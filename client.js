@@ -607,25 +607,35 @@ window.__ModuleLoader__.load({
        * this composer waiting. Applying the same answer here runs the very call a
        * click runs, so the request settles, the composer closes, and the choice is
        * on screen exactly as if it had been made here.
-       * @param sessionId - the session whose composer may still be waiting.
-       * @param sync - the phone's accepted answer, as the Host recorded it.
-       * @returns whether it reached a pending interaction.
+       * @param sync - the phone's accepted decision, as the Host recorded it.
+       * @returns null when it was applied, else why it could not be.
        */
-      const applySync = (sessionId, sync) => {
-        if (sync === null || typeof sync !== 'object') return false
-        if (sync.sessionId !== undefined && String(sync.sessionId) !== String(sessionId)) return false
+      const applySync = (sync) => {
+        if (sync === null || typeof sync !== 'object') return 'no decision'
         // Read through `get`: the browser half still works where the Session UI
         // is absent, and reading a service property without an `inject` throws.
-        const pending = ctx.get?.('uiSession')?.pendingInteractions?.getSnapshot?.()?.get?.(sessionId)
-        if (pending === undefined || typeof pending.answer !== 'function') return false
+        const snapshot = ctx.get?.('uiSession')?.pendingInteractions?.getSnapshot?.()
+        if (snapshot?.get === undefined) return 'no pending-interaction source'
+        const ids = Array.isArray(sync.questions) ? sync.questions.join('\u0000') : undefined
+        const matches = pending => ids === undefined || ids === ''
+          || (pending?.questions ?? []).map(item => item?.id).join('\u0000') === ids
         // Only the request the phone actually decided: another request in the
-        // same session may be pending by the time this poll arrives.
-        const ids = (pending.questions ?? []).map(item => item?.id).join('\u0000')
-        if (Array.isArray(sync.questions) && sync.questions.join('\u0000') !== ids) return false
+        // same session may be pending by the time this poll arrives. The session
+        // the Host named is tried first; with it unnamed or keyed differently the
+        // question ids decide, since both sides read them from one request.
+        const named = sync.sessionId === undefined ? undefined : snapshot.get(sync.sessionId)
+        const pending = matches(named) ? named : [...snapshot.values()].find(entry => matches(entry))
+        if (pending === undefined || typeof pending.answer !== 'function') return 'no waiting composer'
         // A composer that already settled is not a failure — the recorded answer
         // is the phone's either way, and there is nothing left to mirror.
         void Promise.resolve(pending.answer(sync.answer)).catch(() => {})
-        return true
+        return null
+      }
+
+      /** Read the Host's last phone decision, or null when it offers none. */
+      const readSync = async () => {
+        const response = await fetch(`${ROUTE}/state`, { headers: { accept: 'application/json' } })
+        return response.ok ? ((await response.json())?.sync ?? null) : null
       }
 
       /**
@@ -636,25 +646,38 @@ window.__ModuleLoader__.load({
        * @returns null.
        */
       function DesktopMirror(props) {
-        const applied = React.useRef(null)
+        const sessionId = props.sessionId
         React.useEffect(() => {
+          // One line per mount and one per decision, so a page that is not
+          // mirroring says which of the two it is doing.
+          console.info(`pocket-console: desktop mirror watching session ${String(sessionId)}`)
           let stopped = false
+          let applied = null
+          let reported = null
           const poll = async () => {
             try {
-              const response = await fetch(`${ROUTE}/state`, { headers: { accept: 'application/json' } })
-              if (stopped || !response.ok) return
-              const sync = (await response.json())?.sync
-              if (sync === null || sync === undefined || sync.id === applied.current) return
-              if (props.applySync(sync) === true) applied.current = sync.id
+              const sync = await readSync()
+              if (stopped || sync === null || sync.id === applied) return
+              const reason = props.applySync(sync)
+              if (reason === null) {
+                applied = sync.id
+                console.info(`pocket-console: mirrored the phone's ${String(sync.kind)} decision`)
+                return
+              }
+              if (reported !== sync.id) {
+                reported = sync.id
+                console.info(`pocket-console: mirror skipped — ${reason}`)
+              }
             } catch (error) {
               // A failed poll mirrors nothing and retries on the next tick: the
               // phone's answer is already recorded either way.
+              console.info(`pocket-console: mirror poll failed — ${String(error?.message ?? error)}`)
             }
           }
           void poll()
           const timer = setInterval(() => { void poll() }, 1000)
           return () => { stopped = true; clearInterval(timer) }
-        }, [props.sessionId])
+        }, [sessionId])
         return null
       }
 
@@ -671,12 +694,15 @@ window.__ModuleLoader__.load({
         }),
       }, PocketConsoleCard))
 
-      // The dock is part of the conversation view, so this entry is mounted
-      // whenever a session is on screen — including while its composer waits.
-      ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
-        name: 'conversation.input.dock',
-        inject: (sessionId) => ({ sessionId, applySync: (sync) => applySync(sessionId, sync) }),
-      }, DesktopMirror))
+      // The mirror mounts wherever the conversation shows a session, including
+      // while its composer waits. Both outlets belong to the same conversation,
+      // so each instance retries and whichever reaches the composer applies it.
+      for (const slot of ['conversation.input.dock', 'conversation.input.overlay']) {
+        ctx.slots.inject(slot, () => ctx.slots.register({
+          name: slot,
+          inject: (sessionId) => ({ sessionId, applySync }),
+        }, DesktopMirror))
+      }
     }
 
     module.exports = { apply, inject: ['slots', 'settingsScope'] }

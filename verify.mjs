@@ -879,7 +879,10 @@ test('the browser half loads through the module loader and registers its card', 
   }
 
   const first = applyTo(loaded.exports)
-  assert.deepEqual(first.inject, ['settings.plugin.item', 'conversation.input.dock'])
+  assert.deepEqual(first.inject, [
+    'settings.plugin.item', 'conversation.input.dock', 'conversation.input.overlay',
+  ], 'the mirror mounts in both conversation outlets')
+  assert.equal(first.docked.options.name, 'conversation.input.dock')
   assert.deepEqual(first.bind, { namespace: 'pocket-console' }, 'the card binds its own settings namespace')
   assert.equal(first.registered.options.key, 'pocket-console', 'the card is keyed by the settings namespace')
   assert.equal(typeof first.registered.Component, 'function')
@@ -931,25 +934,33 @@ test('the browser half loads through the module loader and registers its card', 
   const phoneAnswer = { answers: [{ id: 'a', selected: ['a1'] }] }
   assert.equal(
     mirror.applySync({ id: 'm1', sessionId: 's_agent', questions: ['a', 'b'], answer: phoneAnswer }),
-    true,
+    null,
+    'an applied decision reports nothing to explain',
   )
   await sleep(10)
   assert.deepEqual(answered, [phoneAnswer], 'the phone answer is what the desktop composer settles with')
   assert.equal(
-    mirror.applySync({ id: 'm2', sessionId: 's_other', questions: ['a', 'b'], answer: phoneAnswer }),
-    false,
-    'another session keeps its own composer',
-  )
-  assert.equal(
-    mirror.applySync({ id: 'm3', sessionId: 's_agent', questions: ['x'], answer: phoneAnswer }),
-    false,
+    mirror.applySync({ id: 'm2', sessionId: 's_agent', questions: ['x'], answer: phoneAnswer }),
+    'no waiting composer',
     'a different request in the same session is left alone',
+  )
+  // A decision whose session the Host could not name still lands by the question
+  // ids both sides read from the same request.
+  assert.equal(
+    mirror.applySync({ id: 'm3', questions: ['a', 'b'], answer: phoneAnswer }),
+    null,
   )
   uiSession.pendingInteractions.getSnapshot = () => new Map()
   assert.equal(
     mirror.applySync({ id: 'm4', sessionId: 's_agent', questions: ['a', 'b'], answer: phoneAnswer }),
-    false,
+    'no waiting composer',
     'no pending composer means nothing to mirror',
+  )
+  uiSession.pendingInteractions.getSnapshot = () => undefined
+  assert.equal(
+    mirror.applySync({ id: 'm5', sessionId: 's_agent', questions: ['a', 'b'], answer: phoneAnswer }),
+    'no pending-interaction source',
+    'a page without the Session UI says so instead of failing silently',
   )
 
   // The shell publishes the active language on <html>; the card follows it.
