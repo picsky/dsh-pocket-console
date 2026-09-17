@@ -531,9 +531,52 @@ test('the browser half loads through the module loader and registers its card', 
     // A connection still being established reads as such, and never as bound.
     FakeReact.cells[1] = { enrollment: { state: 'starting' }, settings: {}, pending: [] }
     const connecting = collect(renderCard())
-    assert.ok(connecting.texts.includes(pairFace.copy.starting), 'the card says it is connecting')
+    assert.ok(connecting.texts.includes(pairFace.copy.startingConnecting), 'the card says it is connecting')
     assert.ok(!connecting.texts.includes(pairFace.copy.connected), 'and claims nothing it does not have')
     assert.ok(!connecting.texts.includes(pairFace.copy.bind), 'with no second attempt mid-flight')
+
+    // Making the app is a different wait from connecting to it: the QR code is still
+    // on its way, and the click must never look like nothing happened.
+    FakeReact.cells[1] = { enrollment: { state: 'starting', stage: 'creating' }, settings: {}, pending: [] }
+    assert.ok(
+      collect(renderCard()).texts.includes(pairFace.copy.startingCreating),
+      'creating the app says so while the code is on its way',
+    )
+    FakeReact.cells[1] = { enrollment: { state: 'starting', stage: 'creating', slow: true }, settings: {}, pending: [] }
+    assert.ok(
+      collect(renderCard()).texts.includes(pairFace.copy.startingCreatingSlow),
+      'and a slow creation reads differently again',
+    )
+    FakeReact.cells[1] = { enrollment: { state: 'starting', stage: 'connecting', slow: true }, settings: {}, pending: [] }
+    assert.ok(collect(renderCard()).texts.includes(pairFace.copy.startingConnectingSlow), 'as does a slow connection')
+
+    const code = 'https://open.feishu.cn/page/launcher?user_code=X'
+    FakeReact.cells[1] = { enrollment: { state: 'awaiting', verifyUrl: code }, settings: {}, pending: [] }
+    const scanning = collect(renderCard())
+    assert.ok(scanning.texts.includes(pairFace.copy.scan), 'a code that arrived shows the code')
+    assert.ok(!scanning.texts.includes(pairFace.copy.startingCreating), 'and stops reporting the wait')
+
+    // The page and the process serving it are replaced separately, so a card can
+    // call a route the running host does not have. What a reader saw for that was a
+    // bare 404; the card has to name the cause and the fix.
+    FakeReact.cells[1] = { enrollment: { state: 'unbound' }, settings: {}, pending: [] }
+    globalThis.fetch = async () => ({ ok: false, status: 404, json: async () => ({}) })
+    const startBinding = (function find(node) {
+      if (node === null || typeof node !== 'object') return undefined
+      if (Array.isArray(node)) return node.map(find).find(Boolean)
+      if (node.type === 'button' && node.props.children?.[0] === pairFace.copy.bind
+        && node.props['aria-expanded'] === undefined) return node
+      return find(node.props?.children)
+    })(renderCard())
+    assert.ok(startBinding !== undefined, 'the card offers creating an app')
+    startBinding.props.onClick()
+    await sleep(20)
+    const outdated = collect(renderCard())
+    assert.ok(outdated.texts.includes(pairFace.copy.hostOutdated), 'a missing route names the restart')
+    assert.ok(
+      !outdated.texts.some(text => typeof text === 'string' && text.includes('failed: 404')),
+      'and not the bare status it used to show',
+    )
   } finally {
     globalThis.fetch = previousUnbindFetch
   }

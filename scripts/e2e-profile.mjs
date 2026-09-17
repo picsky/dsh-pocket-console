@@ -199,6 +199,27 @@ try {
 
   const refused = await fetch(`${origin}/__pocket/state`)
   check('and refuses a caller the connection does not trust', refused.status === 401, `status ${refused.status}`)
+
+  // The browser half and the Host half are replaced separately — the page can be
+  // newer than the process serving it, which is how a card ends up calling a route
+  // that is not there. Every route the card calls must exist on the host, and an
+  // untrusted request answering 401 rather than 404 is what proves it does.
+  const routes = [
+    ['GET', '/__pocket/state'],
+    ['GET', '/__pocket/qr.svg'],
+    ['POST', '/__pocket/bind'],
+    ['POST', '/__pocket/adopt'],
+    ['POST', '/__pocket/unbind'],
+    ['POST', '/__pocket/mirror'],
+  ]
+  for (const [method, path] of routes) {
+    const response = await fetch(`${origin}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      ...(method === 'POST' ? { body: '{}' } : {}),
+    })
+    check(`${path} exists on the host that serves the card`, response.status !== 404, `status ${response.status}`)
+  }
 } catch (error) {
   check('the check ran to completion', false, error instanceof Error ? error.message : String(error))
 } finally {

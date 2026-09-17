@@ -69,8 +69,10 @@ window.__ModuleLoader__.load({
         bound: '已绑定',
         unbound: '未绑定',
         awaiting: '等待扫码确认',
-        starting: '正在连接飞书…',
-        startingSlow: '仍在连接飞书…（网络可能不通，会继续重试）',
+        startingConnecting: '正在连接飞书…',
+        startingConnectingSlow: '仍在连接飞书…（网络可能不通，会继续重试）',
+        startingCreating: '正在创建飞书应用…二维码马上出现',
+        startingCreatingSlow: '创建应用比平时慢…仍在等待飞书返回二维码',
         failed: '连接失败',
         unsupported: '当前通道不支持绑定',
         appId: '应用',
@@ -107,6 +109,7 @@ window.__ModuleLoader__.load({
         copy: '复制链接',
         copied: '已复制',
         loading: '读取中…',
+        hostOutdated: '宿主还在运行旧版插件，没有这条接口：请重启 dsh web 后再试（只刷新页面不会更新宿主）。',
         delaySeconds: '桌面专享时间（秒）',
         delaySecondsHint: '桌面在这段时间内可以先答；超时后同一条请求才会发到手机。0 表示同时可答。',
         titlePrefix: '标题前缀',
@@ -133,8 +136,10 @@ window.__ModuleLoader__.load({
         bound: 'Bound',
         unbound: 'Not bound',
         awaiting: 'Waiting for confirmation',
-        starting: 'Connecting to Feishu…',
-        startingSlow: 'Still connecting to Feishu… (the network may be blocked; retrying)',
+        startingConnecting: 'Connecting to Feishu…',
+        startingConnectingSlow: 'Still connecting to Feishu… (the network may be blocked; retrying)',
+        startingCreating: 'Creating the Feishu app… the QR code is on its way',
+        startingCreatingSlow: 'Creating the app is taking longer than usual… still waiting for the QR code',
         failed: 'Connection failed',
         unsupported: 'This channel does not support binding',
         appId: 'App',
@@ -171,6 +176,7 @@ window.__ModuleLoader__.load({
         copy: 'Copy link',
         copied: 'Copied',
         loading: 'Loading…',
+        hostOutdated: 'The host is still running an older version of this plugin, which does not have this route: restart dsh web and try again. Reloading the page alone does not update the host.',
         delaySeconds: 'Desktop head start (seconds)',
         delaySecondsHint: 'Seconds the desktop may answer before the same request is sent to the phone. 0 makes both answerable at once.',
         titlePrefix: 'Title prefix',
@@ -493,6 +499,9 @@ window.__ModuleLoader__.load({
       const refresh = useCallback(async (signal) => {
         try {
           const response = await fetch(`${ROUTE}/state`, { signal, headers: { accept: 'application/json' } })
+          // The page and the process that serves it are replaced separately, so a
+          // 404 here means this page is newer than the host it is talking to.
+          if (response.status === 404) throw new Error(copy.hostOutdated)
           if (!response.ok) throw new Error(`state request failed: ${response.status}`)
           setRuntime(await response.json())
           setFailure(null)
@@ -500,7 +509,7 @@ window.__ModuleLoader__.load({
           if (error?.name === 'AbortError') return
           setFailure(String(error?.message ?? error))
         }
-      }, [])
+      }, [copy.hostOutdated])
 
       /** Run one binding operation, then adopt the enrollment it reports. */
       const run = async (path, body) => {
@@ -511,6 +520,7 @@ window.__ModuleLoader__.load({
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify(body ?? {}),
           })
+          if (response.status === 404) throw new Error(copy.hostOutdated)
           if (!response.ok) throw new Error(`${path} failed: ${response.status}`)
           const enrollment = await response.json()
           setRuntime(previous => ({ ...previous, enrollment }))
@@ -527,8 +537,16 @@ window.__ModuleLoader__.load({
       const pending = Array.isArray(runtime?.pending) ? runtime.pending : []
       const verifyUrl = enrollment.verifyUrl
       const tone = STATUS_TONE[enrollment.state] ?? 'muted'
-      const status = enrollment.state === 'starting' && enrollment.slow === true
-        ? copy.startingSlow
+      // Which wait this is, and whether it has gone on unusually long: the two are
+      // told apart because "creating the app" and "connecting to it" fail, stall,
+      // and finish differently, and a reader can act on knowing which one it is.
+      const stage = enrollment.stage === 'creating' ? 'creating' : 'connecting'
+      const STARTING = {
+        creating: { normal: copy.startingCreating, slow: copy.startingCreatingSlow },
+        connecting: { normal: copy.startingConnecting, slow: copy.startingConnectingSlow },
+      }
+      const status = enrollment.state === 'starting'
+        ? STARTING[stage][enrollment.slow === true ? 'slow' : 'normal']
         : copy[enrollment.state] ?? copy.unbound
       const recipientValue = enrollment.recipient === null || enrollment.recipient === undefined
         ? h('span', null, copy.recipientNone)

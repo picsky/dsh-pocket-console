@@ -41,8 +41,8 @@ export async function create({ ctx, config, binding, log }) {
 
 | 成员 | 说明 |
 |---|---|
-| `enrollmentState()` | 返回当前状态：`{ state: 'unbound' \| 'starting' \| 'awaiting' \| 'bound' \| 'failed', recipient?, verifyUrl?, expiresIn?, message?, appId?, connected?, slow?, persisted?, persistError? }`。**不得包含任何密钥**（`appId` 不是密钥，它是应用的名字）。`bound` 只允许在**传输真的能收事件之后**发布，并持续反映连接是否在线——卡片把"连上了"当作事实来显示，含糊的乐观状态正是用户无法判断成败的原因。 |
-| `beginEnrollment(mode?)` | 启动上手流程。必须**幂等**：设备授权轮询会比触发它的 HTTP 请求活得更久，进行中的那一轮要共享而不是每次重启。返回当前状态（可以是 Promise）。 |
+| `enrollmentState()` | 返回当前状态：`{ state: 'unbound' \| 'starting' \| 'awaiting' \| 'bound' \| 'failed', stage?, recipient?, verifyUrl?, expiresIn?, message?, appId?, connected?, slow?, persisted?, persistError? }`。**不得包含任何密钥**（`appId` 不是密钥，它是应用的名字）。`bound` 只允许在**传输真的能收事件之后**发布，并持续反映连接是否在线——卡片把"连上了"当作事实来显示，含糊的乐观状态正是用户无法判断成败的原因。`starting` 时用 `stage: 'creating' \| 'connecting'` 说明在等什么：等二维码（还在创建应用）还是等长连接握手；`slow` 表示这一等已经异常久。卡片据此给出不同文案——**点击后必须立刻能看到"在处理中"**，否则用户无法区分"卡住了"和"正在做"。 |
+| `beginEnrollment(mode?)` | 启动上手流程。必须**幂等**：设备授权轮询会比触发它的 HTTP 请求活得更久，进行中的那一轮要共享而不是每次重启。**返回前先发布等待状态**（返回可以是 Promise）：二维码要一个网络往返才回来，若等 `connect` 自己发布，触发它的那次点击回的就是"它替换掉的那个状态"，卡片上什么都看不到。已经连着传输时直接返回现状，不要再开第二条连接。 |
 | `adoptCredentials({ appId, appSecret })` | 可选：用**用户已有的应用凭据**直接绑定。必须先向平台校验这组凭据再建立连接——长连接的握手对错误凭据是**重试而不是报错**，只有这一次校验能让卡片说出原因；被平台拒绝的凭据不要留在凭据库里，平台不可达时则保留。凭据属于打开它的那条连接，所以换应用时要关掉旧连接。 |
 | `clearEnrollment()` | 撤销绑定与凭据，回到 `unbound`。 |
 | `resume()` | **只用已存凭据重连**，不启动任何上手流程；没有凭据时保持 `unbound` 并返回当前状态。核心在插件加载时调用它，因为"重启后还要点一次绑定"不是用户该承担的事。 |
@@ -54,6 +54,14 @@ export async function create({ ctx, config, binding, log }) {
 加载顺序是 `resume()` → 有界面则等待用户点按钮 → 无界面且仍未连接才 `beginEnrollment()`。
 所以一个已经绑定过的部署重启后应当**不打印任何链接、不需要点击**；`resume()` 里
 唯一允许的日志是失败时的警告。
+
+## 日志
+
+通道要用宿主给的 `log`（`info` / `warn` / `debug`）说话，**不要**让第三方 SDK 直接往终端打印。
+SDK 通常提供 `logger` 与 `loggerLevel`：把它的日志接进 `log.warn` / `log.debug`，
+就让**部署自己的日志级别**决定谁能看到什么，而不是替所有部署决定。
+飞书通道的具体做法：SDK 的启动横幅、每条连接步骤、事件分发器的就绪行都归到 `debug`，
+错误与警告归到 `warn`——正常运行时不刷屏，出问题时照样看得见。
 
 ## 视图（核心 → 通道）
 

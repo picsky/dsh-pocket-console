@@ -10,6 +10,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { LoggerLevel } from '@larksuiteoapi/node-sdk'
 import {
   sleep,
   SAME_ORIGIN,
@@ -18,7 +19,6 @@ import {
   requestBinding,
   bind,
   observed,
-  platform,
 } from './support/harness.mjs'
 
 /** Adopt the credentials the user typed, the way the card posts them. */
@@ -32,13 +32,13 @@ test('an adopted app is reported connected only once the connection is up', asyn
 
   const adopted = json(await adopt(route, { appId: 'cli_adopted', appSecret: 'secret_adopted' }))
   assert.equal(adopted.state, 'starting', 'passing the check is not the connection being up')
+  assert.equal(adopted.stage, 'connecting', 'and the wait it reports is a connection, not a scan')
   assert.equal(observed.started, 1, 'and the handshake was launched')
-  assert.deepEqual(
-    platform.checks.map(check => check.appId),
-    ['cli_adopted'],
-    'the pair is checked against the platform before anything connects',
-  )
-  assert.match(platform.checks[0].url, /tenant_access_token\/internal$/)
+  assert.equal(observed.requests.length, 1, 'the pair is checked against the platform before anything connects')
+  // The SDK owns the origin behind its domain enum, so the check must ask with a
+  // path: building one from the enum produced `0/open-apis/…` once already.
+  assert.equal(observed.requests[0].url, '/open-apis/auth/v3/tenant_access_token/internal')
+  assert.equal(observed.requests[0].data.app_id, 'cli_adopted')
 
   // The SDK's ready callback is the first moment this channel can receive.
   observed.wsClients[0].config.onReady()
@@ -51,7 +51,9 @@ test('an adopted app is reported connected only once the connection is up', asyn
 
 test('a pair the platform rejects is reported in words and is not kept', async () => {
   const { route, json, state, values, infos } = await scaffold()
-  platform.answer = { code: 10014, msg: 'app id not exists' }
+  // The SDK refuses a bad pair by throwing, and its message carries the platform's
+  // own answer — the shape observed against the live platform.
+  observed.tenantToken = { throws: 'failed to get tenant_access_token, code: 10014, msg: app id not exists' }
 
   const refused = json(await adopt(route, { appId: 'cli_missing', appSecret: 'secret_typo' }))
   assert.equal(refused.state, 'failed')
@@ -65,13 +67,26 @@ test('a pair the platform rejects is reported in words and is not kept', async (
   )
 })
 
+test('a rejection the platform answers in a body is reported the same way', async () => {
+  const { route, json, values } = await scaffold()
+  // A code this build does not map keeps the platform's wording, which is enough
+  // to name the half that is wrong.
+  observed.tenantToken = { code: 12345, msg: 'app secret invalid' }
+
+  const refused = json(await adopt(route, { appId: 'cli_body', appSecret: 'secret_wrong' }))
+  assert.equal(refused.state, 'failed')
+  assert.equal(refused.message, 'App Secret 不正确，请在开发者后台的「凭证与基础信息」里重新复制')
+  assert.equal(values.size, 0, 'and that pair is not kept either')
+})
+
 test('an unreachable platform is reported without discarding what was typed', async () => {
   const { route, json, values } = await scaffold()
-  platform.failure = 'fetch failed'
+  observed.tenantToken = { throws: 'getaddrinfo ENOTFOUND open.feishu.cn' }
 
   const failed = json(await adopt(route, { appId: 'cli_offline', appSecret: 'secret_offline' }))
   assert.equal(failed.state, 'failed')
-  assert.equal(failed.message, 'fetch failed', 'the reason is the one the network gave')
+  assert.match(failed.message, /无法确认这组凭据/, 'the message claims no more than it knows')
+  assert.match(failed.message, /ENOTFOUND/, 'and keeps the reason the network gave')
   assert.equal(values.get('DSH_FEISHU_APP_ID'), 'cli_offline', 'what could not be checked is kept')
 })
 
@@ -132,6 +147,76 @@ test('a handshake that fails terminally is reported as a failure', async () => {
   // failure it replaced.
   await sleep(20)
   assert.equal((await state()).enrollment.state, 'failed')
+})
+
+test('a click on the scan names the wait it started, and never a second connection', async () => {
+  const { route, json } = await scaffold({}, {
+    stored: { appId: 'cli_stored', appSecret: 'secret_stored', recipient: 'ou_stored' },
+  })
+  // This deployment is already connected, which is the work the click would ask
+  // for: it reports that instead of opening a second connection to the same app.
+  const asked = json(await route('POST', '/__pocket/bind', SAME_ORIGIN))
+  assert.equal(asked.state, 'bound')
+  assert.equal(observed.registerAppCalls.length, 0, 'and the one-click flow is not run')
+  assert.equal(observed.started, 1, 'and no second connection is opened')
+})
+
+test('a retry after a failed check reports the connection it is starting', async () => {
+  const { route, json } = await scaffold({}, {
+    stored: { appId: 'cli_stored', appSecret: 'secret_stored', recipient: 'ou_stored' },
+    // The pair is kept, because a platform that could not be reached proved nothing
+    // about it — so the retry connects with it rather than scanning for a new app.
+    tenantToken: { throws: 'getaddrinfo ENOTFOUND open.feishu.cn' },
+  })
+  observed.tenantToken = {}
+
+  const retry = json(await route('POST', '/__pocket/bind', SAME_ORIGIN))
+  assert.equal(retry.state, 'starting')
+  assert.equal(retry.stage, 'connecting', 'not a scan, because there is nothing to create')
+  assert.equal(observed.registerAppCalls.length, 0)
+  assert.equal(observed.started, 1)
+})
+
+test('the SDK log goes to the deployment log at the deployment levels', async () => {
+  const { route, json, infos, warnings, debugs } = await scaffold()
+  observed.handshake = 'held'
+  json(await adopt(route, { appId: 'cli_logged', appSecret: 'secret_logged' }))
+
+  // Both clients take the plugin's logger, so nothing the SDK prints reaches the
+  // terminal behind the deployment's back.
+  const wsOptions = observed.wsClients[0].config
+  assert.equal(wsOptions.loggerLevel, LoggerLevel.debug, 'every level is routed, and the levels decide')
+  assert.equal(typeof wsOptions.logger?.info, 'function')
+  for (const level of ['error', 'warn', 'info', 'debug', 'trace']) {
+    assert.equal(typeof wsOptions.logger[level], 'function', `the SDK's ${level} has a route`)
+  }
+  assert.equal(
+    observed.dispatcherOptions.loggerLevel,
+    LoggerLevel.debug,
+    'and the event dispatcher, which logs its own ready line, takes the same routing',
+  )
+  assert.equal(observed.dispatcherOptions.logger, wsOptions.logger, 'one adapter, so the routing cannot drift')
+
+  // The banner and the connection chatter are info; errors and warnings are not.
+  wsOptions.logger.info('[ws]', 'receive events or callbacks through persistent connection\n   only available in self-build & Feishu app')
+  wsOptions.logger.error('[ws]', 'code: 1000040343, internal error')
+
+  assert.ok(
+    debugs.some(line => line.includes('receive events or callbacks through persistent connection')),
+    'an info line lands in debug, where a deployment can ask for it',
+  )
+  assert.ok(
+    !infos.some(line => line.includes('persistent connection')),
+    'and never in the log a deployment reads by default',
+  )
+  assert.ok(
+    warnings.some(line => String(line).includes('1000040343')),
+    'while an error is reported',
+  )
+  assert.ok(
+    debugs.every(line => !line.includes('1000040343')),
+    'and an error is not demoted to debug',
+  )
 })
 
 test('a direct message re-binds the recipient the card is showing', async () => {

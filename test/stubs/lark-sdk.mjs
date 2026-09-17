@@ -10,6 +10,8 @@ export const observed = {
   patched: [],
   /** The dispatcher the channel registered its handlers on. */
   dispatcher: undefined,
+  /** The options the dispatcher was built with, including its log routing. */
+  dispatcherOptions: undefined,
   started: 0,
   closed: 0,
   registerAppCalls: [],
@@ -31,6 +33,13 @@ export const observed = {
   handshakeError: 'handshake failed',
   /** Every long connection built, so a case can see the callbacks it was given. */
   wsClients: [],
+  /** Every generic SDK request made: the credential check. */
+  requests: [],
+  /**
+   * What the tenant-token call answers: nothing set accepts the pair, `{ code, msg }`
+   * answers with a rejection body, and `{ throws }` fails the way the SDK does.
+   */
+  tenantToken: {},
 }
 
 /** Reset recorded calls between cases. */
@@ -38,6 +47,7 @@ export function resetObserved() {
   observed.created.length = 0
   observed.patched.length = 0
   observed.dispatcher = undefined
+  observed.dispatcherOptions = undefined
   observed.started = 0
   observed.closed = 0
   observed.registerAppCalls.length = 0
@@ -48,18 +58,42 @@ export function resetObserved() {
   observed.handshake = 'ready'
   observed.handshakeError = 'handshake failed'
   observed.wsClients.length = 0
+  observed.requests.length = 0
+  observed.tenantToken = {}
 }
 
-/** Region selector accepted by `Client`/`WSClient`. */
-export const Domain = { Feishu: 'feishu', Lark: 'lark' }
+/**
+ * Region selector accepted by `Client`/`WSClient`.
+ *
+ * These are the real values, not names: the SDK ships a numeric enum whose
+ * reverse mapping makes `Domain[0] === 'Feishu'`, so a stub answering `'feishu'`
+ * would accept a domain used as an origin, and let exactly that ship.
+ */
+export const Domain = { 0: 'Feishu', 1: 'Lark', Feishu: 0, Lark: 1 }
 
-/** Log level selector; the stub ignores it. */
-export const LoggerLevel = { error: 'error', warn: 'warn', info: 'info', debug: 'debug', trace: 'trace' }
+/**
+ * The origins behind those values, as the SDK's `formatDomain` resolves them.
+ */
+const ORIGINS = { [Domain.Feishu]: 'https://open.feishu.cn', [Domain.Lark]: 'https://open.larksuite.com' }
+
+/**
+ * Log level selector. The real values, for the same reason as `Domain`: the SDK
+ * compares these numerically, so a stub answering names would accept a level that
+ * silences nothing.
+ */
+export const LoggerLevel = {
+  0: 'fatal', 1: 'error', 2: 'warn', 3: 'info', 4: 'debug', 5: 'trace',
+  fatal: 0, error: 1, warn: 2, info: 3, debug: 4, trace: 5,
+}
 
 /** Records outbound message calls and returns a stable message id. */
 export class Client {
   constructor(config) {
     this.config = config
+    // Resolved like the real client, so `client.domain` means here what it means
+    // there: an origin, rather than the enum that was passed in.
+    this.domain = ORIGINS[config.domain] ?? config.domain
+    this.tokenManager = { domain: this.domain }
     this.im = {
       message: {
         create: async (request) => {
@@ -80,6 +114,26 @@ export class Client {
         },
       },
     }
+  }
+
+  /**
+   * The one generic request the channel makes: the tenant-token check.
+   *
+   * The SDK takes an API path here and owns the origin behind `domain`, so a
+   * caller that built a URL itself arrives with something the real client never
+   * sends. This refuses that where the mistake is made.
+   * @param options - the SDK's request options.
+   * @returns the platform's answer, driven by `observed.tenantToken`.
+   */
+  request(options) {
+    if (typeof options?.url !== 'string' || !options.url.startsWith('/')) {
+      return Promise.reject(new Error(`the SDK takes an API path, not an origin: ${String(options?.url)}`))
+    }
+    observed.requests.push(options)
+    const answer = observed.tenantToken
+    if (answer.throws !== undefined) return Promise.reject(new Error(answer.throws))
+    if (answer.code !== undefined) return Promise.resolve({ code: answer.code, msg: answer.msg })
+    return Promise.resolve({ code: 0, tenant_access_token: 'stub-tenant-token', expire: 7200 })
   }
 }
 
@@ -120,8 +174,11 @@ export class WSClient {
 
 /** Minimal dispatcher: `register` stores handlers; `invoke` flattens like the SDK. */
 export class EventDispatcher {
-  constructor() {
+  constructor(params = {}) {
     this.handlers = {}
+    // The real dispatcher takes the same logger options the clients do, and logs
+    // its own ready line through them.
+    observed.dispatcherOptions = params
   }
 
   register(map) {

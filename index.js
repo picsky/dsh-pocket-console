@@ -176,6 +176,18 @@ export async function apply(ctx, config) {
   let settings = entry
 
   /**
+   * Read the effective settings back from the provider.
+   *
+   * The provider hands over a source once and then only reports that something
+   * changed, so the current value has to be read through that source on every
+   * change. Keeping whatever the source returned at install time meant a card edit
+   * reached the plugin only after a restart — the one thing a settings card must
+   * never require.
+   */
+  let readSettings = () => entry
+  const reloadSettings = () => { settings = readSettings() }
+
+  /**
    * The interface language a browser reported, until it reports another. The Host
    * cannot see a browser's language any other way, and a deployment whose page
    * never opens leaves its own `locale` in charge.
@@ -210,8 +222,8 @@ export async function apply(ctx, config) {
   // entry as the source.
   ctx.inject(['settings'], (settingsCtx) => {
     settingsCtx.settings.installSection(ctx, NAME, SectionSchema, entry, {
-      setSource: (source) => { settings = source() },
-      onChange: () => {},
+      setSource: (source) => { readSettings = source; reloadSettings() },
+      onChange: reloadSettings,
     })
   })
 

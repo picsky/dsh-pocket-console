@@ -19,37 +19,6 @@ const HOST = '127.0.0.1:3080'
 const SAME_ORIGIN = { origin: `http://${HOST}` }
 
 /**
- * The fake Feishu open platform the channel checks credentials against.
- *
- * The check is the one outbound HTTP call the plugin makes; every case answers
- * here instead of reaching the network, and a case that never mentions it gets
- * an accepted pair.
- */
-export const platform = {
-  /** The tenant-token answer; `{ code: 0 }` accepts the pair. */
-  answer: { code: 0 },
-  /** Set to fail the request the way an unreachable platform does. */
-  failure: undefined,
-  /** Every check made: the endpoint, and the app id it carried. */
-  checks: [],
-  /** Restore the accepted answer between cases. */
-  reset() {
-    this.answer = { code: 0 }
-    this.failure = undefined
-    this.checks.length = 0
-  },
-}
-
-globalThis.fetch = async (url, options) => {
-  // The secret is deliberately not recorded: a case asserts that the channel
-  // keeps it out of the log, and the harness must not be the thing that leaks it.
-  const body = JSON.parse(String(options?.body ?? '{}'))
-  platform.checks.push({ url: String(url), appId: body.app_id })
-  if (platform.failure !== undefined) throw new Error(platform.failure)
-  return { ok: true, status: 200, json: async () => platform.answer }
-}
-
-/**
  * The recipient the fake deployment is bound to. A click is only honoured from
  * this identity, so the helper sends it; a case that tests the refusal passes
  * its own.
@@ -127,16 +96,18 @@ function makeResponse() {
  * route table, and a captured settings section; apply the plugin.
  * @param configOverrides - plugin config overrides.
  * @param host - which optional services this deployment composes, what the
- *   credential store already holds from an earlier run, and whether that store
- *   refuses writes (the environment layer shadows the reference).
+ *   credential store already holds from an earlier run, whether that store refuses
+ *   writes (the environment layer shadows the reference), and what the platform
+ *   answers when the stored pair is checked at load.
  */
 async function scaffold(configOverrides = {}, {
   services = ['settings', 'webServer'],
   stored = {},
   refuseWrites = false,
+  tenantToken,
 } = {}) {
   resetObserved()
-  platform.reset()
+  if (tenantToken !== undefined) observed.tenantToken = tenantToken
   const config = Plugin.Config.resolve({
     channel: './providers/feishu.js',
     channelConfig: {},
@@ -177,8 +148,24 @@ async function scaffold(configOverrides = {}, {
   }
   const settings = {
     installSection(owner, ns, schema, entry, hooks) {
-      sections.set(ns, { schema, entry, hooks })
-      hooks.setSource(() => entry)
+      // The real provider hands over a source exactly once and afterwards only
+      // reports that something changed, so a case edits the user layer and calls
+      // `change()` — never `setSource` again. A plugin that kept the value it read
+      // at install time therefore fails here, which is what the running application
+      // was doing: a card edit that needed a restart to take effect.
+      const layer = {}
+      sections.set(ns, {
+        schema,
+        entry,
+        hooks,
+        layer,
+        change(mutate) {
+          if (mutate !== undefined) mutate(layer)
+          hooks.onChange()
+        },
+      })
+      // Effective value: what the deployment composed, with the user layer on top.
+      hooks.setSource(() => ({ ...entry, ...layer }))
       hooks.onChange()
     },
   }
@@ -309,10 +296,16 @@ async function scaffold(configOverrides = {}, {
 /**
  * Ask for a binding the way the card does, then let the background onboarding
  * reach the SDK call, which is where the verification link becomes available.
+ *
+ * The answer to the click reports the wait it started — the QR code is a network
+ * round trip away — and that is what the card shows in the meantime.
  */
 async function requestBinding(route) {
   const response = await route('POST', '/__pocket/bind', SAME_ORIGIN)
   assert.equal(response.status, 200)
+  const answering = JSON.parse(response.body)
+  assert.equal(answering.state, 'starting', 'the click answers with the work it started')
+  assert.equal(answering.stage, 'creating', 'and says which work that is')
   await sleep(10)
   return response
 }

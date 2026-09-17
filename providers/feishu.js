@@ -56,9 +56,15 @@ const TEMPLATES = {
 const CREDENTIAL_CHECK_TIMEOUT_MS = 10_000
 
 /**
- * How long a handshake may stay unfinished before the card says so. The attempt
- * keeps running; this only stops a connection that is still retrying from
- * looking like one that is working.
+ * The endpoint that issues a tenant token for an app id and secret. The SDK takes
+ * it as a path: it owns the origin behind `Domain.Feishu` and `Domain.Lark`.
+ */
+const TENANT_TOKEN_PATH = '/open-apis/auth/v3/tenant_access_token/internal'
+
+/**
+ * How long a wait may last before the card says it is taking unusually long —
+ * either a handshake or the round trip that returns the scan's QR code. The work
+ * keeps running; this only stops a slow attempt from looking like a stuck card.
  */
 const CONNECTION_SLOW_MS = 30_000
 
@@ -99,6 +105,53 @@ async function withDeadline(request, milliseconds, message) {
 }
 
 /**
+ * The platform's own answer inside an SDK error message.
+ *
+ * The SDK formats a call it could not authenticate as
+ * `failed to get tenant_access_token, code: 10014, msg: app id not exists`, which
+ * is the reason worth showing and the only place it appears.
+ */
+const REJECTION_IN_MESSAGE = /code:\s*(\d+)\s*,\s*msg:\s*([^,]+)/
+
+/**
+ * The SDK's log, routed into this deployment's log.
+ *
+ * The SDK prints a startup banner and a line per connection step at info level,
+ * which is noise in a running deployment: what is worth reading there is its
+ * errors and warnings. Levels decide where each message lands — the SDK's info and
+ * debug become deployment debug — so the deployment's own level governs how much of
+ * it anyone reads, instead of every deployment being told.
+ * @param log - this plugin's log.
+ * @returns the logger the SDK takes in its client options.
+ */
+function sdkLogger(log) {
+  /** One SDK message: the SDK hands its parts over as an array. */
+  const text = (parts) => parts
+    .flat(Infinity)
+    .map((part) => {
+      if (typeof part === 'string') return part
+      if (part instanceof Error) return part.message
+      try {
+        return JSON.stringify(part)
+      } catch {
+        // A value that cannot be serialized is still worth naming.
+        return String(part)
+      }
+    })
+    .join(' ')
+    .replace(/\s*\n\s*/g, ' ')
+
+  const route = (emit) => (...parts) => { emit(`飞书 SDK：${text(parts)}`) }
+  return {
+    error: route((message) => { log.warn(message) }),
+    warn: route((message) => { log.warn(message) }),
+    info: route((message) => { log.debug(message) }),
+    debug: route((message) => { log.debug(message) }),
+    trace: route((message) => { log.debug(message) }),
+  }
+}
+
+/**
  * The card's words for a pair the platform rejected.
  * @param copy - the deployment's copy table.
  * @param body - the platform's answer, carrying `code` and `msg`.
@@ -122,36 +175,42 @@ function rejectionReason(copy, body) {
  * would sit at "connecting" forever with nothing to report. This endpoint takes
  * the pair directly — the same pair the connection authenticates with — and
  * answers with a code and a reason.
+ *
+ * The call goes through the SDK's own client rather than a URL built here:
+ * `domain` is the SDK's enum (`Domain.Feishu` is 0), not an origin, and the
+ * client is what turns it into the platform to ask.
+ * @param client - the SDK client for these credentials.
  * @param credentials - the app id and secret to check.
- * @param options - the region to ask, and the copy for a rejection.
+ * @param copy - the copy for a rejection, and for a platform that cannot be reached.
  * @returns whether the pair works, and why not when it does not.
  */
-async function checkCredentials(credentials, { domain, copy }) {
-  let response
-  try {
-    response = await withDeadline(fetch(`${domain}/open-apis/auth/v3/tenant_access_token/internal`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ app_id: credentials.appId, app_secret: credentials.appSecret }),
-    }), CREDENTIAL_CHECK_TIMEOUT_MS, copy.platformUnreachable)
-  } catch (error) {
-    // A platform that cannot be reached and a request that never answered read
-    // the same way to the reader: this pair could not be checked.
-    return {
-      ok: false,
-      kind: 'unreachable',
-      message: error instanceof Error ? error.message : copy.platformUnreachable,
-    }
-  }
+async function checkCredentials(client, credentials, copy) {
   let body
   try {
-    body = await response.json()
-  } catch {
-    // A body that is not JSON is a gateway or proxy answering, not the platform.
-    return { ok: false, kind: 'unreachable', message: copy.platformUnreachable }
+    body = await withDeadline(client.request({
+      method: 'POST',
+      url: TENANT_TOKEN_PATH,
+      data: { app_id: credentials.appId, app_secret: credentials.appSecret },
+    }), CREDENTIAL_CHECK_TIMEOUT_MS, copy.platformUnreachable)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const refusal = REJECTION_IN_MESSAGE.exec(message)
+    if (refusal !== null) {
+      return {
+        ok: false,
+        kind: 'rejected',
+        message: rejectionReason(copy, { code: Number(refusal[1]), msg: refusal[2].trim() }),
+      }
+    }
+    // A platform that cannot be reached and a request that never answered read
+    // the same way to the reader: this pair could not be checked.
+    return { ok: false, kind: 'unreachable', message: copy.unreachableWith(message) }
   }
-  if (body?.code === 0) return { ok: true }
-  return { ok: false, kind: 'rejected', message: rejectionReason(copy, body) }
+  const answer = body?.data ?? body
+  if (answer?.code !== undefined && answer.code !== 0) {
+    return { ok: false, kind: 'rejected', message: rejectionReason(copy, answer) }
+  }
+  return { ok: true }
 }
 
 /**
@@ -263,7 +322,16 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
   // `header` and `event` onto the top level and drops the `event` key, so the
   // action fields live at `data.action`. Reading the envelope's own nesting
   // finds no payload, and every click then decodes as an expired request.
-  const dispatcher = new Lark.EventDispatcher({}).register({
+  // Everything the SDK logs goes through this: its startup banner, its event
+  // dispatcher's ready line, and every connection step are debug here, so a
+  // running deployment does not read them while its errors and warnings still
+  // arrive. One adapter, so the routing cannot differ between the SDK's objects.
+  const sdkLog = sdkLogger(log)
+
+  const dispatcher = new Lark.EventDispatcher({
+    logger: sdkLog,
+    loggerLevel: Lark.LoggerLevel.debug,
+  }).register({
     'card.action.trigger': async (data) => {
       const action = data?.action
       // A card is a capability: whoever holds the message can press its buttons.
@@ -491,14 +559,26 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       enrollment = { state: 'unbound' }
       return enrollment
     }
-    enrollment = { state: 'starting' }
+    // Which wait this is: the QR code arrives a network round trip after the
+    // click, so a run that has to create the app says so instead of looking like
+    // a connection that is already under way.
+    enrollment = { state: 'starting', stage: stored === undefined ? 'creating' : 'connecting' }
     credentials = stored ?? await createApplication(run, { createOnly })
     if (closed || run !== generation) return enrollment
+
+    const options = {
+      appId: credentials.appId,
+      appSecret: credentials.appSecret,
+      domain: config.domain,
+      logger: sdkLog,
+      loggerLevel: Lark.LoggerLevel.debug,
+    }
+    const client = new Lark.Client(options)
 
     // Bad credentials are the one failure the connection cannot report: its
     // handshake retries them instead of failing. Asking the platform directly is
     // what turns that silence into a reason the card can show.
-    const check = await checkCredentials(credentials, { domain: config.domain, copy: messages() })
+    const check = await checkCredentials(client, credentials, messages())
     if (closed || run !== generation) return enrollment
     if (!check.ok) {
       enrollment = { state: 'failed', message: check.message }
@@ -514,19 +594,15 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       return enrollment
     }
 
-    const options = {
-      appId: credentials.appId,
-      appSecret: credentials.appSecret,
-      domain: config.domain,
-    }
-    const client = new Lark.Client(options)
     const wsClient = new Lark.WSClient({ ...options, ...lifecycle(run) })
     connected = false
     // Armed before the handshake starts: a connection that reports itself ended
     // must be able to clear a notice that has not fired yet.
     slowTimer = setTimeout(() => {
-      if (closed || run !== generation || connected) return
-      enrollment = { state: 'starting', slow: true }
+      // A QR code that already landed is not a slow connection, so only a run that
+      // is still waiting is marked — and it keeps the stage it was waiting in.
+      if (closed || run !== generation || connected || enrollment.state !== 'starting') return
+      enrollment = { ...enrollment, slow: true }
     }, CONNECTION_SLOW_MS)
     slowTimer.unref?.()
     wsClient.start({ eventDispatcher: dispatcher })
@@ -616,21 +692,34 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
    * device-authorization poll outlives the request that asked for it, so the
    * in-flight run is shared instead of restarted per call; a failure clears the
    * slot so the user can retry from the card.
-   * @returns the current enrollment state.
+   *
+   * The wait is published before the run starts, because `connect` cannot say
+   * anything until its first await has resolved — the click would otherwise answer
+   * with the state it is replacing, and the card would show no sign of the work
+   * until the QR code arrived. Reading the store first costs one local read and
+   * says which wait this is: creating the app, or connecting to one it already has.
+   * @returns a promise of the state after the wait was published.
    */
-  const beginEnrollment = () => {
+  const beginEnrollment = async () => {
     const run = generation
-    onboarding ??= connect(run, { createOnly: config.createOnly }).catch((error) => {
-      // A cancelled run must not publish its failure over the enrollment that
-      // replaced it, nor clear a retry the user already started.
-      if (run !== generation) return
-      enrollment = {
-        state: 'failed',
-        message: error instanceof Error ? error.message : String(error),
-      }
-      log.warn('飞书绑定失败；审批将只保留在桌面', error)
-      onboarding = undefined
-    })
+    // A live transport is the work already done: starting another would open a
+    // second connection to the same app and leave the first one running.
+    if (transport !== undefined) return enrollment
+    if (onboarding === undefined) {
+      const stored = await storedCredentials()
+      enrollment = { state: 'starting', stage: stored === undefined ? 'creating' : 'connecting' }
+      onboarding = connect(run, { createOnly: config.createOnly, credentials: stored }).catch((error) => {
+        // A cancelled run must not publish its failure over the enrollment that
+        // replaced it, nor clear a retry the user already started.
+        if (run !== generation) return
+        enrollment = {
+          state: 'failed',
+          message: error instanceof Error ? error.message : String(error),
+        }
+        log.warn('飞书绑定失败；审批将只保留在桌面', error)
+        onboarding = undefined
+      })
+    }
     return enrollment
   }
 

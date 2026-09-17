@@ -104,10 +104,11 @@ test('a settings change takes effect without a restart', async () => {
   const { route, state, sections, listenerOf } = await scaffold({ delaySeconds: 1 })
   await bind(route)
 
-  // The card's namespace is the override path: a committed change re-sources.
+  // A card write lands in the provider's user layer, which then reports a change.
+  // Nothing hands the source over again, so a plugin that kept its install-time
+  // value would keep the old delay — and keep it until a restart.
   const section = sections.get('pocket-console')
-  section.hooks.setSource(() => ({ delaySeconds: 600, maxDetailChars: 1200, titlePrefix: 'Re' }))
-  section.hooks.onChange()
+  section.change(layer => { layer.delaySeconds = 600; layer.titlePrefix = 'Re' })
 
   const approval = listenerOf('approval/request')
   const desktop = Promise.withResolvers()
@@ -118,5 +119,21 @@ test('a settings change takes effect without a restart', async () => {
 
   const snapshot = await state()
   assert.equal(snapshot.settings.delaySeconds, 600)
+  assert.equal(snapshot.settings.titlePrefix, 'Re')
+})
+
+test('a later settings change replaces the one before it', async () => {
+  const { state, sections } = await scaffold({ delaySeconds: 1 })
+  const section = sections.get('pocket-console')
+
+  section.change(layer => { layer.delaySeconds = 5 })
+  assert.equal((await state()).settings.delaySeconds, 5, 'the first edit is read back')
+
+  section.change(layer => { layer.delaySeconds = 9 })
+  assert.equal((await state()).settings.delaySeconds, 9, 'and so is the second, without a source handed over again')
+
+  // Clearing the override returns the field to what the deployment composed.
+  section.change(layer => { delete layer.delaySeconds })
+  assert.equal((await state()).settings.delaySeconds, 1, 'and a cleared field falls back to the composition entry')
 })
 
