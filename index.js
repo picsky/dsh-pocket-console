@@ -219,6 +219,10 @@ function registerRoutes(webServer, snapshot, actions) {
           json(res, 200, await actions.clear())
           return
         }
+        if (path === '/mirror' && typeof actions.mirror === 'function') {
+          json(res, 200, await actions.mirror(await readBody(req)))
+          return
+        }
         json(res, 404, { error: 'unknown route' })
       } catch (error) {
         json(res, 500, { error: error instanceof Error ? error.message : String(error) })
@@ -300,6 +304,13 @@ export async function apply(ctx, config) {
   let desktopSync = null
   /** How long a mirror stays on offer. A reload must not replay an old answer. */
   const DESKTOP_SYNC_TTL_MS = 60_000
+  /**
+   * What the browser half has done with the phone's decisions. Only the browser
+   * can see whether a composer closed, so it reports each attempt here; the last
+   * few also ride the state route, which is how a deployment diagnoses a mirror
+   * that is not landing.
+   */
+  const mirrorReports = []
 
   /**
    * Describe one phone decision for the browser half.
@@ -631,12 +642,31 @@ export async function apply(ctx, config) {
     sync: desktopSync !== null && Date.now() - desktopSync.at <= DESKTOP_SYNC_TTL_MS
       ? desktopSync
       : null,
+    /** What the browser half last did with a decision, newest last. */
+    mirror: [...mirrorReports],
   })
 
   /** The two mutations the card asks for. */
   const actions = {
     begin: async () => await channel.beginEnrollment?.() ?? { state: 'unsupported' },
     clear: async () => await channel.clearEnrollment?.() ?? { state: 'unsupported' },
+    /**
+     * Record one browser-half mirror attempt.
+     * @param body - what the browser half did: status, and why when it could not.
+     * @returns the accepted report.
+     */
+    mirror: async (body) => {
+      const report = {
+        at: Date.now(),
+        status: typeof body?.status === 'string' ? body.status : 'unknown',
+        ...(typeof body?.reason === 'string' ? { reason: body.reason } : {}),
+        ...(typeof body?.syncId === 'string' ? { syncId: body.syncId } : {}),
+      }
+      mirrorReports.push(report)
+      if (mirrorReports.length > 10) mirrorReports.shift()
+      log.info(`桌面镜像：${report.status}${report.reason === undefined ? '' : `（${report.reason}）`}`)
+      return report
+    },
   }
 
   // The routes live on the web app's server, which a headless deployment never

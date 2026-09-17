@@ -639,6 +639,26 @@ window.__ModuleLoader__.load({
       }
 
       /**
+       * Tell the Host what the mirror did. The composer belongs to the browser, so
+       * this is the only place the Host — and the deployment log — can see whether
+       * a decision taken on the phone actually landed here.
+       * @param status - mounted, applied, skipped, or error.
+       * @param reason - why it could not be applied, when it could not.
+       * @param syncId - the decision this report is about, when there is one.
+       */
+      const report = (status, reason, syncId) => {
+        void fetch(`${ROUTE}/mirror`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            status,
+            ...(reason === undefined ? {} : { reason }),
+            ...(syncId === undefined ? {} : { syncId }),
+          }),
+        }).catch(() => {})
+      }
+
+      /**
        * Poll the Host for a phone answer and mirror it. Renders nothing: it
        * exists so this page's composer stays in step with a decision taken
        * somewhere else.
@@ -651,6 +671,7 @@ window.__ModuleLoader__.load({
           // One line per mount and one per decision, so a page that is not
           // mirroring says which of the two it is doing.
           console.info(`pocket-console: desktop mirror watching session ${String(sessionId)}`)
+          report('mounted')
           let stopped = false
           let applied = null
           let reported = null
@@ -662,16 +683,20 @@ window.__ModuleLoader__.load({
               if (reason === null) {
                 applied = sync.id
                 console.info(`pocket-console: mirrored the phone's ${String(sync.kind)} decision`)
+                report('applied', undefined, sync.id)
                 return
               }
               if (reported !== sync.id) {
                 reported = sync.id
                 console.info(`pocket-console: mirror skipped — ${reason}`)
+                report('skipped', reason, sync.id)
               }
             } catch (error) {
               // A failed poll mirrors nothing and retries on the next tick: the
               // phone's answer is already recorded either way.
-              console.info(`pocket-console: mirror poll failed — ${String(error?.message ?? error)}`)
+              const message = String(error?.message ?? error)
+              console.info(`pocket-console: mirror poll failed — ${message}`)
+              report('error', message)
             }
           }
           void poll()
