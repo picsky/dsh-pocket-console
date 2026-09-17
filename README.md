@@ -116,6 +116,25 @@ Question shapes:
 - no options → a free-text input plus a Submit button
 - an option `description` renders as an **Options** legend in the body — a button label has no room for it
 
+## Result notices
+
+Approvals and questions are requests: the harness is waiting, and so is the channel. A result notice is the other direction — a session you left running stops, and its result comes to the phone.
+
+Set `resultNotify: idle` and, after a session goes quiet, the phone receives a card carrying that turn's **answer** plus a text box. Type the next instruction there and send it: it is delivered to the same session as a new message, and the work continues with the same context. No desktop is involved, and nothing waits on the desktop, so this path cannot strand a card the way a request can.
+
+The answer is the message the Web GUI leaves unfolded — the turn's last assistant message that speaks without calling a tool. Everything else in the turn is process the GUI folds away, and a notice never carries it.
+
+What suppresses or delays a notice:
+
+- `resultNotify` is `off` by default.
+- A session that produced no answer (only tool calls) notifies nothing.
+- The notice waits out `delaySeconds` of quiet, and keeps waiting while the session is still working, so a run of turns collapses into one notice.
+- One session notifies at most once per `resultNotifyCooldownSeconds`.
+- Delegated sessions are not reported separately; the session that asked for the subagent is.
+- A session whose agent the host has already reclaimed is not resumed, and says so in the log.
+
+The instruction is injected as a **plugin-sourced** message, never as human input. Ordinary continuation works; harness features that require human authority reject it, by design.
+
 ## Configuration
 
 Every value has a default, so the plugin works with no configuration. To tune it, override the row in your own profile layer — a patch replaces the row's entire `config`, so restate every key you want to keep:
@@ -133,9 +152,11 @@ Every value has a default, so the plugin works with no configuration. To tune it
     delaySeconds: 600         # desktop head start; 0 = both sides live at once
     maxDetailChars: 1200
     titlePrefix: DSH
+    resultNotify: idle        # off (default) or idle
+    resultNotifyCooldownSeconds: 600
 ```
 
-`delaySeconds`, `maxDetailChars`, and `titlePrefix` are also registered as a **settings namespace**, so they can be changed at runtime without a restart.
+`delaySeconds`, `maxDetailChars`, `titlePrefix`, `resultNotify`, and `resultNotifyCooldownSeconds` are also registered as a **settings namespace**, so they can be changed at runtime without a restart.
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -144,6 +165,8 @@ Every value has a default, so the plugin works with no configuration. To tune it
 | `delaySeconds` | `120` | How long the desktop GUI answers alone |
 | `maxDetailChars` | `1200` | Truncation bound for reasons and question detail |
 | `titlePrefix` | `DSH` | Card title prefix |
+| `resultNotify` | `off` | `idle` sends each stopped session's result to the phone |
+| `resultNotifyCooldownSeconds` | `600` | Shortest gap between two result notices for one session |
 
 Transport settings (`channelConfig`):
 
@@ -220,6 +243,7 @@ See [`providers/README.md`](providers/README.md) for the full contract. Candidat
 
 - **A phone answer leaves the desktop's question composer on screen.** The GUI's composer is a listener on the forwarded `user-questions/request` waterfall; answering from the phone settles that waterfall ahead of it, and the forwarded request is never withdrawn, so the composer keeps waiting. The answer itself reaches the model — the transcript shows it and the turn completes — and the composer clears when the request is cancelled or `dsh web` restarts. It is a Host-side gap, not a lost answer: forwarding has no cancellation path for a listener the chain left behind.
 - **Card text is truncated** at `maxDetailChars`; a `plan-review` plan can be long.
+- **A result notice does not revive a reclaimed session.** If the host has already let the agent go, the notice is skipped and logged instead of resuming the session.
 - **Long connections are limited to 50 per app and are not broadcast** — do not run several DSH instances against one Feishu app.
 - **The browser half has no build step**, so it is hand-written in the client module system's factory format and renders with plain React elements rather than the shared UI component library.
 - **The published package is about 3.7 MB**, because it carries its Feishu transport — and that transport's own dependencies — inside the tarball. That is what keeps an install free of build permissions; nothing is compiled on the machine that installs it.
@@ -233,9 +257,9 @@ Plain ESM JavaScript, **no build step** — nothing here compiles, and the tests
 npm test
 ```
 
-Nothing to install first: the suite replaces its four production dependencies through a Node module resolution hook (`test/hooks.mjs`), so it needs no credentials and no network.
+Nothing to install first: the suite replaces its five production dependencies through a Node module resolution hook (`test/hooks.mjs`), so it needs no credentials and no network.
 
-23 cases cover: settings namespace and route registration, no escalation before binding, the unbound → awaiting → bound state machine, the QR route, cross-origin refusal, unbind cleanup, the unbind race against a late scan, delayed delivery, card contents, button round-trip, desktop-first suppression, multi-question accumulation and card rewrite, multi-select forms with and without a typed answer, free text, forged-option refusal, re-binding by direct message, the pending report, a deployment without the optional services and their later arrival, runtime settings changes, cancellation, disposal, failure degradation, and the browser half's load-and-register shape.
+26 cases cover: settings namespace and route registration, no escalation before binding, the unbound → awaiting → bound state machine, the QR route, cross-origin refusal, unbind cleanup, the unbind race against a late scan, delayed delivery, card contents, button round-trip, desktop-first suppression, multi-question accumulation and card rewrite, multi-select forms with and without a typed answer, free text, forged-option refusal, re-binding by direct message, the pending report, a deployment without the optional services and their later arrival, runtime settings changes, cancellation, disposal, failure degradation, result-notice delivery and its single-use instruction round trip, result-notice suppression while off or busy or delegated, the notice cooldown, and the browser half's load-and-register shape.
 
 Debug with a local overlay by pointing `channel` at a relative path:
 

@@ -38,6 +38,8 @@ window.__ModuleLoader__.load({
       { field: 'delaySeconds', kind: 'number' },
       { field: 'maxDetailChars', kind: 'number' },
       { field: 'titlePrefix', kind: 'text' },
+      { field: 'resultNotify', kind: 'select', options: ['off', 'idle'] },
+      { field: 'resultNotifyCooldownSeconds', kind: 'number' },
     ]
 
     const COPY = {
@@ -72,6 +74,12 @@ window.__ModuleLoader__.load({
         maxDetailCharsHint: '单条原因、问题细节或选项说明渲染到手机上的最大字符数。',
         titlePrefix: '标题前缀',
         titlePrefixHint: '手机消息标题的前缀，用来区分不同部署。',
+        resultNotify: '结果通知',
+        resultNotifyHint: '会话停下来后，把本轮结果发到手机，并附上一个可以直接回复的输入框。',
+        resultNotifyOff: '关闭',
+        resultNotifyIdle: '空闲时通知',
+        resultNotifyCooldownSeconds: '通知冷却（秒）',
+        resultNotifyCooldownSecondsHint: '同一个会话两次结果通知之间的最短间隔，避免连续短任务刷屏。',
         overridden: '已覆盖',
         reset: '恢复默认',
         invalidNumber: '请填一个数字，留空表示恢复默认。',
@@ -115,6 +123,12 @@ window.__ModuleLoader__.load({
         maxDetailCharsHint: 'Longest reason, question detail, or option description rendered on the phone.',
         titlePrefix: 'Title prefix',
         titlePrefixHint: 'Prefix on every phone message title, for telling deployments apart.',
+        resultNotify: 'Result notices',
+        resultNotifyHint: 'After a session stops, send the turn result to the phone with a box to reply in.',
+        resultNotifyOff: 'Off',
+        resultNotifyIdle: 'When idle',
+        resultNotifyCooldownSeconds: 'Notice cooldown (s)',
+        resultNotifyCooldownSecondsHint: 'Shortest gap between two result notices for one session, so short turns do not flood the channel.',
         overridden: 'Overridden',
         reset: 'Reset',
         invalidNumber: 'Enter a number, or leave it blank to inherit the default.',
@@ -332,6 +346,8 @@ window.__ModuleLoader__.load({
           delaySeconds: fieldState('delaySeconds'),
           maxDetailChars: fieldState('maxDetailChars'),
           titlePrefix: fieldState('titlePrefix'),
+          resultNotify: fieldState('resultNotify'),
+          resultNotifyCooldownSeconds: fieldState('resultNotifyCooldownSeconds'),
         }),
         edit(field, text) { staged.set(field, { text, clear: false }); failed = false; publish() },
         resetField(field) {
@@ -472,14 +488,23 @@ window.__ModuleLoader__.load({
               control.overridden ? h('span', { style: S.badge }, copy.overridden) : null,
               button(copy.reset, () => { props.resetField(fieldSpec.field) },
                 { disabled: !control.overridden || !shell.writable }))),
-          h('input', {
-            id,
-            style: control.invalid ? { ...S.input, ...S.inputInvalid } : S.input,
-            value: control.text,
-            disabled: !shell.writable,
-            inputMode: fieldSpec.kind === 'number' ? 'numeric' : undefined,
-            onChange: event => { props.edit(fieldSpec.field, event.target.value) },
-          }),
+          fieldSpec.kind === 'select'
+            ? h('select', {
+                id,
+                style: S.input,
+                value: control.text,
+                disabled: !shell.writable,
+                onChange: event => { props.edit(fieldSpec.field, event.target.value) },
+              }, fieldSpec.options.map(option => h('option', { key: option, value: option },
+                copy[option === 'off' ? 'resultNotifyOff' : 'resultNotifyIdle'])))
+            : h('input', {
+                id,
+                style: control.invalid ? { ...S.input, ...S.inputInvalid } : S.input,
+                value: control.text,
+                disabled: !shell.writable,
+                inputMode: fieldSpec.kind === 'number' ? 'numeric' : undefined,
+                onChange: event => { props.edit(fieldSpec.field, event.target.value) },
+              }),
           control.invalid ? h('p', { style: S.invalid }, copy.invalidNumber) : null,
           h('p', { style: S.hint }, hint))
       }
@@ -553,6 +578,8 @@ window.__ModuleLoader__.load({
           field(FIELDS[0], copy.delay, copy.delayHint),
           field(FIELDS[1], copy.maxDetailChars, copy.maxDetailCharsHint),
           field(FIELDS[2], copy.titlePrefix, copy.titlePrefixHint),
+          field(FIELDS[3], copy.resultNotify, copy.resultNotifyHint),
+          field(FIELDS[4], copy.resultNotifyCooldownSeconds, copy.resultNotifyCooldownSecondsHint),
 
           h('div', { style: S.footer },
             shell.failed ? h('p', { style: S.failed, role: 'status' }, copy.saveFailed) : null,

@@ -1,6 +1,6 @@
 {
   "name": "dsh-pocket-console",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Put DeepSeek Harness in your pocket: approve tool calls and answer ask_user_question prompts from your phone over Feishu, with the desktop always first in line.",
   "type": "module",
   "main": "index.js",
@@ -13,6 +13,7 @@
   "files": [
     "index.js",
     "client.js",
+    "results.js",
     "providers/feishu.js",
     "providers/README.md",
     "cordis.patch.yml",
@@ -78,6 +79,7 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
     "@deepseek-ai/dsh-credentials": "*",
+    "@deepseek-ai/dsh-llm": "*",
     "@deepseek-ai/schemastery": "*"
   },
   "peerDependenciesMeta": {
@@ -85,6 +87,9 @@
       "optional": true
     },
     "@deepseek-ai/dsh-credentials": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-llm": {
       "optional": true
     },
     "@deepseek-ai/schemastery": {

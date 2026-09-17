@@ -8,10 +8,10 @@
  * behind it would never run.
  *
  * This module owns the channel-neutral half: the two answerer seams, the
- * escalation timer, the pending registry, decision decoding, the settings
- * namespace, and the same-origin routes the browser card calls. Transports live
- * behind the channel contract in `providers/README.md`, so adding a channel
- * never edits this file.
+ * escalation timer, the pending registry, decision decoding, the result
+ * notifier, the settings namespace, and the same-origin routes the browser card
+ * calls. Transports live behind the channel contract in `providers/README.md`,
+ * so adding a channel never edits this file.
  *
  * @module pocket-console
  */
@@ -20,6 +20,7 @@ import { randomUUID } from 'node:crypto'
 import QRCode from 'qrcode'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import z from '@deepseek-ai/schemastery'
+import { createResultNotifier } from './results.js'
 
 /** Plugin name used by the Loader and every diagnostic. */
 export const name = 'pocket-console'
@@ -48,6 +49,19 @@ export const Config = z.object({
   maxDetailChars: z.natural().default(1200),
   /** Title prefix identifying the deployment. @default 'DSH' */
   titlePrefix: z.string().default('DSH'),
+  /**
+   * Whether a stopped session's answer is offered to the channel with a box for
+   * the next instruction. `'idle'` enables it; `'off'` leaves the channel to
+   * live requests only.
+   * @default 'off'
+   */
+  resultNotify: z.union(['off', 'idle']).default('off'),
+  /**
+   * Seconds before the same session may notify again, so a session running many
+   * short turns does not flood the channel.
+   * @default 600
+   */
+  resultNotifyCooldownSeconds: z.natural().default(600),
 })
 
 /** Approval outcome meaning "this one call may proceed". */
@@ -73,6 +87,10 @@ const SectionSchema = z.object({
   maxDetailChars: z.natural().default(1200),
   /** Title prefix identifying the deployment. */
   titlePrefix: z.string().default('DSH'),
+  /** Whether a stopped session's answer is offered to the channel. */
+  resultNotify: z.union(['off', 'idle']).default('off'),
+  /** Seconds before the same session may notify again. */
+  resultNotifyCooldownSeconds: z.natural().default(600),
 })
 
 /**
@@ -251,6 +269,8 @@ export async function apply(ctx, config) {
     delaySeconds: config.delaySeconds,
     maxDetailChars: config.maxDetailChars,
     titlePrefix: config.titlePrefix,
+    resultNotify: config.resultNotify,
+    resultNotifyCooldownSeconds: config.resultNotifyCooldownSeconds,
   })
   let settings = entry
   // The provider owns the section, so none can be installed before one exists.
@@ -269,6 +289,10 @@ export async function apply(ctx, config) {
   /** Live escalations keyed by the opaque id embedded in their action payloads. */
   const open = new Map()
   let closed = false
+
+  // Result notices ride the session firehose rather than a live request, so a
+  // turn that ends while nobody is watching still reaches the phone.
+  const results = createResultNotifier({ ctx, log, channel, settings: () => settings })
 
   /**
    * Bound rendered text; a plan review or a long reason otherwise overflows a
@@ -595,7 +619,10 @@ export async function apply(ctx, config) {
       (request, next) => escalate(request, next, 'question'),
       { prepend: true },
     )
+    const offResults = results.install()
     const offAction = channel.subscribe(({ payload, values }) => {
+      const notice = results.handleAction(payload, values)
+      if (notice !== undefined) return notice
       const id = typeof payload?.rid === 'string' ? payload.rid : undefined
       const record = id === undefined ? undefined : open.get(id)
       if (record === undefined) return { toast: '该请求已处理或已过期', accepted: false }
@@ -616,6 +643,7 @@ export async function apply(ctx, config) {
     return () => {
       offApproval()
       offQuestion()
+      offResults()
       offAction()
       closed = true
       // Abandon rather than settle: the desktop branch of each in-flight race

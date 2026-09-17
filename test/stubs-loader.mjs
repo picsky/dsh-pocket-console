@@ -2,7 +2,7 @@
  * Module resolution hook for the test suite.
  *
  * The plugin imports its production dependencies by bare specifier. The suite
- * replaces four of them with in-repo stubs so it can run with nothing
+ * replaces five of them with in-repo stubs so it can run with nothing
  * installed, no credentials, and no network — and so the plugin itself needs no
  * test-only seam.
  *
@@ -15,6 +15,7 @@
 const STUBS = new Map([
   ['@larksuiteoapi/node-sdk', './stubs/lark-sdk.mjs'],
   ['@deepseek-ai/dsh-credentials', './stubs/credentials.mjs'],
+  ['@deepseek-ai/dsh-llm', './stubs/llm.mjs'],
   ['@deepseek-ai/schemastery', './stubs/schemastery.mjs'],
   ['qrcode', './stubs/qrcode.mjs'],
 ])
