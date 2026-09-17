@@ -83,19 +83,6 @@ const button = (label, tone, payload) => ({
   behaviors: [{ type: 'callback', value: payload }],
 })
 
-/** Place buttons side by side; Feishu stacks them vertically otherwise. */
-const buttonRow = (buttons) => ({
-  tag: 'column_set',
-  flex_mode: 'bisect',
-  horizontal_spacing: '8px',
-  columns: buttons.map(node => ({
-    tag: 'column',
-    width: 'weighted',
-    weight: 1,
-    elements: [node],
-  })),
-})
-
 /**
  * Render one channel-neutral view as a card JSON 2.0 document.
  * @param view - the view built by the core.
@@ -104,22 +91,23 @@ const buttonRow = (buttons) => ({
 function renderCard(view) {
   const elements = view.body.map(content => ({ tag: 'markdown', content }))
 
-  if (view.buttons.length > 0) {
-    const nodes = view.buttons.map(node => button(
+  // One button per row: side by side halves every label, which cuts off the
+  // option text the user is choosing between.
+  for (const node of view.buttons) {
+    elements.push(button(
       node.label,
       BUTTON_TYPES.has(node.tone) ? node.tone : 'default',
       node.payload,
     ))
-    // A row holds at most two readable buttons; longer lists stack.
-    for (let index = 0; index < nodes.length; index += 2) {
-      elements.push(buttonRow(nodes.slice(index, index + 2)))
-    }
   }
 
-  for (const form of view.forms) {
+  for (const [index, form] of view.forms.entries()) {
     elements.push({
       tag: 'form',
-      name: `form_${form.fieldId}`,
+      // One request can carry several questions, and a card may not hold two
+      // elements of the same name; the input's own name stays `fieldId` so the
+      // submitted value arrives under the key the core decodes.
+      name: `form_${index}_${form.fieldId}`,
       elements: [
         form.options === undefined
           ? { tag: 'input', name: form.fieldId, placeholder: plainText('输入回答') }
@@ -164,13 +152,17 @@ export async function create({ ctx, config: rawConfig, binding, log }) {
   let transport
   let closed = false
 
+  // A handler receives its parsed event body: the SDK merges a v2 envelope's
+  // `header` and `event` onto the top level and drops the `event` key, so the
+  // action fields live at `data.action`. Reading the envelope's own nesting
+  // finds no payload, and every click then decodes as an expired request.
   const dispatcher = new Lark.EventDispatcher({}).register({
     'card.action.trigger': (data) => {
-      const value = data?.event?.action?.value
+      const action = data?.action
       const settled = onAction?.({
-        payload: value,
-        values: data?.event?.action?.form_value,
-        messageId: data?.event?.context?.open_message_id,
+        payload: action?.value,
+        values: action?.form_value,
+        messageId: data?.context?.open_message_id,
       })
       if (settled === undefined) return { toast: { type: 'warning', content: '该请求已失效' } }
       return { toast: { type: settled.accepted ? 'success' : 'warning', content: settled.toast } }

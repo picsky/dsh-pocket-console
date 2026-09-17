@@ -336,6 +336,16 @@ export async function apply(ctx, config) {
       ].filter(Boolean).join('\n\n'))
 
       const options = question.options ?? []
+      // A button label carries no room for an option's description, so the
+      // body holds the legend and the buttons stay the answer controls.
+      if (options.some(option => option.description !== undefined && option.description !== '')) {
+        body.push(['**选项**', ...options.map((option, index) => {
+          const description = option.description === undefined || option.description === ''
+            ? ''
+            : ` — ${clip(option.description)}`
+          return `${index + 1}. **${option.label}**${description}`
+        })].join('\n'))
+      }
       if (options.length === 0 || question.multiSelect === true) {
         forms.push({
           payload: { rid: record.id, q: question.id, submit: true },
@@ -355,6 +365,14 @@ export async function apply(ctx, config) {
           tone: 'default',
         })
       }
+      // The desktop card always accepts a typed answer beside its options, so
+      // the phone needs the same door; a single-select typed answer carries the
+      // text alone, with no option selected.
+      forms.push({
+        payload: { rid: record.id, q: question.id, submit: true },
+        fieldId: 'value',
+        submitLabel: '提交其他回答',
+      })
     }
     return {
       title: `${settings.titlePrefix} 提问`,

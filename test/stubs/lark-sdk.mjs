@@ -8,7 +8,8 @@
 export const observed = {
   created: [],
   patched: [],
-  handlers: {},
+  /** The dispatcher the channel registered its handlers on. */
+  dispatcher: undefined,
   started: 0,
   closed: 0,
   registerAppCalls: [],
@@ -22,6 +23,7 @@ export const observed = {
 export function resetObserved() {
   observed.created.length = 0
   observed.patched.length = 0
+  observed.dispatcher = undefined
   observed.started = 0
   observed.closed = 0
   observed.registerAppCalls.length = 0
@@ -54,7 +56,7 @@ export class Client {
   }
 }
 
-/** Captures the dispatcher handed to `start` and exposes its handlers. */
+/** Captures the dispatcher handed to `start`, so a test can dispatch through it. */
 export class WSClient {
   constructor(config) {
     this.config = config
@@ -62,7 +64,7 @@ export class WSClient {
 
   start({ eventDispatcher }) {
     observed.started += 1
-    observed.handlers = eventDispatcher.handlers
+    observed.dispatcher = eventDispatcher
     return Promise.resolve()
   }
 
@@ -71,7 +73,7 @@ export class WSClient {
   }
 }
 
-/** Minimal dispatcher: `register` stores handlers and returns itself. */
+/** Minimal dispatcher: `register` stores handlers; `invoke` flattens like the SDK. */
 export class EventDispatcher {
   constructor() {
     this.handlers = {}
@@ -84,6 +86,23 @@ export class EventDispatcher {
 
   unregister() {
     return this
+  }
+
+  /**
+   * Dispatch one raw event body the way the long connection does.
+   *
+   * The SDK parses a v2 envelope by merging its `header` and `event` onto the
+   * top level and dropping the `event` key, so a handler reads `data.action`
+   * rather than `data.event.action`. A test that calls a handler with the raw
+   * envelope shape therefore proves nothing about a real click.
+   * @param body - the raw envelope, e.g. `{ schema, header, event }`.
+   * @returns the registered handler's return value, or `undefined` for an unregistered type.
+   */
+  async invoke(body) {
+    const { header = {}, event = {}, ...rest } = body
+    const handler = this.handlers[header.event_type]
+    if (handler === undefined) return undefined
+    return await handler({ ...rest, ...header, ...event })
   }
 }
 

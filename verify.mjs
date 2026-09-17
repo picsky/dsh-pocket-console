@@ -17,6 +17,38 @@ const sleep = (milliseconds) => new Promise((resolve) => { setTimeout(resolve, m
 const HOST = '127.0.0.1:3080'
 const SAME_ORIGIN = { origin: `http://${HOST}` }
 
+/**
+ * Click one button the way the long connection delivers it: through the
+ * dispatcher, inside the v2 envelope whose `event` the SDK flattens before the
+ * handler sees it.
+ * @param value - the clicked button's payload.
+ * @param formValue - submitted form values, keyed by input name.
+ * @returns the channel's response, whose toast reports the outcome.
+ */
+async function clickCard(value, formValue) {
+  return await observed.dispatcher.invoke({
+    schema: '2.0',
+    header: { event_type: 'card.action.trigger' },
+    event: {
+      action: { value, ...(formValue === undefined ? {} : { form_value: formValue }) },
+      context: { open_message_id: 'om_stub_1' },
+    },
+  })
+}
+
+/**
+ * Send one direct message, which is how a changed account re-binds.
+ * @param openId - the sender's open id.
+ * @returns the handler's return value.
+ */
+async function directMessage(openId) {
+  return await observed.dispatcher.invoke({
+    schema: '2.0',
+    header: { event_type: 'im.message.receive_v1' },
+    event: { sender: { sender_id: { open_id: openId } } },
+  })
+}
+
 /** One HTTP request shaped as the webserver hands it to a route handler. */
 function makeRequest(method, path, headers = {}) {
   return {
@@ -305,9 +337,7 @@ test('escalates an approval to the bound user and answers it from the card', asy
   assert.match(JSON.stringify(card), /需要越过工作区写沙箱/)
 
   const rid = buttons[0].rid
-  const toast = await observed.handlers['card.action.trigger']({
-    event: { action: { value: { rid, v: 'allowed-once' } }, context: { open_message_id: 'om_stub_1' } },
-  })
+  const toast = await clickCard({ rid, v: 'allowed-once' })
   assert.equal(toast.toast.type, 'success')
   assert.equal(await result, 'allowed-once', 'a phone answer must become the approval outcome')
 
@@ -343,19 +373,25 @@ test('answers a single-select question from its option button', async () => {
       id: 'deploy',
       header: '发布',
       question: '现在发布到生产吗？',
-      options: [{ label: '发布' }, { label: '取消' }],
+      options: [{ label: '发布', description: '立即上线' }, { label: '取消' }],
     }],
     signal: new AbortController().signal,
   }, () => desktop.promise)
   await sleep(1200)
 
-  const chosen = callbackValues(sentCard()).find(value => value.v === '发布')
+  const card = sentCard()
+  assert.match(JSON.stringify(card), /立即上线/, 'an option description must reach the card body')
+  assert.equal(JSON.stringify(card).includes('column_set'), false, 'each option takes its own full-width row')
+
+  const chosen = callbackValues(card).find(value => value.v === '发布')
   assert.ok(chosen, 'the option label must be offered as a button')
   assert.equal(chosen.q, 'deploy')
 
-  await observed.handlers['card.action.trigger']({
-    event: { action: { value: chosen }, context: { open_message_id: 'om_stub_1' } },
-  })
+  const typed = callbackValues(card).find(value => value.submit === true)
+  assert.ok(typed, 'a single-select question must also accept a typed answer')
+  assert.equal(typed.q, 'deploy')
+
+  await clickCard(chosen)
   assert.deepEqual(await result, { answers: [{ id: 'deploy', selected: ['发布'] }] })
 })
 
@@ -375,9 +411,7 @@ test('accumulates answers until every question is answered', async () => {
   await sleep(1200)
 
   const values = callbackValues(sentCard())
-  const partial = await observed.handlers['card.action.trigger']({
-    event: { action: { value: values.find(value => value.q === 'a') }, context: {} },
-  })
+  const partial = await clickCard(values.find(value => value.q === 'a'))
   assert.match(partial.toast.content, /1\/2/, 'a partial answer must not settle the request')
 
   await sleep(20)
@@ -386,14 +420,12 @@ test('accumulates answers until every question is answered', async () => {
   assert.match(JSON.stringify(rewritten), /已答 1\/2/, 'the progress line advances')
   assert.match(JSON.stringify(rewritten), /✅ a1/, 'the chosen answer stays visible')
   assert.deepEqual(
-    callbackValues(rewritten).map(value => value.q),
+    [...new Set(callbackValues(rewritten).map(value => value.q))],
     ['b'],
     'the answered question loses its controls while the open one keeps them',
   )
 
-  await observed.handlers['card.action.trigger']({
-    event: { action: { value: values.find(value => value.q === 'b') }, context: {} },
-  })
+  await clickCard(values.find(value => value.q === 'b'))
   assert.deepEqual(await result, {
     answers: [
       { id: 'a', selected: ['a1'] },
@@ -422,9 +454,7 @@ test('accepts a multi-select form submission', async () => {
   const submit = callbackValues(sentCard()).find(value => value.submit === true)
   assert.ok(submit, 'a multi-select question needs a submit button')
 
-  await observed.handlers['card.action.trigger']({
-    event: { action: { value: submit, form_value: { value: ['x', 'y'] } }, context: {} },
-  })
+  await clickCard(submit, { value: ['x', 'y'] })
   assert.deepEqual(await result, { answers: [{ id: 'pick', selected: ['x', 'y'] }] })
 })
 
@@ -444,9 +474,7 @@ test('accepts a free-text form submission when the question offers no options', 
   assert.match(JSON.stringify(card), /"tag":"input"/, 'a no-option question needs a text field')
 
   const submit = callbackValues(card).find(value => value.submit === true)
-  await observed.handlers['card.action.trigger']({
-    event: { action: { value: submit, form_value: { value: '按 B 方案来' } }, context: {} },
-  })
+  await clickCard(submit, { value: '按 B 方案来' })
   assert.deepEqual(await result, {
     answers: [{ id: 'note', selected: [], custom: '按 B 方案来' }],
   })
@@ -463,14 +491,10 @@ test('rejects an unknown request id and a forged option label', async () => {
   await sleep(1200)
   const rid = callbackValues(sentCard())[0].rid
 
-  const expired = await observed.handlers['card.action.trigger']({
-    event: { action: { value: { rid: 'nope', v: 'ok' } }, context: {} },
-  })
+  const expired = await clickCard({ rid: 'nope', v: 'ok' })
   assert.equal(expired.toast.type, 'warning')
 
-  const forged = await observed.handlers['card.action.trigger']({
-    event: { action: { value: { rid, q: 'q', v: '模型没提供过的选项' } }, context: {} },
-  })
+  const forged = await clickCard({ rid, q: 'q', v: '模型没提供过的选项' })
   assert.equal(forged.toast.type, 'warning', 'an answer no option offered must be refused')
   assert.equal(observed.patched.length, 0, 'a refused answer must not close the request')
 })
@@ -478,9 +502,7 @@ test('rejects an unknown request id and a forged option label', async () => {
 test('re-binding follows a direct message from a new account', async () => {
   const { route, records } = await scaffold()
   await bind(route, { openId: 'ou_first' })
-  await observed.handlers['im.message.receive_v1']({
-    sender: { sender_id: { open_id: 'ou_second' } },
-  })
+  await directMessage('ou_second')
   assert.deepEqual(records.get('pocket-console/recipient').payload, { id: 'ou_second' })
 })
 
