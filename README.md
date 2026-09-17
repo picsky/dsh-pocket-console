@@ -40,6 +40,14 @@ Install straight from GitHub — no registry publish required:
 dsh plugin --profile web add github:picsky/dsh-pocket-console
 ```
 
+The first run stops on `ERR_PNPM_IGNORED_BUILDS`: pnpm ≥11 refuses to finish while any dependency declares a build script it has not been allowed to run, and the Feishu SDK brings in `protobufjs`, whose `postinstall` only warns about version schemes and never writes a file. pnpm appends a stub for it to the profile's `pnpm-workspace.yaml`, and that stub is not a decision — set it to `false` and re-run the same command:
+
+```yaml
+# $DSH_HOME/profiles/web/pnpm-workspace.yaml
+allowBuilds:
+  protobufjs: false
+```
+
 Restart `dsh web`, then open **Settings → Plugins → Plugin configuration → "Pocket console"**:
 
 1. Click **Start binding**
@@ -191,7 +199,7 @@ See [`providers/README.md`](providers/README.md) for the full contract. Candidat
 
 ## Development
 
-Plain ESM JavaScript, **no build step** — which is also why installing from npm, a tarball, or git never asks for a build permission.
+Plain ESM JavaScript, **no build step** — the package itself never needs a build permission. Its dependency graph still does: `protobufjs`, through the Feishu SDK, is the one pnpm ≥11 gates, declined once in the [Quick start](#quick-start).
 
 ```sh
 npm test

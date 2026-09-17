@@ -56,8 +56,10 @@ store, referenced by name.
 ## Style
 
 - Plain ESM JavaScript, no TypeScript and no bundler. This is deliberate: it is
-  what lets the package install from npm, a tarball, or a raw git URL without
-  asking the user to permit a build script.
+  what keeps the package itself free of build scripts, so installing it from
+  npm, a tarball, or a raw git URL never builds it. Dependencies are still gated
+  by pnpm ≥11 — the Quick start carries the one `allowBuilds` entry the Feishu
+  SDK's `protobufjs` needs.
 - Comment the contract, not the code. Say what a caller must know — ownership,
   failure, timing — and delete anything that restates the line below it.
 - Prefer a clear name over a clever one.

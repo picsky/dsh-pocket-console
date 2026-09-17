@@ -40,6 +40,17 @@
 dsh plugin --profile web add github:picsky/dsh-pocket-console
 ```
 
+首次运行会停在 `ERR_PNPM_IGNORED_BUILDS`：只要有依赖声明了未获许可的构建脚本，
+pnpm ≥11 就拒绝完成安装；飞书 SDK 带进了 `protobufjs`，而它的 `postinstall`
+只在版本方案不匹配时打印一行警告，从不写文件。pnpm 会把一条占位项追加进
+profile 的 `pnpm-workspace.yaml`，那不是决定——把它设为 `false`，再重新执行同一条命令：
+
+```yaml
+# $DSH_HOME/profiles/web/pnpm-workspace.yaml
+allowBuilds:
+  protobufjs: false
+```
+
 重启 `dsh web`，打开 **设置 → 插件 → 插件配置 →「Pocket console」**：
 
 1. 点「开始绑定」
@@ -217,8 +228,9 @@ user-questions/request    ─┘         │
 
 ## 开发
 
-纯 ESM JavaScript，**无构建步骤**——这也是从 npm、tarball 或 git 安装时
-都不需要额外构建许可的原因。
+纯 ESM JavaScript，**无构建步骤**——包本身从不需要构建许可。依赖图仍然需要：
+飞书 SDK 引入的 `protobufjs` 就是 pnpm ≥11 会拦下的那一个，在
+[快速开始](#快速开始) 里一次性拒绝即可。
 
 ```sh
 npm test
