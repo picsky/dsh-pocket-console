@@ -2,6 +2,7 @@
 
 **Put [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) in your pocket.** When you step away from the desk, `dsh-pocket-console` forwards the two moments that would otherwise stall an agent — **tool-call approvals** and **`ask_user_question` prompts** — to your phone as Feishu interactive cards, so you can approve or answer from anywhere.
 
+[![npm](https://img.shields.io/npm/v/dsh-pocket-console?label=npm&color=4b6bfb)](https://www.npmjs.com/package/dsh-pocket-console)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
 ![DSH bundle](https://img.shields.io/badge/DSH-bundle%20plugin-4b6bfb)
@@ -37,7 +38,7 @@ Close the browser and walk away, and the agent is stuck until you come back. `ds
 
 ## Quick start
 
-Install from npm. The published tarball carries its Feishu transport inside it, so the install resolves nothing that needs a build permission:
+Install from [npm](https://www.npmjs.com/package/dsh-pocket-console). The published tarball carries its Feishu transport inside it, so the install resolves nothing that needs a build permission and runs no install-time script:
 
 ```sh
 dsh plugin --profile web add dsh-pocket-console
@@ -166,8 +167,15 @@ An approval card is a **remote code-execution grant channel**. It is built accor
 - **Callback payloads are validated.** Buttons carry a single-use random `rid`; an answer must name an option that question actually offered, and the `rid` dies the moment the request settles.
 - **Mutating routes are same-origin only.** `/__pocket` deliberately sits outside the `/api` trust fence, so it carries its own `Origin` check and refuses cross-site writes with `403`.
 - **Outbound only.** The long connection needs no inbound port, no public IP, and no tunnel.
+- **Installing runs nothing.** The tarball ships its transport bundled rather than resolved, so a profile installs no dependency that declares an install script and executes none of them; the bundled code is the official SDK, exactly as it was published.
 
 ## Troubleshooting
+
+**The first install from GitHub stops on `ERR_PNPM_IGNORED_BUILDS`.**
+A git dependency resolves its own dependencies from the registry, so pnpm ≥11 meets `protobufjs`'s postinstall and refuses to finish until that script is allowed or declined. The stub pnpm appends is not a decision: set it to `false` in the profile's `pnpm-workspace.yaml` and re-run. Installing from npm never reaches this, because the transport arrives bundled.
+
+**pnpm wrote `minimumReleaseAgeExclude` into the profile.**
+That is pnpm's supply-chain cooling-off policy for a version published very recently, not something this plugin asks for. Installing the same version after that window does not add the line.
 
 **The Settings card does not appear.**
 The card is keyed on the settings namespace the Host serves. Check the plugin loaded (`dsh --profile web --dump-config` should list a `# == dsh-pocket-console` layer), then reload the page — the served namespace list re-reads on a document commit or a reconnect, not on registration.
@@ -180,6 +188,9 @@ The link is valid for 10 minutes and can be used once. Click **Retry** for a fre
 
 **The connection logs `ws client ready` but buttons do nothing.**
 Feishu's older "message card callback" is not available over the long connection — only the newer `card.action.trigger`. Make sure the app subscribes to `card.action.trigger`; the one-click flow does this for you.
+
+**A button answers with 该请求已处理或过期.**
+The click carried no live request: the desktop answered that request first, or it was cancelled — a decision rewrites the card, so its buttons should have gone with it. Releases before 0.1.0 read card actions from the wrong envelope field and produced this toast for every click; upgrade if that is the version in the profile.
 
 **Approvals never reach the phone.**
 Confirm the card says **Bound**. Then check `delaySeconds` — it is the desktop's exclusive window, and the card is only sent after it elapses.
@@ -211,7 +222,8 @@ See [`providers/README.md`](providers/README.md) for the full contract. Candidat
 - **Card text is truncated** at `maxDetailChars`; a `plan-review` plan can be long.
 - **Long connections are limited to 50 per app and are not broadcast** — do not run several DSH instances against one Feishu app.
 - **The browser half has no build step**, so it is hand-written in the client module system's factory format and renders with plain React elements rather than the shared UI component library.
-- **Not verified against a live Feishu tenant yet.** The flows and payload shapes follow the official documentation; the first real bind is still the acceptance test.
+- **The published package is about 3.7 MB**, because it carries its Feishu transport — and that transport's own dependencies — inside the tarball. That is what keeps an install free of build permissions; nothing is compiled on the machine that installs it.
+- **Verified against a live Feishu tenant, but not yet at this release.** The one-scan app creation, the long connection, card delivery, and card actions arriving back all work against a real app. The card-action field path, the one-option-per-row layout, and typed answers shipped after that pass: the suite covers them, and a phone still has to confirm them.
 
 ## Development
 

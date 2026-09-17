@@ -2,6 +2,7 @@
 
 **把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 装进你的口袋。** 当你离开电脑，`dsh-pocket-console` 会把两个**会让 Agent 卡住**的时刻——**工具调用审批**和 **`ask_user_question` 提问**——以飞书交互卡片的形式送到手机上，随时随地批准或作答。
 
+[![npm](https://img.shields.io/npm/v/dsh-pocket-console?label=npm&color=4b6bfb)](https://www.npmjs.com/package/dsh-pocket-console)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
 ![DSH bundle](https://img.shields.io/badge/DSH-bundle%20plugin-4b6bfb)
@@ -37,7 +38,7 @@
 
 ## 快速开始
 
-从 npm 安装。发布的 tarball 已经把飞书通道内置其中，所以安装过程不会解析出任何需要构建许可的依赖：
+从 [npm](https://www.npmjs.com/package/dsh-pocket-console) 安装。发布的 tarball 已经把飞书通道内置其中，所以安装过程不会解析出任何需要构建许可的依赖，也不会执行任何安装期脚本：
 
 ```sh
 dsh plugin --profile web add dsh-pocket-console
@@ -186,8 +187,20 @@ revision 为栅栏，只有点「保存」才真正落盘。绑定与状态则�
 - **变更路由仅限同源。** `/__pocket` 刻意不走 `/api` 的信任围栏，所以自带 `Origin` 校验，
   跨站写入一律 `403`。
 - **只需出网。** 长连接不需要监听端口、公网 IP 或隧道。
+- **安装不执行任何代码。** tarball 把通道内置发布，而不是让安装过程去解析它，
+  所以 profile 不会安装任何声明了安装脚本的依赖，更不会执行它们；
+  内置的就是官方 SDK 原样发布的代码。
 
 ## 常见问题
+
+**从 GitHub 首次安装停在 `ERR_PNPM_IGNORED_BUILDS`。**
+git 依赖会从 registry 解析它自己的依赖，于是 pnpm ≥11 会撞上 `protobufjs` 的 postinstall，
+在你允许或拒绝该脚本之前拒绝完成安装。pnpm 追加的那条占位项**不是决定**——
+把它设为 `false` 再重新执行即可。从 npm 安装不会走到这一步，因为通道是内置的。
+
+**pnpm 往 profile 里写了 `minimumReleaseAgeExclude`。**
+那是 pnpm 对"刚发布不久的版本"的供应链冷却策略，不是本插件要求的；
+过了那个窗口再装同一个版本就不会出现这一行。
 
 **设置卡片没出现。**
 卡片按 Host 服务的设置命名空间键控。先确认插件加载了
@@ -205,6 +218,11 @@ revision 为栅栏，只有点「保存」才真正落盘。绑定与状态则�
 **日志有 `ws client ready`，但点按钮没反应。**
 飞书旧版「消息卡片回传交互」**不支持长连接**，只有新版 `card.action.trigger` 可以。
 确认应用订阅了 `card.action.trigger`——一键创建流程已经帮你配好。
+
+**点按钮回的是「该请求已处理或过期」。**
+这次点击没有对应的存活请求：要么桌面已经先答了那条请求，要么它被取消了——
+一旦产生决定就会改写卡片，按钮本应随之消失。0.1.0 之前的版本读错了卡片回调的字段路径，
+**每次**点击都会回这个提示；如果 profile 里还是那个版本，升级即可。
 
 **审批永远到不了手机。**
 先确认卡片显示「已绑定」。再看 `delaySeconds`——那是桌面专享窗口，过了才会发卡。
@@ -243,8 +261,11 @@ revision 为栅栏，只有点「保存」才真正落盘。绑定与状态则�
 - **长连接每应用最多 50 个，且不广播**——同一个飞书应用不要同时跑多个 DSH 实例。
 - **浏览器半没有构建步骤**，所以是手写的客户端模块工厂格式，用基础 React 元素渲染，
   没有使用共享 UI 组件库。
-- **尚未在真实飞书租户上验证过。** 流程与 payload 形状依据官方文档实现，
-  第一次真实绑定才是验收测试。
+- **发布出来的包约 3.7 MB**，因为它把飞书通道连同该通道自己的依赖一起装进了 tarball。
+  这正是安装不需要任何构建许可的原因；安装它的机器上不会编译任何东西。
+- **已在真实飞书租户上验证过，但尚未覆盖本版本。** 一键创建应用、长连接、卡片投递、
+  以及卡片回调回到 Host，都在真实应用上跑通过了。卡片回调的字段路径、选项整行、
+  以及自由文本回答是在那次验证**之后**才改的：测试覆盖了它们，但仍需真机确认一次。
 
 ## 开发
 
