@@ -174,8 +174,8 @@ An approval card is a **remote code-execution grant channel**. It is built accor
 **The first install from GitHub stops on `ERR_PNPM_IGNORED_BUILDS`.**
 A git dependency resolves its own dependencies from the registry, so pnpm ≥11 meets `protobufjs`'s postinstall and refuses to finish until that script is allowed or declined. The stub pnpm appends is not a decision: set it to `false` in the profile's `pnpm-workspace.yaml` and re-run. Installing from npm never reaches this, because the transport arrives bundled.
 
-**pnpm wrote `minimumReleaseAgeExclude` into the profile.**
-That is pnpm's supply-chain cooling-off policy for a version published very recently, not something this plugin asks for. Installing the same version after that window does not add the line.
+**pnpm wrote `minimumReleaseAgeExclude` into the profile, or installed the previous version.**
+Both are pnpm's supply-chain policy for a version published very recently, not something this plugin asks for. It holds a fresh version back, resolves an unpinned spec to the one before it, and records the exclusion that lets the one it did install through. Name the version to take it right away — `dsh plugin --profile web add dsh-pocket-console@0.1.1` — and re-add the plain name later if you would rather track releases automatically. pnpm also caches registry metadata, so a version published minutes ago can stay invisible until that cache refreshes.
 
 **The Settings card does not appear.**
 The card is keyed on the settings namespace the Host serves. Check the plugin loaded (`dsh --profile web --dump-config` should list a `# == dsh-pocket-console` layer), then reload the page — the served namespace list re-reads on a document commit or a reconnect, not on registration.
