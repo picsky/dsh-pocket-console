@@ -307,6 +307,21 @@ test('serves no QR before a binding is requested, and unbinds cleanly', async ()
   assert.equal((await state()).enrollment.state, 'unbound')
 })
 
+test('a one-click run that outlives an unbind writes nothing back', async () => {
+  const { route, state, records } = await scaffold()
+  await requestBinding(route)
+
+  const unbound = await route('POST', '/__pocket/unbind', SAME_ORIGIN)
+  assert.equal(unbound.status, 200)
+  assert.equal(records.size, 0, 'unbinding clears the credentials and the recipient')
+
+  // The device-authorization poll outlives the request that started it, so a
+  // scan can settle after the user gave up on it.
+  await scan()
+  assert.equal(records.size, 0, 'a late scan must not re-create what the unbind removed')
+  assert.equal((await state()).enrollment.state, 'unbound')
+})
+
 test('escalates an approval to the bound user and answers it from the card', async () => {
   const { route, listenerOf } = await scaffold()
   await bind(route, { openId: 'ou_scanner' })

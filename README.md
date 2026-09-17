@@ -210,7 +210,7 @@ npm test
 
 Nothing to install first: the suite replaces its four production dependencies through a Node module resolution hook (`test/hooks.mjs`), so it needs no credentials and no network.
 
-19 cases cover: settings namespace and route registration, no escalation before binding, the unbound → awaiting → bound state machine, the QR route, cross-origin refusal, unbind cleanup, delayed delivery, card contents, button round-trip, desktop-first suppression, multi-question accumulation and card rewrite, multi-select forms, free text, forged-option refusal, re-binding by direct message, the pending report, runtime settings changes, cancellation, disposal, failure degradation, and the browser half's load-and-register shape.
+20 cases cover: settings namespace and route registration, no escalation before binding, the unbound → awaiting → bound state machine, the QR route, cross-origin refusal, unbind cleanup, the unbind race against a late scan, delayed delivery, card contents, button round-trip, desktop-first suppression, multi-question accumulation and card rewrite, multi-select forms, free text, forged-option refusal, re-binding by direct message, the pending report, runtime settings changes, cancellation, disposal, failure degradation, and the browser half's load-and-register shape.
 
 Debug with a local overlay by pointing `channel` at a relative path:
 

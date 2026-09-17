@@ -188,6 +188,13 @@ export async function create({ ctx, config: rawConfig, binding, log }) {
   let onboarding
 
   /**
+   * Bumped when the binding is cleared. An onboarding run captures it, so a scan
+   * that settles after an unbind writes nothing back: without it, a late success
+   * re-creates the credentials and the recipient the user just removed.
+   */
+  let generation = 0
+
+  /**
    * Publish the verification link and record it for the Settings card, which
    * renders it as a QR code. The link is single-use and expires, so it is not
    * a secret worth persisting.
@@ -203,7 +210,7 @@ export async function create({ ctx, config: rawConfig, binding, log }) {
    * Resolve stored credentials, or run the one-click creation flow.
    * @returns the credentials to connect with.
    */
-  const ensureCredentials = async () => {
+  const ensureCredentials = async (run) => {
     const [storedId, storedSecret] = await Promise.all([
       ctx.credentials.resolve(appIdRef),
       ctx.credentials.resolve(appSecretRef),
@@ -228,6 +235,10 @@ export async function create({ ctx, config: rawConfig, binding, log }) {
       onStatusChange: (info) => { log.info(`绑定状态：${info.status}`) },
     })
 
+    // The scan outlives the request that started it, so the user may have
+    // unbound while this was pending; the credentials are then nobody's to keep.
+    if (run !== generation) return { appId: result.client_id, appSecret: result.client_secret }
+
     await ctx.credentials.set(appIdRef, result.client_id)
     await ctx.credentials.set(appSecretRef, result.client_secret)
     const openId = result.user_info?.open_id
@@ -238,10 +249,10 @@ export async function create({ ctx, config: rawConfig, binding, log }) {
   }
 
   /** Connect the long connection once credentials are known. */
-  const connect = async () => {
+  const connect = async (run) => {
     enrollment = { state: 'starting' }
-    credentials = await ensureCredentials()
-    if (closed) return
+    credentials = await ensureCredentials(run)
+    if (closed || run !== generation) return
     const options = {
       appId: credentials.appId,
       appSecret: credentials.appSecret,
@@ -263,7 +274,11 @@ export async function create({ ctx, config: rawConfig, binding, log }) {
    * @returns the current enrollment state.
    */
   const beginEnrollment = () => {
-    onboarding ??= connect().catch((error) => {
+    const run = generation
+    onboarding ??= connect(run).catch((error) => {
+      // A cancelled run must not publish its failure over the enrollment that
+      // replaced it, nor clear a retry the user already started.
+      if (run !== generation) return
       enrollment = {
         state: 'failed',
         message: error instanceof Error ? error.message : String(error),
@@ -291,6 +306,9 @@ export async function create({ ctx, config: rawConfig, binding, log }) {
     enrollmentState: () => enrollment,
     beginEnrollment,
     async clearEnrollment() {
+      // Retire the running onboarding first: everything it would still write
+      // belongs to an enrollment the user has just cancelled.
+      generation += 1
       try {
         transport?.wsClient?.close?.()
       } catch (error) {
