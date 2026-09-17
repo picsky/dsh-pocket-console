@@ -16,6 +16,7 @@
     "results.js",
     "routes.js",
     "mirror.js",
+    "escalation.js",
     "providers/feishu.js",
     "providers/README.md",
     "cordis.patch.yml",
