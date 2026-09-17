@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Matches the harness engine range: ^22.19 || >=24.
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # The suite stubs its four production dependencies through a resolution
+      # hook, so there is nothing to install and no credentials or network.
+      - run: npm test
+
+  package:
+    name: publish payload
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # Every path the manifest promises must exist, and every relative runtime
+      # import must be reachable from the installed package.
+      - name: Check the manifest and its declared files
+        run: |
+          node -e "
+          const fs = require('node:fs');
+          const pkg = require('./package.json');
+          let failed = false;
+          for (const file of pkg.files) {
+            if (!fs.existsSync(file)) { console.error('missing from files:', file); failed = true; }
+          }
+          for (const [key, value] of Object.entries(pkg.exports)) {
+            const target = typeof value === 'string' ? value : value.default;
+            if (target !== undefined && !fs.existsSync(target)) {
+              console.error('missing export target:', key, target); failed = true;
+            }
+          }
+          if (pkg.dsh?.bundle?.patch && !fs.existsSync(pkg.dsh.bundle.patch)) {
+            console.error('missing bundle patch:', pkg.dsh.bundle.patch); failed = true;
+          }
+          if (failed) process.exit(1);
+          console.log('manifest verified');
+          "

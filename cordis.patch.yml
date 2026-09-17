@@ -1,0 +1,26 @@
+# dsh-pocket-console bundle layer.
+#
+# `dsh plugin --profile web add dsh-pocket-console` installs this package and
+# appends this file as a profile layer, so nothing needs merging by hand.
+#
+# The package is dual-face: this one row mounts the Host half (the two answerer
+# seams, the `/__pocket` routes, and the settings namespace) and — because the
+# manifest declares `dsh.client.platform: web` and exports `./client` — also
+# contributes the Settings → Plugins card.
+#
+# Every setting has a schema default, so this row names no configuration. To
+# tune the deployment, override the row in your own
+# `$DSH_HOME/profiles/web/cordis.patch.yml` — a patch replaces a row's entire
+# `config`, so restate every key you want to keep:
+#
+#   - id: pocket-console
+#     config:
+#       channel: dsh-pocket-console/providers/feishu.js
+#       delaySeconds: 600
+#       titlePrefix: DSH
+#       channelConfig:
+#         domain: feishu
+
+- insert:
+    - id: pocket-console
+      name: dsh-pocket-console

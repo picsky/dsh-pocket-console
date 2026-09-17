@@ -1,0 +1,247 @@
+# dsh-pocket-console
+
+**把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 装进你的口袋。** 当你离开电脑，`dsh-pocket-console` 会把两个**会让 Agent 卡住**的时刻——**工具调用审批**和 **`ask_user_question` 提问**——以飞书交互卡片的形式送到手机上，随时随地批准或作答。
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
+![DSH bundle](https://img.shields.io/badge/DSH-bundle%20plugin-4b6bfb)
+
+[English](README.md) · 简体中文
+
+---
+
+## 要解决的问题
+
+无人值守的 DeepSeek Harness 在需要你的时候**不会失败，而是等待**。两条 seam 都没有超时：
+
+- 需要审批的工具调用，只有在 answerer 给出结论后才 resolve，这一轮就停在那里。
+- `ask_user_question` 以完全相同的方式阻塞。
+
+关上浏览器走开，Agent 就一直卡到你回来。`dsh-pocket-console` 就是那个能找到你的 answerer。
+
+## 它能做什么
+
+- **桌面优先**：请求先给桌面 GUI。在桌面上答了，手机完全不会被骚扰。
+- **手机兜底**：`delaySeconds` 秒内桌面没应答，才发飞书卡片。点一下按钮，Agent 立刻继续。
+- **两条 seam 都覆盖**：审批和提问，不是只做一半。
+- **扫码即装**：设置卡片上出现二维码，扫码后飞书应用、权限、事件订阅、回调、以及你的接收人 id **全部自动配置完成**。
+- **只需出网**：走飞书 WebSocket 长连接，不需要公网 IP、域名、端口转发或内网穿透。
+- **核心与通道解耦**：飞书只是一个按契约实现的传输。接 Telegram、企业微信、钉钉或 ntfy 是**新增一个文件，不是重写**。
+
+<!-- 演示：录一段 GIF（设置卡片 → 扫码 → 手机收到审批），存为 assets/demo.gif，
+     然后把这段注释替换为：
+     <p align="center"><img src="assets/demo.gif" alt="在设置卡片绑定并从手机审批" width="720"></p> -->
+
+## 快速开始
+
+直接从 GitHub 安装，不需要先发 npm：
+
+```sh
+dsh plugin --profile web add github:picsky/dsh-pocket-console
+```
+
+重启 `dsh web`，打开 **设置 → 插件 → 插件配置 →「Pocket console」**：
+
+1. 点「开始绑定」
+2. 卡片上出现二维码
+3. 用飞书扫码（或在手机上打开同一链接）
+4. 卡片变为「已绑定」并显示接收人
+
+以上就是全部配置。飞书应用、权限、长连接、接收人 id 都来自飞书官方的**一键创建应用**
+（[OAuth 2.0 Device Authorization Grant](https://open.feishu.cn/document/mcp_open_tools/integrating-agents-with-feishu/overview)），
+链接 **10 分钟内有效、仅可使用一次**。
+
+卸载：
+
+```sh
+dsh plugin --profile web remove dsh-pocket-console
+```
+
+## 工作原理
+
+DSH 通过 Cordis **waterfall 事件**解析这两件事，而 Web GUI 只是每条链上的一个 answerer：
+
+```
+approval/request          ─┐
+                           ├─→ dsh-pocket-console ─→ 通道 ─→ 你的手机
+user-questions/request    ─┘         │
+                                     └─→ next() → 桌面 GUI → 其它 answerer
+```
+
+撑起整套设计的只有两点：
+
+- **必须 `prepend: true`。** GUI 的转发器在浏览器连上时不会调用 `next()`，排在它后面的 answerer **永远不会执行**。
+- **先 `next()` 再和计时器竞速。** 桌面链路照常跑；谁先答谁生效。审批语义完全不变——授权仍然是一次性的（`allowed-once`）。
+
+浏览器卡片与 Host 半之间走**同源 HTTP 路由**（`/__pocket/state`、`/bind`、`/unbind`、`/qr.svg`），
+而不是 Remote 方法：Remote 的类型面是生成的、转发事件白名单由 Host 拥有，
+**外部插件两者都插不进去**；同源路由天然复用浏览器已有会话，不需要 token。
+
+## 提问在手机上怎么显示
+
+`ask_user_question` 一次可以问**多个问题**（`questions` 是数组），答案一次性回给模型。
+桌面 GUI 是逐题翻页、带 "2 / 3" 计数；手机卡片一次全列——这是有意的：
+
+| | 桌面 GUI | 手机卡片 |
+|---|---|---|
+| 布局 | 一次一题，带上一题 / 下一题 | 全部可见，可任意顺序作答 |
+| 已答 | 翻页离开后看不到 | **原地保留**，显示 `✅ 你的选择`，移除该题控件 |
+| 提交 | 只有最后一题才出现「提交」 | 全部答完**自动** resolve |
+
+一屏全列更适合手机：飞书每次改写卡片都是一次网络往返，翻页式向导会把"答三题"变成三次等待，
+而小屏上滚动本来就比翻页自然。但它绝不能变成一个"点了没反应"的卡片，
+所以**每答一题都会改写卡片**：进度行前进、已答题目变成 `✅ 答案`、其余保持可点。
+
+各题形态：
+
+- 有选项、单选 → 一排按钮，点一下即记录
+- 有选项、多选 → 勾选组件 + 「提交本题」
+- 没有选项 → 自由文本输入框 + 「提交本题」
+
+## 配置
+
+所有配置都有默认值，开箱即用。要调整就在自己的 profile 层里覆盖那一行——
+**patch 会替换整个 `config`，所以要写全想保留的键**：
+
+`$DSH_HOME/profiles/web/cordis.patch.yml`
+
+```yaml
+- id: pocket-console
+  config:
+    channel: dsh-pocket-console/providers/feishu.js
+    channelConfig:
+      domain: feishu          # 或 lark
+      appName: Pocket console
+      # receiveId: 'ou_xxx'   # 可选：跳过扫码，直接指定接收人
+    delaySeconds: 600         # 桌面专享时间；0 = 两端同时可答
+    maxDetailChars: 1200
+    titlePrefix: DSH
+```
+
+`delaySeconds`、`maxDetailChars`、`titlePrefix` 同时注册在**设置命名空间**里，
+可以运行时修改，不用重启。
+
+| 字段 | 默认 | 说明 |
+|---|---|---|
+| `channel` | `dsh-pocket-console/providers/feishu.js` | 通道模块 |
+| `channelConfig` | `{}` | 通道自有配置 |
+| `delaySeconds` | `120` | 桌面 GUI 单独作答的时间 |
+| `maxDetailChars` | `1200` | 原因与问题详情的截断长度 |
+| `titlePrefix` | `DSH` | 卡片标题前缀 |
+
+通道配置（`channelConfig`）：
+
+| 字段 | 默认 | 说明 |
+|---|---|---|
+| `appIdRef` | `DSH_FEISHU_APP_ID` | 凭据引用名 |
+| `appSecretRef` | `DSH_FEISHU_APP_SECRET` | 凭据引用名 |
+| `domain` | `feishu` | `feishu` 或 `lark` |
+| `receiveId` | — | 指定接收人则跳过扫码 |
+| `receiveIdType` | `open_id` | `open_id` / `chat_id` / `user_id` / `email` |
+| `appName` / `appDesc` | 见源码 | 扫码确认页上预填的应用信息 |
+| `createOnly` | `true` | 只新建应用，绝不覆盖已有应用 |
+
+## 安全
+
+审批卡片本质上是一条**远程代码执行授权通道**，因此按这个标准来做：
+
+- **授权一次性。** `allowed-once` 只对该次调用生效，之后什么都不算。
+- **密钥不进环境变量。** Agent 执行的每条命令都继承进程环境，能直接把密钥读出来。
+  凭据统一放 `$DSH_HOME/.credentials.yaml`。
+- **应用只申请必要权限。** 从最小基座起步（`addons.preset: false`，仅机器人能力），
+  只加三个权限、一个事件、一个回调——而不是默认模板那一大堆云文档 / 知识库 / 多维表格权限。
+- **回填严格校验。** 按钮只带一次性随机 `rid`；答案必须来自该问题真正提供过的选项，
+  请求结算后 `rid` 立即失效。
+- **变更路由仅限同源。** `/__pocket` 刻意不走 `/api` 的信任围栏，所以自带 `Origin` 校验，
+  跨站写入一律 `403`。
+- **只需出网。** 长连接不需要监听端口、公网 IP 或隧道。
+
+## 常见问题
+
+**设置卡片没出现。**
+卡片按 Host 服务的设置命名空间键控。先确认插件加载了
+（`dsh --profile web --dump-config` 应列出 `# == dsh-pocket-console` 层），
+然后刷新页面——已服务命名空间列表只在文档提交或重连时重读，不在注册时。
+
+**点「开始绑定」失败，或不出二维码。**
+一键创建流程需要能访问 `open.feishu.cn`。如果主机走代理，确认该域名可达。
+
+**二维码出来了，但扫码后不完成。**
+链接 10 分钟内有效且只能用一次，点卡片上的「重试」拿新的。
+另外你的飞书账号必须能在所属组织内创建应用；个人版且未加入任何组织时，
+先建一个免费组织并把自己拉进去。
+
+**日志有 `ws client ready`，但点按钮没反应。**
+飞书旧版「消息卡片回传交互」**不支持长连接**，只有新版 `card.action.trigger` 可以。
+确认应用订阅了 `card.action.trigger`——一键创建流程已经帮你配好。
+
+**审批永远到不了手机。**
+先确认卡片显示「已绑定」。再看 `delaySeconds`——那是桌面专享窗口，过了才会发卡。
+
+**能和别的飞书机器人一起跑吗？**
+只有在**不同应用**的前提下可以。飞书长连接是集群模式、不广播，
+两个工具共用一个应用会互相静默丢回调。请新建一个应用。
+
+**和 Auto review 预设兼容吗？**
+审批不兼容。Auto review 下 `approval/policy` 为 `never`，
+工具审批不再经过 `approval/request`，没有东西可以升级。提问升级仍然有效。
+
+## 写一个新通道
+
+核心只做四件事：两条 answerer seam、升级计时、待决注册表、决策解码。
+**消息怎么送达、按钮怎么点回来，全归通道。**
+
+一个通道就是一个 ESM 文件，导出 `create({ ctx, config, binding, log })`，
+返回一个小对象——`available`、`supportsForms`、`deliver`、`update`、`subscribe`、`close`，
+再加上扫码式上手可选的 `enrollmentState` / `beginEnrollment` / `clearEnrollment`。
+
+完整契约见 [`providers/README.md`](providers/README.md)。候选通道：
+
+| 通道 | 只需出网 | 能否回传 | 备注 |
+|---|---|---|---|
+| Telegram Bot | ✅ 长轮询 | ✅ 内联键盘 | `deliver` 发消息，`subscribe` 拉回调 |
+| 企业微信 / 钉钉 | ✅ 长连接 | ✅ 交互卡片 | 与飞书通道结构同构 |
+| ntfy | 需手机可达 | ✅ action 按钮 | 按钮回调 Host 上的小路由 |
+| Bark / Server酱 | ✅ | ❌ 只推不收 | `supportsForms: false`，仅通知 |
+
+## 已知限制
+
+- **手机先答完，桌面面板不会立刻消失。** 它会保留到该工具调用的取消信号到达，
+  通常就在工具结算后不久。结论两种情况下都正确，残留面板是唯一的副作用。
+- **卡片文本会被截断**（`maxDetailChars`）；`plan-review` 的计划正文可能很长。
+- **长连接每应用最多 50 个，且不广播**——同一个飞书应用不要同时跑多个 DSH 实例。
+- **浏览器半没有构建步骤**，所以是手写的客户端模块工厂格式，用基础 React 元素渲染，
+  没有使用共享 UI 组件库。
+- **尚未在真实飞书租户上验证过。** 流程与 payload 形状依据官方文档实现，
+  第一次真实绑定才是验收测试。
+
+## 开发
+
+纯 ESM JavaScript，**无构建步骤**——这也是从 npm、tarball 或 git 安装时
+都不需要额外构建许可的原因。
+
+```sh
+npm test
+```
+
+**不需要先装任何东西**：测试套件通过 Node 的模块解析钩子（`test/hooks.mjs`）
+把四个生产依赖换成桩，因此不需要凭据也不需要网络。
+
+18 个用例覆盖：设置命名空间与路由注册、未绑定时不升级、unbound → awaiting → bound 状态机、
+二维码路由、跨源拒绝、解绑清理、延时发卡、卡片内容、按钮回填、桌面优先抑制、
+多题累积与卡片改写、多选表单、自由文本、伪造选项拒绝、消息重新绑定、
+运行时设置生效、取消、卸载、失败降级，以及浏览器半的加载与注册形状。
+
+本地用 `--patch` 调试时，把 `channel` 指向相对路径：
+
+```yaml
+- insert:
+    - id: pocket-console
+      name: ./index.js
+      config:
+        channel: ./providers/feishu.js
+```
+
+## 许可
+
+[MIT](LICENSE)

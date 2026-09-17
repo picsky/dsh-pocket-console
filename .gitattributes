@@ -1,0 +1,15 @@
+# Normalize line endings: LF in the repository and in every checkout, so the
+# published files are byte-identical no matter which platform they came from.
+* text=auto eol=lf
+
+# Binary assets keep their bytes.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+
+# Keep diffs readable for the generated and dependency lock files.
+pnpm-lock.yaml linguist-generated=true
+package-lock.json linguist-generated=true

@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Local experiments
+*.local.*
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editors
+.vscode/
+.idea/
