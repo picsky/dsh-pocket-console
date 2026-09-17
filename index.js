@@ -135,23 +135,25 @@ function createBinding(ctx) {
 }
 
 /**
- * Serve the browser half's same-origin state routes.
+ * Serve the browser half's routes on the webserver that serves the GUI.
  *
  * The browser half cannot call a Host Remote method: that surface is generated
- * and the forwarded-event allowlist is host-owned. It uses routes the Host
- * registers on the same webserver that serves the GUI instead — same-origin, so
- * the browser's existing session cookie already applies and no token is needed.
+ * and the forwarded-event allowlist is host-owned. It uses routes on the GUI's
+ * own server instead — same-origin, so the browser's session cookie already
+ * applies and no token of our own is needed.
  *
- * These routes are exactly as reachable as the GUI port itself, so every
- * mutating call carries a same-origin check rather than relying on the `/api`
- * trust fence this prefix deliberately sits outside of.
+ * The routes carry what the card needs: the binding, the open requests, and the
+ * decision the desktop should mirror. That is not public, so every request goes
+ * through the connection's trust fence first, and a deployment without a fence
+ * falls back to the same-origin check every mutating call already carries.
  *
  * @param webServer - the route-registration carrier.
  * @param snapshot - thunk returning the current state for the card.
  * @param actions - mutating operations the card may request.
+ * @param trust - the connection's request fence, when the deployment has one.
  * @returns the disposer removing the route.
  */
-function registerRoutes(webServer, snapshot, actions) {
+function registerRoutes(webServer, snapshot, actions, trust = () => undefined) {
   const json = (res, status, body) => {
     const payload = JSON.stringify(body)
     res.writeHead(status, {
@@ -195,6 +197,12 @@ function registerRoutes(webServer, snapshot, actions) {
       const path = new URL(req.url ?? '/', 'http://x').pathname.slice(ROUTE_PREFIX.length)
       const method = req.method ?? 'GET'
       try {
+        // The connection owns browser authority; ask it before reading anything.
+        const rejection = trust(req)
+        if (rejection !== undefined) {
+          json(res, rejection, { error: rejection === 401 ? 'unauthorized' : 'forbidden' })
+          return
+        }
         if (path === '/state' && method === 'GET') {
           json(res, 200, await snapshot())
           return
@@ -705,9 +713,15 @@ export async function apply(ctx, config) {
 
   // The routes live on the web app's server, which a headless deployment never
   // composes. Registering them through `inject` follows the service instead of
-  // the load order, and they leave with it.
+  // the load order, and they leave with it. `connection` is read through `get`
+  // because it is the browser surface's service: a deployment without one keeps
+  // the same-origin check alone.
   ctx.inject(['webServer'], (webCtx) => {
-    webCtx.effect(() => registerRoutes(webCtx.webServer, snapshot, actions), 'pocket-console: routes')
+    const trust = (req) => ctx.get?.('connection')?.requestRejection?.(req)
+    webCtx.effect(
+      () => registerRoutes(webCtx.webServer, snapshot, actions, trust),
+      'pocket-console: routes',
+    )
   })
 
   ctx.effect(() => {

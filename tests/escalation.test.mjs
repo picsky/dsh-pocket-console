@@ -16,6 +16,30 @@ import {
   observed,
 } from './support/harness.mjs'
 
+test('only the bound recipient can answer a card', async () => {
+  const { route, listenerOf } = await scaffold()
+  await bind(route, { openId: 'ou_scanner' })
+
+  const approval = listenerOf('approval/request')
+  const desktop = Promise.withResolvers()
+  const result = approval.handler(
+    { toolName: 'pwsh', signal: new AbortController().signal },
+    () => desktop.promise,
+  )
+  await sleep(1200)
+
+  // The card is a capability, and the answer it carries becomes human input. A
+  // press from anyone but the bound recipient must not become one.
+  const allowed = callbackValues(sentCard()).find(value => value.v === 'allowed-once')
+  const stranger = await clickCard(allowed, undefined, { operator: 'ou_someone_else' })
+  assert.equal(stranger.toast.type, 'warning')
+  assert.match(stranger.toast.content, /只有绑定的接收人/)
+
+  const owner = await clickCard(allowed)
+  assert.equal(owner.toast.type, 'success')
+  assert.equal(await result, 'allowed-once', 'the stranger changed nothing')
+})
+
 test('escalates an approval to the bound user and answers it from the card', async () => {
   const { route, listenerOf } = await scaffold()
   await bind(route, { openId: 'ou_scanner' })

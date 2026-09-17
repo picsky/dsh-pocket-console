@@ -19,19 +19,28 @@ const HOST = '127.0.0.1:3080'
 const SAME_ORIGIN = { origin: `http://${HOST}` }
 
 /**
+ * The recipient the fake deployment is bound to. A click is only honoured from
+ * this identity, so the helper sends it; a case that tests the refusal passes
+ * its own.
+ */
+const bound = { recipient: 'ou_bound' }
+
+/**
  * Click one button the way the long connection delivers it: through the
  * dispatcher, inside the v2 envelope whose `event` the SDK flattens before the
  * handler sees it.
  * @param value - the clicked button's payload.
  * @param formValue - submitted form values, keyed by input name.
+ * @param options - the pressing identity, defaulting to whoever is bound.
  * @returns the channel's response, whose toast reports the outcome.
  */
-async function clickCard(value, formValue) {
+async function clickCard(value, formValue, { operator = bound.recipient } = {}) {
   return await observed.dispatcher.invoke({
     schema: '2.0',
     header: { event_type: 'card.action.trigger' },
     event: {
       action: { value, ...(formValue === undefined ? {} : { form_value: formValue }) },
+      operator: { open_id: operator },
       context: { open_message_id: 'om_stub_1' },
     },
   })
@@ -43,6 +52,7 @@ async function clickCard(value, formValue) {
  * @returns the handler's return value.
  */
 async function directMessage(openId) {
+  bound.recipient = openId
   return await observed.dispatcher.invoke({
     schema: '2.0',
     header: { event_type: 'im.message.receive_v1' },
@@ -106,6 +116,7 @@ async function scaffold(configOverrides = {}, { services = ['settings', 'webServ
   if (stored.appId !== undefined) values.set(credentialRef('DSH_FEISHU_APP_ID'), stored.appId)
   if (stored.appSecret !== undefined) values.set(credentialRef('DSH_FEISHU_APP_SECRET'), stored.appSecret)
   if (stored.recipient !== undefined) {
+    bound.recipient = stored.recipient
     records.set(credentialKey('pocket-console', 'recipient'), {
       kind: 'grant',
       payload: { id: stored.recipient },
@@ -129,6 +140,8 @@ async function scaffold(configOverrides = {}, { services = ['settings', 'webServ
     },
   }
   const composed = new Set(services)
+  /** What the composed trust fence answers, when one is composed. */
+  let rejection
   const deferred = []
 
   /** The context one `inject` callback receives: its services, and effects. */
@@ -179,6 +192,9 @@ async function scaffold(configOverrides = {}, { services = ['settings', 'webServ
       if (!composed.has(name)) return undefined
       if (name === 'webServer') return webServer
       if (name === 'settings') return settings
+      // The browser surface's trust fence: present in a GUI deployment, and the
+      // routes must ask it before answering anything.
+      if (name === 'connection') return { requestRejection: () => rejection }
       return undefined
     },
     inject(deps, callback) {
@@ -235,6 +251,7 @@ async function scaffold(configOverrides = {}, { services = ['settings', 'webServ
     flushInjects()
   }
   return {
+    bound, setRejection: (status) => { rejection = status },
     config, ctx, listeners, disposers, warnings, infos, debugs, values, records,
     routes, sections, route, json, state, listenerOf, compose, agents,
   }
@@ -253,6 +270,7 @@ async function requestBinding(route) {
 
 /** Complete the pending one-click scan. */
 async function scan({ openId = 'ou_bound', appId = 'cli_test' } = {}) {
+  bound.recipient = openId
   assert.ok(observed.completeRegisterApp, 'expected a pending one-click app creation')
   observed.completeRegisterApp({
     client_id: appId,
@@ -297,6 +315,7 @@ function sentCard() {
 
 export {
   sleep,
+  bound,
   HOST,
   SAME_ORIGIN,
   clickCard,

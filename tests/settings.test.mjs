@@ -14,6 +14,23 @@ import {
   SAME_ORIGIN,
 } from './support/harness.mjs'
 
+test('the connection trust fence guards every route', async () => {
+  const { route, setRejection } = await scaffold({}, {
+    services: ['settings', 'webServer', 'connection'],
+  })
+  assert.equal((await route('GET', '/__pocket/state')).status, 200, 'a trusted browser reads the state')
+
+  setRejection(401)
+  const refused = await route('GET', '/__pocket/state')
+  assert.equal(refused.status, 401, 'an untrusted caller gets the connection 401')
+  assert.deepEqual(JSON.parse(refused.body), { error: 'unauthorized' })
+  assert.equal(
+    (await route('POST', '/__pocket/unbind', SAME_ORIGIN)).status,
+    401,
+    'and it cannot mutate either',
+  )
+})
+
 test('mirror reports ride the state route without filling the log', async () => {
   const { route, state, infos, debugs } = await scaffold()
 

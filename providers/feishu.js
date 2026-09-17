@@ -162,12 +162,23 @@ export async function create({ ctx, config: rawConfig, binding, log }) {
   // action fields live at `data.action`. Reading the envelope's own nesting
   // finds no payload, and every click then decodes as an expired request.
   const dispatcher = new Lark.EventDispatcher({}).register({
-    'card.action.trigger': (data) => {
+    'card.action.trigger': async (data) => {
       const action = data?.action
-      const settled = onAction?.({
+      // A card is a capability: whoever holds the message can press its buttons.
+      // Only the bound recipient's press counts, so a forwarded card or a
+      // shoulder-surfer cannot answer on the pair's behalf — the answer the core
+      // injects is human-attributed input.
+      const sender = data?.operator?.open_id
+      const bound = (await recipient().catch(() => undefined))?.id
+      if (typeof sender !== 'string' || sender === '' || sender !== bound) {
+        log.debug('忽略非接收人的卡片操作。')
+        return { toast: { type: 'warning', content: '只有绑定的接收人可以操作' } }
+      }
+      const settled = await onAction?.({
         payload: action?.value,
         values: action?.form_value,
         messageId: data?.context?.open_message_id,
+        sender,
       })
       if (settled === undefined) return { toast: { type: 'warning', content: '该请求已失效' } }
       return { toast: { type: settled.accepted ? 'success' : 'warning', content: settled.toast } }

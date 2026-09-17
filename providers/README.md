@@ -77,7 +77,7 @@ export async function create({ ctx, config, binding, log }) {
 通道必须把 `payload` **原样**回传：
 
 ```js
-onAction({ payload, values, messageId })
+onAction({ payload, values, messageId, sender })
 ```
 
 - `payload`：用户按下的按钮所携带的 `payload`。
@@ -85,6 +85,8 @@ onAction({ payload, values, messageId })
   一个表单可以同时声明 `fieldId` 与 `customFieldId`，那时两个键在同一次提交里一起到达——
   多选题的选项与"补充说明"就是这样一起回传的。
 - `messageId`：通道自己的消息句柄，核心不用，供通道实现 `update` 时关联。
+- `sender`：**操作发起者在该通道上的身份**。核心不用它做授权，因为"谁能操作"是通道自己
+  的信任模型；飞书通道就是在这里校验它等于绑定接收人。
 
 返回值是 `{ toast, accepted }`，通道可据此给用户即时反馈（飞书里映射为 toast 弹窗）。
 
@@ -92,7 +94,12 @@ onAction({ payload, values, messageId })
 
 核心已经做了这件事：`payload.rid` 一次性随机、结算后立即失效、
 选项必须来自该问题自己提供的标签。
-**通道的责任是**：不要自行解释或改写 `payload`，不要在没有用户交互时伪造 `onAction` 调用。
+**通道的责任是**：
+
+- 不要自行解释或改写 `payload`，不要在没有用户交互时伪造 `onAction` 调用；
+- **校验操作者**：卡片是一张凭证，拿到消息的人都能按。手机上传回的答案会以人类归属进入会话
+  （`{ kind: 'user' }`），所以"这次点击确实来自绑定接收人"必须由通道自己确认——飞书通道
+  用回调里的 `operator.open_id` 对照接收人，不符则直接拒绝并且不调用 `onAction`。
 
 ## 现有通道
 
