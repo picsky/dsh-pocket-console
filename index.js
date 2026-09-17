@@ -290,6 +290,32 @@ export async function apply(ctx, config) {
   const open = new Map()
   let closed = false
 
+  /**
+   * The last decision the phone took, for the browser half to mirror onto the
+   * desktop's own composer. A forwarded request can only be finished by a
+   * browser answering it, so a request the phone answered leaves that composer
+   * waiting; the browser half replays this value through the same client call a
+   * click makes, which clears it.
+   */
+  let desktopSync = null
+  /** How long a mirror stays on offer. A reload must not replay an old answer. */
+  const DESKTOP_SYNC_TTL_MS = 60_000
+
+  /**
+   * Describe one phone decision for the browser half.
+   * @param record - the escalation the phone answered.
+   * @param answer - the value the request settled with.
+   * @returns the mirror record the state route serves.
+   */
+  const mirrorOf = (record, answer) => ({
+    id: record.id,
+    kind: record.kind,
+    sessionId: record.request.agent?.id,
+    questions: (record.request.questions ?? []).map(item => item.id),
+    answer,
+    at: Date.now(),
+  })
+
   // Result notices ride the session firehose rather than a live request, so a
   // turn that ends while nobody is watching still reaches the phone.
   const results = createResultNotifier({ ctx, log, channel, settings: () => settings })
@@ -522,7 +548,11 @@ export async function apply(ctx, config) {
   const decodeApproval = (record, payload) => {
     if (payload?.v !== ALLOW && payload?.v !== REJECT) return undefined
     const label = payload.v === ALLOW ? '已批准（仅本次）' : '已拒绝'
-    record.complete(payload.v, label, payload.v === ALLOW ? 'success' : 'danger')
+    // Only the answer that actually settles the request is mirrored: a click
+    // arriving after the desktop already decided changes nothing.
+    if (record.complete(payload.v, label, payload.v === ALLOW ? 'success' : 'danger')) {
+      desktopSync = mirrorOf(record, payload.v)
+    }
     return { toast: label }
   }
 
@@ -569,11 +599,12 @@ export async function apply(ctx, config) {
     const answers = record.request.questions
       .map(item => record.answers.get(item.id))
       .filter(Boolean)
-    record.complete(
+    const accepted = record.complete(
       { answers },
       `已回答：${clip(answers.map(item => `${item.id}=${item.custom ?? item.selected.join('/')}`).join('；'))}`,
       'success',
     )
+    if (accepted) desktopSync = mirrorOf(record, { answers })
     return { toast: '已提交全部回答' }
   }
 
@@ -593,6 +624,13 @@ export async function apply(ctx, config) {
       }
     }),
     enrollment: await channel.enrollmentState?.() ?? { state: 'unsupported' },
+    /**
+     * The decision the browser half should mirror onto the desktop composer,
+     * while it is still recent enough to belong to the request on screen.
+     */
+    sync: desktopSync !== null && Date.now() - desktopSync.at <= DESKTOP_SYNC_TTL_MS
+      ? desktopSync
+      : null,
   })
 
   /** The two mutations the card asks for. */

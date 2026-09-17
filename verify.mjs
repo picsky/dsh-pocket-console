@@ -495,7 +495,7 @@ test('answers a single-select question from its option button', async () => {
 })
 
 test('accumulates answers until every question is answered', async () => {
-  const { route, listenerOf } = await scaffold()
+  const { route, listenerOf, state } = await scaffold()
   await bind(route)
   const questions = listenerOf('user-questions/request')
 
@@ -505,9 +505,11 @@ test('accumulates answers until every question is answered', async () => {
       { id: 'a', question: 'A?', options: [{ label: 'a1' }] },
       { id: 'b', question: 'B?', options: [{ label: 'b1' }] },
     ],
+    agent: { id: 's_agent' },
     signal: new AbortController().signal,
   }, () => desktop.promise)
   await sleep(1200)
+  assert.equal((await state()).sync, null, 'nothing is mirrored before the phone decides')
 
   const values = callbackValues(sentCard())
   const partial = await clickCard(values.find(value => value.q === 'a'))
@@ -531,6 +533,18 @@ test('accumulates answers until every question is answered', async () => {
       { id: 'b', selected: ['b1'] },
     ],
   })
+
+  // The phone decided, so the desktop composer still waits: the Host offers the
+  // accepted answer for the browser half to apply there.
+  const sync = (await state()).sync
+  assert.equal(sync.sessionId, 's_agent', 'the mirror names the session whose composer waits')
+  assert.deepEqual(sync.questions, ['a', 'b'])
+  assert.deepEqual(sync.answer, {
+    answers: [
+      { id: 'a', selected: ['a1'] },
+      { id: 'b', selected: ['b1'] },
+    ],
+  }, 'the mirror carries exactly the answer the request settled with')
 })
 
 test('accepts a multi-select form submission with a typed answer beside the choices', async () => {
@@ -832,6 +846,9 @@ test('the browser half loads through the module loader and registers its card', 
       for (const listener of scopeListeners) listener()
     },
   }
+  /** Stand-in for the Session UI service the desktop mirror reads. */
+  const uiSession = { pendingInteractions: { getSnapshot: () => new Map() } }
+
   /**
    * Apply one loaded browser half against a stand-in host context.
    * @param module - the loaded browser half.
@@ -841,6 +858,9 @@ test('the browser half loads through the module loader and registers its card', 
     const seen = { inject: [], register: [], bind: undefined }
     module.apply({
       settingsScope: { bind(spec) { seen.bind = spec; return scope } },
+      // The Session UI is reached through `get` because the browser half stays
+      // loadable without it; the mirror reads the pending interaction there.
+      get: (name) => name === 'uiSession' ? uiSession : undefined,
       slots: {
         inject(name, contribute) {
           seen.inject.push(name)
@@ -851,11 +871,15 @@ test('the browser half loads through the module loader and registers its card', 
         },
       },
     })
-    return { ...seen, registered: seen.register.at(-1) }
+    return {
+      ...seen,
+      registered: seen.register.find(entry => entry.options.name === 'settings.plugin.item'),
+      docked: seen.register.find(entry => entry.options.name === 'conversation.input.dock'),
+    }
   }
 
   const first = applyTo(loaded.exports)
-  assert.deepEqual(first.inject, ['settings.plugin.item'])
+  assert.deepEqual(first.inject, ['settings.plugin.item', 'conversation.input.dock'])
   assert.deepEqual(first.bind, { namespace: 'pocket-console' }, 'the card binds its own settings namespace')
   assert.equal(first.registered.options.key, 'pocket-console', 'the card is keyed by the settings namespace')
   assert.equal(typeof first.registered.Component, 'function')
@@ -892,6 +916,41 @@ test('the browser half loads through the module loader and registers its card', 
   await face.save()
   assert.equal(section.delaySeconds, 120, 'a reset re-inherits the composition layer')
   assert.equal(card.getSnapshot().delaySeconds.overridden, false)
+
+  // The desktop mirror applies a phone decision through the same client call a
+  // click makes, so a composer the phone answered stops waiting.
+  assert.equal(typeof first.docked.Component, 'function', 'the mirror mounts as a dock entry')
+  const mirror = first.docked.options.inject('s_agent')
+  assert.equal(mirror.sessionId, 's_agent')
+  const answered = []
+  const pending = {
+    questions: [{ id: 'a' }, { id: 'b' }],
+    answer: async (answer) => { answered.push(answer) },
+  }
+  uiSession.pendingInteractions.getSnapshot = () => new Map([['s_agent', pending]])
+  const phoneAnswer = { answers: [{ id: 'a', selected: ['a1'] }] }
+  assert.equal(
+    mirror.applySync({ id: 'm1', sessionId: 's_agent', questions: ['a', 'b'], answer: phoneAnswer }),
+    true,
+  )
+  await sleep(10)
+  assert.deepEqual(answered, [phoneAnswer], 'the phone answer is what the desktop composer settles with')
+  assert.equal(
+    mirror.applySync({ id: 'm2', sessionId: 's_other', questions: ['a', 'b'], answer: phoneAnswer }),
+    false,
+    'another session keeps its own composer',
+  )
+  assert.equal(
+    mirror.applySync({ id: 'm3', sessionId: 's_agent', questions: ['x'], answer: phoneAnswer }),
+    false,
+    'a different request in the same session is left alone',
+  )
+  uiSession.pendingInteractions.getSnapshot = () => new Map()
+  assert.equal(
+    mirror.applySync({ id: 'm4', sessionId: 's_agent', questions: ['a', 'b'], answer: phoneAnswer }),
+    false,
+    'no pending composer means nothing to mirror',
+  )
 
   // The shell publishes the active language on <html>; the card follows it.
   globalThis.document = { documentElement: { lang: 'zh-CN' } }

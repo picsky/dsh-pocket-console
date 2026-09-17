@@ -116,6 +116,8 @@ Question shapes:
 - no options → a free-text input plus a Submit button
 - an option `description` renders as an **Options** legend in the body — a button label has no room for it
 
+The desktop follows. An answer given on the phone is mirrored onto the page's own composer, through the same client call a click there makes, so the request settles and the composer clears instead of waiting for a decision that already happened. The mirror also covers approvals. It is a browser-side action because the Host cannot withdraw a forwarded request: the gateway finishes one only when a browser answers it.
+
 ## Result notices
 
 Approvals and questions are requests: the harness is waiting, and so is the channel. A result notice is the other direction — a session you left running stops, and its result comes to the phone.
@@ -241,7 +243,7 @@ See [`providers/README.md`](providers/README.md) for the full contract. Candidat
 
 ## Limitations
 
-- **A phone answer leaves the desktop's question composer on screen.** The GUI's composer is a listener on the forwarded `user-questions/request` waterfall; answering from the phone settles that waterfall ahead of it, and the forwarded request is never withdrawn, so the composer keeps waiting. The answer itself reaches the model — the transcript shows it and the turn completes — and the composer clears when the request is cancelled or `dsh web` restarts. It is a Host-side gap, not a lost answer: forwarding has no cancellation path for a listener the chain left behind.
+- **A phone answer needs an open desktop page to be mirrored there.** The browser half reads the pending interaction the page already has and applies the phone's answer to it, so the composer settles exactly as a click would. With no page open there is nothing to mirror — the answer still reaches the model, and the transcript shows it — but a page reloaded later never replays it, because a mirror is only honoured for a minute.
 - **Card text is truncated** at `maxDetailChars`; a `plan-review` plan can be long.
 - **A result notice does not revive a reclaimed session.** If the host has already let the agent go, the notice is skipped and logged instead of resuming the session.
 - **Long connections are limited to 50 per app and are not broadcast** — do not run several DSH instances against one Feishu app.

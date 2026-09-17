@@ -599,6 +599,65 @@ window.__ModuleLoader__.load({
       form.subscribe(() => { store.set(form.projection()) })
       const copy = copyForDocument()
 
+      /**
+       * Mirror one answer the phone already gave onto this page's composer.
+       *
+       * The Host cannot withdraw a forwarded request: the gateway finishes one
+       * only when a browser answers it, so a request answered on the phone leaves
+       * this composer waiting. Applying the same answer here runs the very call a
+       * click runs, so the request settles, the composer closes, and the choice is
+       * on screen exactly as if it had been made here.
+       * @param sessionId - the session whose composer may still be waiting.
+       * @param sync - the phone's accepted answer, as the Host recorded it.
+       * @returns whether it reached a pending interaction.
+       */
+      const applySync = (sessionId, sync) => {
+        if (sync === null || typeof sync !== 'object') return false
+        if (sync.sessionId !== undefined && String(sync.sessionId) !== String(sessionId)) return false
+        // Read through `get`: the browser half still works where the Session UI
+        // is absent, and reading a service property without an `inject` throws.
+        const pending = ctx.get?.('uiSession')?.pendingInteractions?.getSnapshot?.()?.get?.(sessionId)
+        if (pending === undefined || typeof pending.answer !== 'function') return false
+        // Only the request the phone actually decided: another request in the
+        // same session may be pending by the time this poll arrives.
+        const ids = (pending.questions ?? []).map(item => item?.id).join('\u0000')
+        if (Array.isArray(sync.questions) && sync.questions.join('\u0000') !== ids) return false
+        // A composer that already settled is not a failure — the recorded answer
+        // is the phone's either way, and there is nothing left to mirror.
+        void Promise.resolve(pending.answer(sync.answer)).catch(() => {})
+        return true
+      }
+
+      /**
+       * Poll the Host for a phone answer and mirror it. Renders nothing: it
+       * exists so this page's composer stays in step with a decision taken
+       * somewhere else.
+       * @param props - the slot's session identity and the mirror verb.
+       * @returns null.
+       */
+      function DesktopMirror(props) {
+        const applied = React.useRef(null)
+        React.useEffect(() => {
+          let stopped = false
+          const poll = async () => {
+            try {
+              const response = await fetch(`${ROUTE}/state`, { headers: { accept: 'application/json' } })
+              if (stopped || !response.ok) return
+              const sync = (await response.json())?.sync
+              if (sync === null || sync === undefined || sync.id === applied.current) return
+              if (props.applySync(sync) === true) applied.current = sync.id
+            } catch (error) {
+              // A failed poll mirrors nothing and retries on the next tick: the
+              // phone's answer is already recorded either way.
+            }
+          }
+          void poll()
+          const timer = setInterval(() => { void poll() }, 1000)
+          return () => { stopped = true; clearInterval(timer) }
+        }, [props.sessionId])
+        return null
+      }
+
       ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
         name: 'settings.plugin.item',
         key: NS,
@@ -611,6 +670,13 @@ window.__ModuleLoader__.load({
           discard: form.discard,
         }),
       }, PocketConsoleCard))
+
+      // The dock is part of the conversation view, so this entry is mounted
+      // whenever a session is on screen — including while its composer waits.
+      ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+        name: 'conversation.input.dock',
+        inject: (sessionId) => ({ sessionId, applySync: (sync) => applySync(sessionId, sync) }),
+      }, DesktopMirror))
     }
 
     module.exports = { apply, inject: ['slots', 'settingsScope'] }
