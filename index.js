@@ -238,7 +238,16 @@ export async function apply(ctx, config) {
 
   /** The two mutations the card asks for. */
   const actions = {
-    begin: async (mode, appId) => await channel.beginEnrollment?.(mode, appId) ?? { state: 'unsupported' },
+    begin: async () => await channel.beginEnrollment?.() ?? { state: 'unsupported' },
+    /**
+     * Adopt an app the user already has, by the credentials they pasted.
+     * @param body - the app id and secret from the developer console.
+     * @returns the enrollment state after connecting.
+     */
+    adopt: async (body) => await channel.adoptCredentials?.({
+      appId: body?.appId,
+      appSecret: body?.appSecret,
+    }) ?? { state: 'unsupported' },
     clear: async () => await channel.clearEnrollment?.() ?? { state: 'unsupported' },
     /**
      * Record one browser-half mirror attempt.

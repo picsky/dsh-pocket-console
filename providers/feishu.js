@@ -202,8 +202,6 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
 
   /** The one in-flight onboarding run, shared across callers. */
   let onboarding
-  /** Which request that run belongs to, so a different one starts its own. */
-  let onboardingFor
 
   /**
    * Bumped when the binding is cleared. An onboarding run captures it, so a scan
@@ -243,10 +241,8 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
    * @param run - the generation that started this run.
    * @returns the created credentials, whether or not they were persisted.
    */
-  const createApplication = async (run, { createOnly = config.createOnly, appId } = {}) => {
-    log.info(appId === undefined
-      ? '未找到飞书凭据，开始一键创建应用；请用飞书扫描或打开下面的链接。'
-      : `开始为已有应用 ${appId} 授权；请用飞书扫描或打开下面的链接，确认页会列出将要新增的权限。`)
+  const createApplication = async (run, { createOnly = config.createOnly } = {}) => {
+    log.info('未找到飞书凭据，开始一键创建应用；请用飞书扫描或打开下面的链接。')
     const result = await Lark.registerApp({
       appPreset: { name: config.appName, desc: config.appDesc },
       addons: {
@@ -257,10 +253,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
         events: { items: { tenant: TENANT_EVENTS } },
         callbacks: { items: CALLBACKS },
       },
-      // The launch page reads the app to update from `clientID`, and would
-      // ignore it if `createOnly` were true. Both are only sent when asked for:
-      // the SDK writes `createOnly` solely as the literal `true`.
-      ...(appId === undefined ? { createOnly } : { createOnly: false, appId }),
+      createOnly,
       onQRCodeReady: announce,
       onStatusChange: (info) => { log.info(`绑定状态：${info.status}`) },
     })
@@ -284,7 +277,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
    * @param options - whether a run without stored credentials may create one.
    * @returns whether a transport is connected.
    */
-  const connect = async (run, { allowCreate = true, createOnly, appId } = {}) => {
+  const connect = async (run, { allowCreate = true, createOnly } = {}) => {
     const stored = await storedCredentials()
     if (stored === undefined && !allowCreate) {
       // Nothing to resume from. Onboarding belongs to the user's click, not to
@@ -293,7 +286,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       return false
     }
     enrollment = { state: 'starting' }
-    credentials = stored ?? await createApplication(run, { createOnly, appId })
+    credentials = stored ?? await createApplication(run, { createOnly })
     if (closed || run !== generation) return false
     const options = {
       appId: credentials.appId,
@@ -334,29 +327,41 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
   }
 
   /**
+   * Adopt an app the user already has, by the credentials that name it.
+   *
+   * This is the whole "bind an existing bot" story: the app id and secret are
+   * exactly what the channel connects with, so nothing has to be authorized
+   * through a page, and nothing polls. The pair is written to the credential
+   * store — the same place the one-click flow writes it — and the connection is
+   * then resumed from it.
+   * @param credentials - the app id and secret the user pasted from the console.
+   * @returns the enrollment state after the attempt.
+   */
+  const adoptCredentials = async ({ appId, appSecret }) => {
+    if (typeof appId !== 'string' || appId.trim() === ''
+      || typeof appSecret !== 'string' || appSecret.trim() === '') {
+      throw new Error('an app id and an app secret are both required')
+    }
+    // A scan may be mid-flight; it belongs to a request the user has moved on
+    // from, and its credentials would overwrite what was just entered.
+    generation += 1
+    onboarding = undefined
+    await ctx.credentials.set(appIdRef, appId.trim())
+    await ctx.credentials.set(appSecretRef, appSecret.trim())
+    log.info('已保存应用凭据，正在连接飞书。')
+    return await resume()
+  }
+
+  /**
    * Start onboarding at most once and report where it got to. The
    * device-authorization poll outlives the request that asked for it, so the
    * in-flight run is shared instead of restarted per call; a failure clears the
    * slot so the user can retry from the card.
    * @returns the current enrollment state.
    */
-  const beginEnrollment = (mode, appId) => {
-    // Binding an existing app means naming it: the launch page only learns which
-    // app to update from the id it is carried with. Without one, there is nothing
-    // to bind, and the request falls back to creating.
-    const target = mode === 'existing' && typeof appId === 'string' && appId.trim() !== ''
-      ? appId.trim()
-      : undefined
-    // A run already in flight was started for a different request, so a new one
-    // replaces it: the previous promise keeps polling for a scan nobody will do.
-    const wanted = `${target ?? 'create'}`
-    if (onboarding !== undefined && onboardingFor !== wanted) {
-      onboarding = undefined
-      generation += 1
-    }
-    onboardingFor = wanted
+  const beginEnrollment = () => {
     const run = generation
-    onboarding ??= connect(run, { createOnly: config.createOnly, appId: target }).catch((error) => {
+    onboarding ??= connect(run, { createOnly: config.createOnly }).catch((error) => {
       // A cancelled run must not publish its failure over the enrollment that
       // replaced it, nor clear a retry the user already started.
       if (run !== generation) return
@@ -386,6 +391,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
     available: () => transport !== undefined,
     enrollmentState: () => enrollment,
     beginEnrollment,
+    adoptCredentials,
     resume,
     async clearEnrollment() {
       // Retire the running onboarding first: everything it would still write
@@ -399,7 +405,6 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       transport = undefined
       credentials = undefined
       onboarding = undefined
-      onboardingFor = undefined
       await ctx.credentials.unset(appIdRef)
       await ctx.credentials.unset(appSecretRef)
       await binding.clear()

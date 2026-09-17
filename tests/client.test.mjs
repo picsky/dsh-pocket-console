@@ -459,26 +459,35 @@ test('the browser half loads through the module loader and registers its card', 
     const askForAppId = () => collect(renderCard()).dialogs
       .find(dialog => dialog.props.open === true && dialog.props.title === pairFace.copy.bindExisting)
     const appIdDialog = askForAppId()
-    assert.ok(appIdDialog !== undefined, 'which opens a dialog for the app id')
-    const appIdInput = (function find(node) {
+    assert.ok(appIdDialog !== undefined, 'which opens a dialog for the credentials')
+    const fieldOf = id => (function find(node) {
       if (node === null || typeof node !== 'object') return undefined
       if (Array.isArray(node)) return node.map(find).find(Boolean)
-      if (node.type === 'input' && node.props.id === 'pocket-console-app-id') return node
+      if (node.type === 'input' && node.props.id === id) return node
       return find(node.props?.children)
     })(appIdDialog)
-    assert.ok(appIdInput !== undefined, 'the dialog carries the field')
-    appIdInput.props.onChange({ target: { value: 'cli_from_console' } })
+    const appIdInput = fieldOf('pocket-console-app-id')
+    const secretInput = fieldOf('pocket-console-app-secret')
+    assert.ok(appIdInput !== undefined && secretInput !== undefined, 'the dialog asks for both halves')
+    assert.equal(secretInput.props.type, 'password', 'and hides the secret while it is typed')
 
-    const start = askForAppId().props.footer
-      .find(node => node.props.children?.[0] === pairFace.copy.authorize)
-    assert.equal(start.props.disabled, false, 'naming an app enables the authorization')
-    start.props.onClick()
+    const connect = () => askForAppId().props.footer
+      .find(node => node.props.children?.[0] === pairFace.copy.connect)
+    assert.equal(connect().props.disabled, true, 'a half-filled form cannot connect')
+    appIdInput.props.onChange({ target: { value: 'cli_from_console' } })
+    assert.equal(connect().props.disabled, true, 'the id alone is not enough')
+    askForAppId().props.children[1].props.children[1]
+      .props.onChange({ target: { value: 'secret_from_console' } })
+
+    const ready = connect()
+    assert.equal(ready.props.disabled, false, 'both halves enable connecting')
+    ready.props.onClick()
     await sleep(20)
     assert.ok(
-      pressed.some(call => call.url.endsWith('/__pocket/bind')
+      pressed.some(call => call.url.endsWith('/__pocket/adopt')
         && String(call.body).includes('"appId":"cli_from_console"')
-        && String(call.body).includes('"mode":"existing"')),
-      `authorizing posts the app it will bind: ${JSON.stringify(pressed)}`,
+        && String(call.body).includes('"appSecret":"secret_from_console"')),
+      `connecting posts both halves: ${JSON.stringify(pressed)}`,
     )
   } finally {
     globalThis.fetch = previousUnbindFetch

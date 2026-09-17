@@ -42,7 +42,7 @@ export async function create({ ctx, config, binding, log }) {
 | 成员 | 说明 |
 |---|---|
 | `enrollmentState()` | 同步返回当前状态：`{ state: 'unbound' \| 'starting' \| 'awaiting' \| 'bound' \| 'failed', recipient?, verifyUrl?, expiresIn?, message? }`。**不得包含任何密钥。** |
-| `beginEnrollment(mode?)` | 启动上手流程。必须**幂等**：设备授权轮询会比触发它的 HTTP 请求活得更久，进行中的那一轮要共享而不是每次重启。同步返回当前状态。`mode` 与 `appId` 由核心透传：`'create'` 走部署默认；`'existing'` 表示用户要绑定**已存在**的应用，此时 `appId` 必须给出该应用的 id——飞书启动页只认这个 id（参数名 `clientID`），而 `createOnly` 为 `true` 会把它压掉。通道在没有 id 时应退回默认（新建）而不是假装能绑定。 |
+| `beginEnrollment(mode?)` | 启动上手流程。必须**幂等**：设备授权轮询会比触发它的 HTTP 请求活得更久，进行中的那一轮要共享而不是每次重启。同步返回当前状态。可选实现 `adoptCredentials({ appId, appSecret })`：用**用户已有的应用凭据**直接绑定（写入凭据库后重连），不启动任何上手流程。这是"绑定已有机器人"的正路——凭据本来就是连接所需的一切；相比之下，让启动页去"更新一个已有应用"既需要同一份 secret，又额外引入轮询与有效期。 |
 | `clearEnrollment()` | 撤销绑定与凭据，回到 `unbound`。 |
 | `resume()` | **只用已存凭据重连**，不启动任何上手流程；没有凭据时保持 `unbound` 并返回当前状态。核心在插件加载时调用它，因为"重启后还要点一次绑定"不是用户该承担的事。 |
 

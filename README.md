@@ -71,11 +71,13 @@ Restart `dsh web`, then open **Settings → Plugins → Plugin configuration →
 
 **Creating** walks the official one-click flow and registers everything the plugin needs on a brand-new app.
 
-**Binding an existing app** asks for that app's **App ID** (`cli_…`, from the developer console under *Credentials & Basic Info*) and hands it to the same flow. The App ID is what names an existing app on the launch page — it travels as `clientID` — and the confirmation page then lists the scopes, the one event (`im.message.receive_v1`), and the one callback (`card.action.trigger`) the plugin will add, so nothing changes on that app until you agree.
+**Binding an existing app** asks for that app's **App ID and App Secret** (developer console → *Credentials & Basic Info*) and connects with them. There is no scan, no launch page, and no device-authorization wait: those two values are exactly what the channel needs, and they are stored in the credential store the same way the one-click flow stores its own. Nothing about that app is modified.
 
-Passing `createOnly: false` on its own does **not** turn the flow into "bind existing": the SDK only ever writes that parameter as `true`, so omitting it just leaves the page to its default, which creates. The App ID is the switch.
+The launch page's own "update an existing app" mode is deliberately not used: it needs the same secret anyway, and it adds a polling flow and a ten-minute window in exchange for nothing.
 
 **Without any scan**, put the app's credentials in the credential store under the names `DSH_FEISHU_APP_ID` and `DSH_FEISHU_APP_SECRET` (that is what `appIdRef` and `appSecretRef` point at), and the plugin connects on its own at every start. The recipient then comes from `receiveId`, or from you sending the bot any message — a direct message binds its sender.
+
+Once the credentials are in, the recipient is all that is left: set `receiveId`, or send the bot any direct message and its sender becomes the recipient.
 
 **One Feishu app serves one DSH instance.** Long-connection events are not broadcast: Feishu delivers each event to a single connection, so two instances sharing a bot would see approvals land on whichever one happened to receive them. Use one app per instance, and `titlePrefix` to tell them apart.
 
@@ -196,7 +198,7 @@ Transport settings (`channelConfig`):
 | `receiveId` | — | Name a recipient to skip the scan |
 | `receiveIdType` | `open_id` | `open_id` / `chat_id` / `user_id` / `email` |
 | `appName` / `appDesc` | see source | Prefilled app identity on the confirmation page |
-| `createOnly` | `true` | Refuse to adopt an existing app on the launch page; only a card request naming an App ID overrides it |
+| `createOnly` | `true` | Keep the one-click flow to creating a new app; an existing one is bound with its own credentials |
 
 ## Security
 

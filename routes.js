@@ -120,13 +120,26 @@ export function registerRoutes(webServer, snapshot, actions, trust = () => undef
           return
         }
         if (path === '/bind') {
-          const body = await readBody(req)
-          json(res, 200, await actions.begin(body?.mode, body?.appId))
+          await readBody(req)
+          json(res, 200, await actions.begin())
           return
         }
         if (path === '/unbind') {
           await readBody(req)
           json(res, 200, await actions.clear())
+          return
+        }
+        if (path === '/adopt') {
+          const body = await readBody(req)
+          const { appId, appSecret } = body ?? {}
+          // Both are needed to name an app, and a half-filled form says so
+          // instead of failing deeper in the connection.
+          if (typeof appId !== 'string' || appId.trim() === ''
+            || typeof appSecret !== 'string' || appSecret.trim() === '') {
+            json(res, 400, { error: 'an app id and an app secret are both required' })
+            return
+          }
+          json(res, 200, await actions.adopt({ appId, appSecret }))
           return
         }
         if (path === '/mirror' && typeof actions.mirror === 'function') {

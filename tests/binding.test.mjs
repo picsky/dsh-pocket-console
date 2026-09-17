@@ -39,33 +39,29 @@ test('reports unbound state and does not escalate before binding', async () => {
   assert.equal(await result, 'rejected')
 })
 
-test('the launch page is aimed at an existing app by naming it', async () => {
-  const { route, state } = await scaffold()
+test('an existing app is adopted by its credentials, with no scan at all', async () => {
+  const { route, json, values, infos } = await scaffold()
 
-  // The landing page learns which app to update from `clientID`, which only
-  // `appId` sets: `createOnly: false` alone is dropped by the SDK, so an
-  // app-less request still lands on the create flow.
-  await route('POST', '/__pocket/bind', SAME_ORIGIN, {})
-  assert.equal(observed.registerAppCalls.at(-1).createOnly, true, 'the default creates')
-  assert.equal(observed.registerAppCalls.at(-1).appId, undefined, 'and names no app')
-  await scan({ openId: 'ou_scanner' })
-
-  await route('POST', '/__pocket/unbind', SAME_ORIGIN)
-  await route('POST', '/__pocket/bind', SAME_ORIGIN, { mode: 'existing' })
-  assert.equal(
-    observed.registerAppCalls.at(-1).appId,
-    undefined,
-    'binding an existing app without naming one has nothing to bind',
+  // Binding a bot the user already has is exactly this: the credentials it is
+  // named by. No device authorization, no launch page, no polling — and the
+  // one-click flow is never called, so nothing is created or modified in Feishu.
+  const adopted = json(await route('POST', '/__pocket/adopt', SAME_ORIGIN, {
+    appId: 'cli_existing',
+    appSecret: 'secret_from_console',
+  }))
+  assert.equal(adopted.state, 'bound', 'the channel connects with what was entered')
+  assert.equal(observed.registerAppCalls.length, 0, 'and never runs the create flow')
+  assert.equal(observed.started, 1, 'the long connection is up')
+  assert.equal(values.get('DSH_FEISHU_APP_ID'), 'cli_existing', 'the id is stored where the channel reads it')
+  assert.equal(values.get('DSH_FEISHU_APP_SECRET'), 'secret_from_console')
+  assert.ok(
+    !infos.join('\n').includes('secret_from_console'),
+    'a secret is stored, never written to the deployment log',
   )
 
-  // A request that differs from the run already in flight starts its own, or the
-  // promise in hand would keep polling for a scan nobody is going to do.
-  await route('POST', '/__pocket/bind', SAME_ORIGIN, { mode: 'existing', appId: 'cli_existing' })
-  assert.equal(observed.registerAppCalls.at(-1).appId, 'cli_existing')
-  assert.equal(observed.registerAppCalls.at(-1).createOnly, false, 'which keeps clientID in play')
-
-  await scan({ openId: 'ou_scanner' })
-  assert.equal((await state()).enrollment.state, 'bound')
+  // A half-filled form is refused where it is made, not deeper in the connection.
+  const refused = await route('POST', '/__pocket/adopt', SAME_ORIGIN, { appId: 'cli_existing' })
+  assert.equal(refused.status, 400)
 })
 
 test('a restart reconnects from stored credentials without onboarding', async () => {

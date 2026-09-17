@@ -59,10 +59,12 @@ window.__ModuleLoader__.load({
         scan: '用飞书扫描下面的二维码完成绑定。链接 10 分钟内有效，仅可使用一次。',
         bind: '扫码新建应用',
         bindExisting: '绑定已有应用',
-        bindExistingHint: '填入该应用的 App ID（形如 cli_xxxxxxxx），在飞书开发者后台的「凭证与基础信息」里可以找到。授权页会逐条列出插件将要新增的权限、事件与回调，你确认后才生效。',
+        bindExistingHint: '填入该应用的 App ID 与 App Secret（在飞书开发者后台的「凭证与基础信息」里）。插件会直接用它连接，不再扫码；只有这两项，别的什么都不会改。',
         appIdLabel: 'App ID',
         appIdPlaceholder: 'cli_xxxxxxxx',
-        authorize: '开始授权',
+        appSecretLabel: 'App Secret',
+        appSecretPlaceholder: '应用密钥',
+        connect: '连接',
         unbind: '解除绑定',
         cancel: '取消',
         close: '关闭',
@@ -110,10 +112,12 @@ window.__ModuleLoader__.load({
         scan: 'Scan this code with Feishu to finish binding. The link is valid for 10 minutes and can be used once.',
         bind: 'Scan to create an app',
         bindExisting: 'Bind an existing app',
-        bindExistingHint: "Enter that app's App ID (cli_xxxxxxxx), from the developer console under Credentials & Basic Info. The authorization page lists the scopes, event, and callback the plugin will add, and nothing changes until you agree.",
+        bindExistingHint: "Enter that app's App ID and App Secret, from the developer console under Credentials & Basic Info. The plugin connects with them directly — no scan, and nothing else about that app is changed.",
         appIdLabel: 'App ID',
         appIdPlaceholder: 'cli_xxxxxxxx',
-        authorize: 'Start authorization',
+        appSecretLabel: 'App Secret',
+        appSecretPlaceholder: 'App secret',
+        connect: 'Connect',
         unbind: 'Unbind',
         cancel: 'Cancel',
         close: 'Close',
@@ -431,7 +435,7 @@ window.__ModuleLoader__.load({
       const [copied, setCopied] = useState(false)
       const [confirmingUnbind, setConfirmingUnbind] = useState(false)
       const [askingAppId, setAskingAppId] = useState(false)
-      const [appId, setAppId] = useState('')
+      const [existing, setExisting] = useState({ appId: '', appSecret: '' })
 
       const refresh = useCallback(async (signal) => {
         try {
@@ -575,20 +579,35 @@ window.__ModuleLoader__.load({
               description: copy.bindExistingHint,
               footer: [
                 button(copy.cancel, () => { setAskingAppId(false) }, { disabled: busy }),
-                button(copy.authorize, () => {
+                button(copy.connect, () => {
                   setAskingAppId(false)
-                  void run('/bind', { mode: 'existing', appId: appId.trim() })
-                }, { disabled: busy || appId.trim() === '', primary: true }),
+                  void run('/adopt', { appId: existing.appId.trim(), appSecret: existing.appSecret.trim() })
+                }, {
+                  disabled: busy || existing.appId.trim() === '' || existing.appSecret.trim() === '',
+                  primary: true,
+                }),
               ],
-            }, h('div', { key: 'app-id-field', style: S.field },
-              h('label', { style: S.label, htmlFor: 'pocket-console-app-id' }, copy.appIdLabel),
-              h('input', {
-                id: 'pocket-console-app-id',
-                style: S.input,
-                value: appId,
-                placeholder: copy.appIdPlaceholder,
-                onChange: event => { setAppId(event.target.value) },
-              }))),
+            }, [
+              h('div', { key: 'app-id-field', style: S.field },
+                h('label', { style: S.label, htmlFor: 'pocket-console-app-id' }, copy.appIdLabel),
+                h('input', {
+                  id: 'pocket-console-app-id',
+                  style: S.input,
+                  value: existing.appId,
+                  placeholder: copy.appIdPlaceholder,
+                  onChange: event => { setExisting(current => ({ ...current, appId: event.target.value })) },
+                })),
+              h('div', { key: 'app-secret-field', style: S.field },
+                h('label', { style: S.label, htmlFor: 'pocket-console-app-secret' }, copy.appSecretLabel),
+                h('input', {
+                  id: 'pocket-console-app-secret',
+                  style: S.input,
+                  type: 'password',
+                  value: existing.appSecret,
+                  placeholder: copy.appSecretPlaceholder,
+                  onChange: event => { setExisting(current => ({ ...current, appSecret: event.target.value })) },
+                })),
+            ]),
             h(Modal, {
               key: 'unbind-confirm',
               open: confirmingUnbind,
