@@ -8,6 +8,8 @@
 
 English · [简体中文](README.zh-CN.md)
 
+> **Unofficial project.** Independently developed and maintained by community members — not affiliated with DeepSeek, and not reviewed or endorsed by it. Evaluate any third-party plugin before you install it.
+
 ---
 
 ## The problem
@@ -24,6 +26,7 @@ Close the browser and walk away, and the agent is stuck until you come back. `ds
 - **Desktop first.** Every request goes to the desktop GUI first. Answer there and your phone is never touched.
 - **Phone as backup.** After `delaySeconds` with no desktop answer, the request goes out as a Feishu card. Tap a button and the agent continues immediately.
 - **Covers both seams.** Approvals *and* questions, not just one.
+- **A real DSH plugin, not a wrapper.** It ships as a `dsh.bundle` profile layer, registers on the two documented answerer waterfalls (`approval/request`, `user-questions/request`) with `prepend: true`, and contributes a Settings card on its own namespace. Nothing in DSH is patched or forked.
 - **One-scan setup.** The Settings card shows a QR code. Scanning it creates the Feishu app, configures its permissions, event subscription, and callback, and records your recipient id — automatically.
 - **Outbound only.** Delivery rides the Feishu WebSocket long connection, so there is no public IP, domain, port forwarding, or tunnel.
 - **Channel-agnostic core.** Feishu is one transport behind a documented contract. Telegram, WeCom, DingTalk, or ntfy are a new file, not a rewrite.
