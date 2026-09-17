@@ -188,7 +188,8 @@ dsh 自己的远端客户端（编辑器里的 prompt）就是这么做的（`pa
     resultNotifyCooldownSeconds: 600
 ```
 
-`delaySeconds`、`maxDetailChars`、`titlePrefix`、`resultNotify`、`resultNotifyCooldownSeconds`
+`locale` 决定发到手机上的卡片语言：所有卡片文案来自同一个字典（`messages.js`），部署配了哪种语言就读哪种；设置卡片本身跟随界面语言。
+其余字段
 同时注册在**设置命名空间**里，可以运行时修改，不用重启。
 
 | 字段 | 默认 | 说明 |
@@ -202,6 +203,7 @@ dsh 自己的远端客户端（编辑器里的 prompt）就是这么做的（`pa
 | `resultNotifyCooldownSeconds` | `600` | 同一个会话两次结果通知之间的最短间隔 |
 | `mirrorTtlSeconds` | `60` | 手机决定仍可镜像到桌面面板的时长 |
 | `resultNoticeTtlSeconds` | `1800` | 结果通知仍接受回复的时长 |
+| `locale` | `zh` | 发到手机上的卡片语言（`zh` 或 `en`） |
 
 通道配置（`channelConfig`）：
 

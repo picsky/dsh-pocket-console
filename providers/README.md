@@ -19,8 +19,9 @@ export async function create({ ctx, config, binding, log }) {
 |---|---|
 | `ctx` | Host context。需要 `credentials` 时可自行解析凭据。 |
 | `config` | `channelConfig` 原样透传，**由通道自己解释与校验**（字段集因通道而异）。 |
+| `messages` | 卡片文案字典的读取函数（`() => ({ … })`），随部署的 `locale` 变化。**所有面向用户的文案都从这里取**，语言格式（数字、分隔符、标点）也归它。
 | `binding` | 接收人持久化：`{ read(): Promise<string\|undefined>, write(id): Promise<void>, clear(): Promise<void> }`。底层是本插件的凭据记录，跨重启保留。通道若不需要可忽略。 |
-| `log` | `{ info(message), warn(message, error) }`。 |
+| `log` | `{ info(message), warn(message, error), debug(message) }`。 |
 
 ## channel 对象
 

@@ -20,6 +20,7 @@ import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import z from '@deepseek-ai/schemastery'
 import { createResultNotifier } from './results.js'
 import { createEscalation } from './escalation.js'
+import { LOCALES, messagesFor } from './messages.js'
 import { createMirror } from './mirror.js'
 import { registerRoutes } from './routes.js'
 
@@ -64,6 +65,12 @@ export const Config = z.object({
    */
   resultNotifyCooldownSeconds: z.natural().default(600),
   /**
+   * Language of the cards sent to the phone. The GUI card is bilingual on its
+   * own; this is the copy a person reads in the chat app.
+   * @default 'zh'
+   */
+  locale: z.union(LOCALES).default('zh'),
+  /**
    * Seconds a phone decision stays on offer for the browser half to mirror onto
    * the desktop composer. Long enough to cover a page that is already open,
    * short enough that a reloaded page never replays an old answer.
@@ -93,6 +100,8 @@ const SectionSchema = z.object({
   resultNotify: z.union(['off', 'idle']).default('off'),
   /** Seconds before the same session may notify again. */
   resultNotifyCooldownSeconds: z.natural().default(600),
+  /** Language of the cards sent to the phone. */
+  locale: z.union(LOCALES).default('zh'),
   /** Seconds a phone decision stays on offer for the desktop mirror. */
   mirrorTtlSeconds: z.natural().default(60),
   /** Seconds a result notice keeps accepting a reply. */
@@ -154,11 +163,13 @@ export async function apply(ctx, config) {
   if (typeof module.create !== 'function') {
     throw new TypeError(`pocket-console: channel ${config.channel} must export create()`)
   }
+  // The channel renders its own chrome, so it reads the same copy the core does.
   const channel = await module.create({
     ctx,
     config: config.channelConfig ?? {},
     binding: createBinding(ctx),
     log,
+    messages: () => messagesFor(config.locale),
   })
 
   // A restart must not need the Settings card. Credentials and recipient are
@@ -184,6 +195,7 @@ export async function apply(ctx, config) {
     resultNotifyCooldownSeconds: config.resultNotifyCooldownSeconds,
     mirrorTtlSeconds: config.mirrorTtlSeconds,
     resultNoticeTtlSeconds: config.resultNoticeTtlSeconds,
+    locale: config.locale,
   })
   let settings = entry
   // The provider owns the section, so none can be installed before one exists.
@@ -201,14 +213,16 @@ export async function apply(ctx, config) {
 
   // The decision the phone took, and what the browser half did with it.
   const mirror = createMirror({ log, settings: () => settings })
+  /** The card copy in the deployment's language, read per render. */
+  const messages = () => messagesFor(settings.locale)
 
   // The escalation machine owns the timer, the race, and the pending registry;
   // this file only wires it to the two seams and the channel's actions.
-  const escalation = createEscalation({ log, channel, settings: () => settings, mirror })
+  const escalation = createEscalation({ log, channel, settings: () => settings, mirror, messages })
 
   // Result notices ride the session firehose rather than a live request, so a
   // turn that ends while nobody is watching still reaches the phone.
-  const results = createResultNotifier({ ctx, log, channel, settings: () => settings })
+  const results = createResultNotifier({ ctx, log, channel, settings: () => settings, messages })
 
   /** The card's status snapshot: what the section serves and what is open. */
   const snapshot = async () => ({

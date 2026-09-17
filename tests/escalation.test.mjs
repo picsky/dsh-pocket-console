@@ -161,3 +161,29 @@ test('reports what is still pending, and whether the phone already has it', asyn
   desktop.resolve({ answers: [] })
 })
 
+test('the card copy follows the deployment language', async () => {
+  const { route, listenerOf } = await scaffold({ locale: 'en' })
+  await bind(route, { openId: 'ou_scanner' })
+
+  const approval = listenerOf('approval/request')
+  const desktop = Promise.withResolvers()
+  const result = approval.handler(
+    { toolName: 'pwsh', reason: 'needs the workspace', signal: new AbortController().signal },
+    () => desktop.promise,
+  )
+  await sleep(1200)
+
+  // Every card string comes from the dictionary, so an English deployment reads
+  // English — including the labels a person presses and the toast they get back.
+  const card = sentCard()
+  const rendered = JSON.stringify(card)
+  assert.match(rendered, /Tool approval/)
+  assert.match(rendered, /\*\*Reason\*\*: needs the workspace/)
+  assert.match(rendered, /Allow once/)
+
+  const settled = await clickCard(callbackValues(card).find(value => value.v === 'allowed-once'))
+  assert.equal(settled.toast.content, 'Allowed once')
+  assert.equal(await result, 'allowed-once')
+})
+
+

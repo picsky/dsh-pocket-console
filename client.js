@@ -38,7 +38,8 @@ window.__ModuleLoader__.load({
       { field: 'delaySeconds', kind: 'number' },
       { field: 'maxDetailChars', kind: 'number' },
       { field: 'titlePrefix', kind: 'text' },
-      { field: 'resultNotify', kind: 'select', options: ['off', 'idle'] },
+      { field: 'resultNotify', kind: 'select', options: ['off', 'idle'], labels: { off: 'resultNotifyOff', idle: 'resultNotifyIdle' } },
+      { field: 'locale', kind: 'select', options: ['zh', 'en'], labels: { zh: 'localeZh', en: 'localeEn' } },
       { field: 'resultNotifyCooldownSeconds', kind: 'number' },
       { field: 'mirrorTtlSeconds', kind: 'number' },
       { field: 'resultNoticeTtlSeconds', kind: 'number' },
@@ -80,6 +81,10 @@ window.__ModuleLoader__.load({
         resultNotifyHint: '会话停下来后，把本轮结果发到手机，并附上一个可以直接回复的输入框。',
         resultNotifyOff: '关闭',
         resultNotifyIdle: '空闲时通知',
+        locale: '手机文案语言',
+        localeHint: '发到手机上的卡片用哪种语言；设置卡片本身跟随界面语言。',
+        localeZh: '中文',
+        localeEn: '英文',
         resultNotifyCooldownSeconds: '通知冷却（秒）',
         resultNotifyCooldownSecondsHint: '同一个会话两次结果通知之间的最短间隔，避免连续短任务刷屏。',
         mirrorTtlSeconds: '桌面镜像有效期（秒）',
@@ -133,6 +138,10 @@ window.__ModuleLoader__.load({
         resultNotifyHint: 'After a session stops, send the turn result to the phone with a box to reply in.',
         resultNotifyOff: 'Off',
         resultNotifyIdle: 'When idle',
+        locale: 'Phone card language',
+        localeHint: 'Which language the cards sent to the phone use; this card itself follows the interface language.',
+        localeZh: 'Chinese',
+        localeEn: 'English',
         resultNotifyCooldownSeconds: 'Notice cooldown (s)',
         resultNotifyCooldownSecondsHint: 'Shortest gap between two result notices for one session, so short turns do not flood the channel.',
         mirrorTtlSeconds: 'Desktop mirror window (s)',
@@ -360,6 +369,7 @@ window.__ModuleLoader__.load({
           resultNotifyCooldownSeconds: fieldState('resultNotifyCooldownSeconds'),
           mirrorTtlSeconds: fieldState('mirrorTtlSeconds'),
           resultNoticeTtlSeconds: fieldState('resultNoticeTtlSeconds'),
+          locale: fieldState('locale'),
         }),
         edit(field, text) { staged.set(field, { text, clear: false }); failed = false; publish() },
         resetField(field) {
@@ -508,7 +518,7 @@ window.__ModuleLoader__.load({
                 disabled: !shell.writable,
                 onChange: event => { props.edit(fieldSpec.field, event.target.value) },
               }, fieldSpec.options.map(option => h('option', { key: option, value: option },
-                copy[option === 'off' ? 'resultNotifyOff' : 'resultNotifyIdle'])))
+                copy[fieldSpec.labels?.[option] ?? option])))
             : h('input', {
                 id,
                 style: control.invalid ? { ...S.input, ...S.inputInvalid } : S.input,
@@ -594,6 +604,7 @@ window.__ModuleLoader__.load({
           field(FIELDS[4], copy.resultNotifyCooldownSeconds, copy.resultNotifyCooldownSecondsHint),
           field(FIELDS[5], copy.mirrorTtlSeconds, copy.mirrorTtlSecondsHint),
           field(FIELDS[6], copy.resultNoticeTtlSeconds, copy.resultNoticeTtlSecondsHint),
+          field(FIELDS[7], copy.locale, copy.localeHint),
 
           h('div', { style: S.footer },
             shell.failed ? h('p', { style: S.failed, role: 'status' }, copy.saveFailed) : null,

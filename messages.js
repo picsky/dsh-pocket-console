@@ -1,0 +1,122 @@
+/**
+ * The card copy, in the deployment's language.
+ *
+ * Every string a person reads on the phone comes from here, so a deployment can
+ * serve English cards without a code change, and so the copy has one home instead
+ * of being spelled out at each call site. The core owns the request views and the
+ * notices; a channel owns its own chrome and reads these for the parts it renders
+ * itself, such as form placeholders.
+ *
+ * Functions carry the parts that vary (a tool name, a count, a clip mark), which
+ * keeps formatting next to the language that formats it.
+ *
+ * @module pocket-console/messages
+ */
+
+/** Chinese copy: the default, and the language this plugin's docs are written beside. */
+const zh = {
+  /** Appended by `clip` when a long reason or detail was cut. */
+  truncated: '…（内容过长已截断）',
+  toolLabel: tool => `**工具**：\`${tool}\``,
+  callIdLabel: id => `**调用 ID**：\`${id}\``,
+  reasonLabel: reason => `**原因**：${reason}`,
+  approvalLive: '桌面与手机同时可答，先到者生效。批准仅对本次调用生效。',
+  approvalUpgraded: seconds => `桌面 ${seconds} 秒内未应答，已升级到手机。批准仅对本次调用生效。`,
+  approvalTitle: '工具审批',
+  questionTitle: '提问',
+  allowOnce: '批准一次',
+  reject: '拒绝',
+  progress: (answered, total) => `**进度**：已答 ${answered}/${total}`,
+  optionsLegend: '**选项**',
+  /** Joins several selected labels in a recorded answer. */
+  selectionSeparator: '、',
+  /** Separates recorded answers in the settlement headline. */
+  answerSeparator: '；',
+  submitAnswer: '提交本题',
+  submitOther: '提交其他回答',
+  allowedOnce: '已批准（仅本次）',
+  rejected: '已拒绝',
+  cancelled: '该请求已取消',
+  answeredAtDesk: '已在桌面端处理',
+  recorded: (answered, total) => `已记录 ${answered}/${total} 题`,
+  answered: summary => `已回答：${summary}`,
+  answersSubmitted: '已提交全部回答',
+  requestGone: '该请求已处理或已过期',
+  actionUnknown: '无法识别该操作',
+  /** Returned when a channel action arrives with no request behind it. */
+  requestExpired: '该请求已失效',
+  notRecipient: '只有绑定的接收人可以操作',
+  answerPlaceholder: '输入回答',
+  notePlaceholder: '补充说明（可选）',
+  appDescription: '把 DeepSeek Harness 的工具审批与提问送到飞书',
+  resultTitle: '结果',
+  replyHint: '**回复这条消息**即可把下一步交给这个会话。',
+  sendToAgent: '发送给 agent',
+  superseded: '**这条结果已被新的结果取代**，请用最新那条回复。',
+  readerSpoke: '**该结果已有新消息**，这条通知不再接受回复。',
+  noticeExpired: '**这条通知已过期**，不再接受回复。',
+  noticeGone: '该结果已过期',
+  noticeTtlPassed: '该通知已过期',
+  emptyInstruction: '指令为空，未发送',
+  noAgent: '会话已不在运行，指令未发送',
+  sent: '已发送给 agent',
+  received: '**已收到指令**，已排入该会话。',
+}
+
+/** English copy. Same keys, and the same functions for the varying parts. */
+const en = {
+  truncated: '… (truncated)',
+  toolLabel: tool => `**Tool**: \`${tool}\``,
+  callIdLabel: id => `**Call id**: \`${id}\``,
+  reasonLabel: reason => `**Reason**: ${reason}`,
+  approvalLive: 'The desktop and the phone are both live; whichever answers first wins. Approval applies to this call only.',
+  approvalUpgraded: seconds => `The desktop did not answer within ${seconds} seconds, so this went to the phone. Approval applies to this call only.`,
+  approvalTitle: 'Tool approval',
+  questionTitle: 'Question',
+  allowOnce: 'Allow once',
+  reject: 'Reject',
+  progress: (answered, total) => `**Progress**: ${answered}/${total} answered`,
+  optionsLegend: '**Options**',
+  selectionSeparator: ', ',
+  answerSeparator: '; ',
+  submitAnswer: 'Submit this answer',
+  submitOther: 'Submit another answer',
+  allowedOnce: 'Allowed once',
+  rejected: 'Rejected',
+  cancelled: 'This request was cancelled',
+  answeredAtDesk: 'Answered at the desktop',
+  recorded: (answered, total) => `Recorded ${answered}/${total}`,
+  answered: summary => `Answered: ${summary}`,
+  answersSubmitted: 'Every answer submitted',
+  requestGone: 'That request was already handled or has expired',
+  actionUnknown: 'That action could not be recognized',
+  requestExpired: 'That request has expired',
+  notRecipient: 'Only the bound recipient can act on this card',
+  answerPlaceholder: 'Type your answer',
+  notePlaceholder: 'Extra note (optional)',
+  appDescription: 'DeepSeek Harness tool approvals and questions, delivered to Feishu',
+  resultTitle: 'Result',
+  replyHint: '**Reply to this message** to hand the next step to this session.',
+  sendToAgent: 'Send to the agent',
+  superseded: '**A newer result replaced this one** — reply to that message instead.',
+  readerSpoke: '**This session has a newer message**, so this notice no longer accepts a reply.',
+  noticeExpired: '**This notice has expired** and no longer accepts a reply.',
+  noticeGone: 'That result has expired',
+  noticeTtlPassed: 'That notice has expired',
+  emptyInstruction: 'The instruction was empty, so nothing was sent',
+  noAgent: 'That session is no longer running, so nothing was sent',
+  sent: 'Sent to the agent',
+  received: '**Instruction received** and queued for that session.',
+}
+
+/** The languages a deployment can choose between. */
+export const LOCALES = ['zh', 'en']
+
+/**
+ * The copy for one language.
+ * @param locale - a configured locale; anything unknown reads as Chinese.
+ * @returns that language's dictionary.
+ */
+export function messagesFor(locale) {
+  return locale === 'en' ? en : zh
+}

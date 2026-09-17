@@ -161,7 +161,7 @@ Every value has a default, so the plugin works with no configuration. To tune it
     resultNotifyCooldownSeconds: 600
 ```
 
-`delaySeconds`, `maxDetailChars`, `titlePrefix`, `resultNotify`, and `resultNotifyCooldownSeconds` are also registered as a **settings namespace**, so they can be changed at runtime without a restart.
+`locale` chooses the language of the cards sent to the phone; every card string comes from one dictionary (`messages.js`), so a deployment reads in the language it configured — the Settings card itself follows the interface language either way. The other fields below are registered as a **settings namespace**, so they can be changed at runtime without a restart.
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -174,6 +174,7 @@ Every value has a default, so the plugin works with no configuration. To tune it
 | `resultNotifyCooldownSeconds` | `600` | Shortest gap between two result notices for one session |
 | `mirrorTtlSeconds` | `60` | How long a phone decision may still close the desktop composer |
 | `resultNoticeTtlSeconds` | `1800` | How long a result notice keeps accepting a reply |
+| `locale` | `zh` | Language of the cards sent to the phone (`zh` or `en`) |
 
 Transport settings (`channelConfig`):
 

@@ -37,7 +37,7 @@ export function isAnswer(message) {
 /**
  * Watch root sessions, then offer each stopped session's answer to the channel.
  */
-export function createResultNotifier({ ctx, log, channel, settings, now = () => Date.now() }) {
+export function createResultNotifier({ ctx, log, channel, settings, messages, now = () => Date.now() }) {
   /** Per-session observation: the newest turn, its last message, and when we last spoke. */
   const tracks = new Map()
   /** Notices whose rid is still live, keyed by that rid. */
@@ -102,13 +102,13 @@ export function createResultNotifier({ ctx, log, channel, settings, now = () => 
     // One live notice per session: the newest result is the one worth replying
     // to, and an older card that still accepted a reply would inject an
     // instruction the reader wrote against a superseded answer.
-    retire(session, '**这条结果已被新的结果取代**，请用最新那条回复。')
+    retire(session, messages().superseded)
     const view = {
-      title: `${settings().titlePrefix} 结果`,
+      title: `${settings().titlePrefix} ${messages().resultTitle}`,
       tone: 'info',
-      body: [answer, '**回复这条消息**即可把下一步交给这个会话。'],
+      body: [answer, messages().replyHint],
       buttons: [],
-      forms: [{ payload: { nid: id, submit: true }, fieldId: INSTRUCTION_FIELD, submitLabel: '发送给 agent' }],
+      forms: [{ payload: { nid: id, submit: true }, fieldId: INSTRUCTION_FIELD, submitLabel: messages().sendToAgent }],
     }
     noticeSet(id, { session, handle: undefined, at: now() })
     track.ended = undefined
@@ -148,7 +148,7 @@ export function createResultNotifier({ ctx, log, channel, settings, now = () => 
       retired += 1
       if (notice.handle === undefined) continue
       void Promise.resolve(channel.update(notice.handle, {
-        title: `${settings().titlePrefix} 结果`,
+        title: `${settings().titlePrefix} ${messages().resultTitle}`,
         tone: 'muted',
         body: [headline],
         buttons: [],
@@ -176,7 +176,7 @@ export function createResultNotifier({ ctx, log, channel, settings, now = () => 
       // Somebody spoke — at the desk or from the phone. Whatever the notice
       // carried is no longer the session's latest word, so it stops taking
       // replies instead of injecting one into a conversation that moved on.
-      retire(session.id, '**该结果已有新消息**，这条通知不再接受回复。')
+      retire(session.id, messages().readerSpoke)
     }
     if (event.type === 'assistant/message' && event.surfaceOp === 'append') {
       const blocks = event.data?.message?.content ?? []
@@ -213,22 +213,22 @@ export function createResultNotifier({ ctx, log, channel, settings, now = () => 
     const id = typeof payload?.nid === 'string' ? payload.nid : undefined
     if (id === undefined) return undefined
     const notice = notices.get(id)
-    if (notice === undefined) return { toast: '该结果已过期', accepted: false }
+    if (notice === undefined) return { toast: messages().noticeGone, accepted: false }
     const text = typeof values?.[INSTRUCTION_FIELD] === 'string' ? values[INSTRUCTION_FIELD].trim() : ''
-    if (text === '') return { toast: '指令为空，未发送', accepted: false }
+    if (text === '') return { toast: messages().emptyInstruction, accepted: false }
     // An old notice stops being an offer even when nothing replaced it.
     if (now() - notice.at > settings().resultNoticeTtlSeconds * 1000) {
-      retire(notice.session, '**这条通知已过期**，不再接受回复。')
-      return { toast: '该通知已过期', accepted: false }
+      retire(notice.session, messages().noticeExpired)
+      return { toast: messages().noticeTtlPassed, accepted: false }
     }
     const agent = ctx.get?.('agents')?.get?.(notice.session)
     if (agent === undefined) {
-      return { toast: '会话已不在运行，指令未发送', accepted: false }
+      return { toast: messages().noAgent, accepted: false }
     }
     // Claim before sending: the first submission wins and the rid dies here.
     notices.delete(id)
     void send(agent, text, notice)
-    return { toast: '已发送给 agent', accepted: true }
+    return { toast: messages().sent, accepted: true }
   }
 
   /** Deliver one instruction, then record it on the notice's own message. */
@@ -250,9 +250,9 @@ export function createResultNotifier({ ctx, log, channel, settings, now = () => 
       log.info('已把手机上的指令排入会话。')
       if (notice.handle !== undefined) {
         await Promise.resolve(channel.update(notice.handle, {
-          title: `${settings().titlePrefix} 结果`,
+          title: `${settings().titlePrefix} ${messages().resultTitle}`,
           tone: 'success',
-          body: ['**已收到指令**，已排入该会话。'],
+          body: [messages().received],
           buttons: [],
           forms: [],
         })).catch(error => { log.warn('结果卡片改写失败', error) })

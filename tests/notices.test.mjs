@@ -207,3 +207,26 @@ test('a notice past its window stops taking replies', async () => {
   assert.deepEqual(followed, [], 'an expired notice injects nothing')
 })
 
+test('the notice copy follows the deployment language', async () => {
+  const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle', locale: 'en' })
+  await bind(route, { openId: 'ou_scanner' })
+  const followed = []
+  agents.set('s_en', { status: 'idle', followup: (message) => { followed.push(message) } })
+  const emit = listenerOf('session/event').handler
+
+  runTurn(emit, 's_en', 'The build passed.')
+  await sleep(1100)
+  const card = sentCard()
+  const rendered = JSON.stringify(card)
+  assert.match(rendered, /Result/)
+  assert.match(rendered, /Reply to this message/)
+  assert.match(rendered, /Send to the agent/)
+
+  const submit = callbackValues(card).find(value => value.submit === true)
+  const settled = await clickCard(submit, { value: 'Ship it.' })
+  assert.equal(settled.toast.content, 'Sent to the agent')
+  await sleep(10)
+  assert.equal(followed.length, 1)
+})
+
+

@@ -25,6 +25,7 @@
 #       resultNotifyCooldownSeconds: 600
 #       mirrorTtlSeconds: 60
 #       resultNoticeTtlSeconds: 1800
+#       locale: zh
 
 - insert:
     - id: pocket-console

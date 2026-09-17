@@ -26,11 +26,11 @@ const FORM_CUSTOM_FIELD = 'custom'
 
 /**
  * Create the escalation state machine.
- * @param options - the logger, the channel, the settings and mirror thunks, and
- *   whether the channel is closed for new work.
+ * @param options - the logger, the channel, the settings, mirror, and copy
+ *   thunks, and whether the channel is closed for new work.
  * @returns the answerer, the action router, the pending report, and disposal.
  */
-export function createEscalation({ log, channel, settings, mirror, isClosed = () => false }) {
+export function createEscalation({ log, channel, settings, mirror, messages, isClosed = () => false }) {
   /** Live escalations keyed by the opaque id embedded in their action payloads. */
   const open = new Map()
   /** Set by close(): an escalation started after disposal must not arm a timer. */
@@ -46,7 +46,7 @@ export function createEscalation({ log, channel, settings, mirror, isClosed = ()
     const flat = String(value ?? '')
     return flat.length <= settings().maxDetailChars
       ? flat
-      : `${flat.slice(0, settings().maxDetailChars)}\n…（内容过长已截断）`
+      : `${flat.slice(0, settings().maxDetailChars)}\n${messages().truncated}`
   }
 
   /** Whether this request can be fully answered from a channel message. */
@@ -65,21 +65,22 @@ export function createEscalation({ log, channel, settings, mirror, isClosed = ()
    * @returns the view handed to the channel.
    */
   const buildView = (record) => {
+    const copy = messages()
     if (record.kind === 'approval') {
       const { toolName, callId, reason } = record.request
-      const body = [`**工具**：\`${toolName}\``]
-      if (callId !== undefined) body.push(`**调用 ID**：\`${callId}\``)
-      if (reason !== undefined && reason !== '') body.push(`**原因**：${clip(reason)}`)
+      const body = [copy.toolLabel(toolName)]
+      if (callId !== undefined) body.push(copy.callIdLabel(callId))
+      if (reason !== undefined && reason !== '') body.push(copy.reasonLabel(clip(reason)))
       body.push(settings().delaySeconds === 0
-        ? '桌面与手机同时可答，先到者生效。批准仅对本次调用生效。'
-        : `桌面 ${settings().delaySeconds} 秒内未应答，已升级到手机。批准仅对本次调用生效。`)
+        ? copy.approvalLive
+        : copy.approvalUpgraded(settings().delaySeconds))
       return {
-        title: `${settings().titlePrefix} 工具审批`,
+        title: `${settings().titlePrefix} ${copy.approvalTitle}`,
         tone: 'warning',
         body,
         buttons: [
-          { payload: { rid: record.id, v: ALLOW }, label: '批准一次', tone: 'primary' },
-          { payload: { rid: record.id, v: REJECT }, label: '拒绝', tone: 'danger' },
+          { payload: { rid: record.id, v: ALLOW }, label: copy.allowOnce, tone: 'primary' },
+          { payload: { rid: record.id, v: REJECT }, label: copy.reject, tone: 'danger' },
         ],
         forms: [],
       }
@@ -92,7 +93,7 @@ export function createEscalation({ log, channel, settings, mirror, isClosed = ()
     const forms = []
     // More than one question is the only case where progress is not obvious.
     if (questions.length > 1) {
-      body.push(`**进度**：已答 ${recorded.size}/${questions.length}`)
+      body.push(copy.progress(recorded.size, questions.length))
     }
     for (const question of questions) {
       const heading = question.header === undefined ? '' : `**${question.header}**`
@@ -103,7 +104,7 @@ export function createEscalation({ log, channel, settings, mirror, isClosed = ()
         body.push([
           heading,
           question.question,
-          `✅ ${answer.custom ?? answer.selected.join('、')}`,
+          `✅ ${answer.custom ?? answer.selected.join(copy.selectionSeparator)}`,
         ].filter(Boolean).join('\n\n'))
         continue
       }
@@ -117,7 +118,7 @@ export function createEscalation({ log, channel, settings, mirror, isClosed = ()
       // A button label carries no room for an option's description, so the
       // body holds the legend and the buttons stay the answer controls.
       if (options.some(option => option.description !== undefined && option.description !== '')) {
-        body.push(['**选项**', ...options.map((option, index) => {
+        body.push([copy.optionsLegend, ...options.map((option, index) => {
           const description = option.description === undefined || option.description === ''
             ? ''
             : ` — ${clip(option.description)}`
@@ -137,7 +138,7 @@ export function createEscalation({ log, channel, settings, mirror, isClosed = ()
                 customFieldId: FORM_CUSTOM_FIELD,
               }),
           multiSelect: question.multiSelect === true,
-          submitLabel: '提交本题',
+          submitLabel: copy.submitAnswer,
         })
         continue
       }
@@ -154,11 +155,11 @@ export function createEscalation({ log, channel, settings, mirror, isClosed = ()
       forms.push({
         payload: { rid: record.id, q: question.id, submit: true },
         fieldId: FORM_VALUE_FIELD,
-        submitLabel: '提交其他回答',
+        submitLabel: copy.submitOther,
       })
     }
     return {
-      title: `${settings().titlePrefix} 提问`,
+      title: `${settings().titlePrefix} ${copy.questionTitle}`,
       tone: 'info',
       body,
       buttons,
@@ -168,7 +169,7 @@ export function createEscalation({ log, channel, settings, mirror, isClosed = ()
 
   /** The terminal view shown once a request has been decided. */
   const settledView = (record, headline, tone) => ({
-    title: `${settings().titlePrefix} ${record.kind === 'approval' ? '工具审批' : '提问'}`,
+    title: `${settings().titlePrefix} ${record.kind === 'approval' ? messages().approvalTitle : messages().questionTitle}`,
     tone,
     body: [headline],
     buttons: [],
@@ -230,7 +231,7 @@ export function createEscalation({ log, channel, settings, mirror, isClosed = ()
       return true
     }
 
-    record.onAbort = () => { record.complete(undefined, '该请求已取消', 'muted') }
+    record.onAbort = () => { record.complete(undefined, messages().cancelled, 'muted') }
     if (request.signal?.aborted === true) {
       record.complete(undefined, undefined, 'muted')
       return desktop
@@ -253,7 +254,7 @@ export function createEscalation({ log, channel, settings, mirror, isClosed = ()
 
     return Promise.race([
       Promise.resolve(desktop).then((outcome) => {
-        record.complete(undefined, '已在桌面端处理', 'success')
+        record.complete(undefined, messages().answeredAtDesk, 'success')
         return outcome
       }),
       record.settle.promise,
@@ -263,7 +264,7 @@ export function createEscalation({ log, channel, settings, mirror, isClosed = ()
   /** Answer one approval from an action payload. */
   const decodeApproval = (record, payload) => {
     if (payload?.v !== ALLOW && payload?.v !== REJECT) return undefined
-    const label = payload.v === ALLOW ? '已批准（仅本次）' : '已拒绝'
+    const label = payload.v === ALLOW ? messages().allowedOnce : messages().rejected
     // Only the answer that actually settles the request is mirrored: a click
     // arriving after the desktop already decided changes nothing.
     if (record.complete(payload.v, label, payload.v === ALLOW ? 'success' : 'danger')) {
@@ -309,19 +310,19 @@ export function createEscalation({ log, channel, settings, mirror, isClosed = ()
         void Promise.resolve(channel.update(record.handle, buildView(record)))
           .catch(error => { log.warn('message rewrite failed', error) })
       }
-      return { toast: `已记录 ${answered}/${total} 题` }
+      return { toast: messages().recorded(answered, total) }
     }
 
     const answers = record.request.questions
       .map(item => record.answers.get(item.id))
       .filter(Boolean)
-    const accepted = record.complete(
-      { answers },
-      `已回答：${clip(answers.map(item => `${item.id}=${item.custom ?? item.selected.join('/')}`).join('；'))}`,
-      'success',
-    )
+    const copy = messages()
+    const summary = clip(answers
+      .map(item => `${item.id}=${item.custom ?? item.selected.join('/')}`)
+      .join(copy.answerSeparator))
+    const accepted = record.complete({ answers }, copy.answered(summary), 'success')
     if (accepted) mirror.record(record, { answers })
-    return { toast: '已提交全部回答' }
+    return { toast: messages().answersSubmitted }
   }
 
 
@@ -343,11 +344,11 @@ export function createEscalation({ log, channel, settings, mirror, isClosed = ()
     handleAction(payload, values) {
       const id = typeof payload?.rid === 'string' ? payload.rid : undefined
       const record = id === undefined ? undefined : open.get(id)
-      if (record === undefined) return { toast: '该请求已处理或已过期', accepted: false }
+      if (record === undefined) return { toast: messages().requestGone, accepted: false }
       const outcome = record.kind === 'approval'
         ? decodeApproval(record, payload)
         : decodeQuestion(record, payload, values)
-      if (outcome === undefined) return { toast: '无法识别该操作', accepted: false }
+      if (outcome === undefined) return { toast: messages().actionUnknown, accepted: false }
       return { toast: outcome.toast, accepted: true }
     },
     /**

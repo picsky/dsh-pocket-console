@@ -57,7 +57,7 @@ const TEMPLATES = {
  * @param raw - `channelConfig` from the plugin entry.
  * @returns the resolved settings.
  */
-function resolveConfig(raw) {
+function resolveConfig(raw, messages) {
   const config = raw ?? {}
   return {
     appIdRef: config.appIdRef ?? 'DSH_FEISHU_APP_ID',
@@ -66,7 +66,7 @@ function resolveConfig(raw) {
     receiveId: config.receiveId,
     receiveIdType: config.receiveIdType ?? 'open_id',
     appName: config.appName ?? 'DSH Pocket Console',
-    appDesc: config.appDesc ?? '把 DeepSeek Harness 的工具审批与提问送到飞书',
+    appDesc: config.appDesc ?? messages().appDescription,
     createOnly: config.createOnly ?? true,
   }
 }
@@ -88,7 +88,7 @@ const button = (label, tone, payload) => ({
  * @param view - the view built by the core.
  * @returns the card document.
  */
-function renderCard(view) {
+function renderCard(view, messages) {
   const elements = view.body.map(content => ({ tag: 'markdown', content }))
 
   // One button per row: side by side halves every label, which cuts off the
@@ -110,7 +110,7 @@ function renderCard(view) {
       name: `form_${index}_${form.fieldId}`,
       elements: [
         form.options === undefined
-          ? { tag: 'input', name: form.fieldId, placeholder: plainText('输入回答') }
+          ? { tag: 'input', name: form.fieldId, placeholder: plainText(messages().answerPlaceholder) }
           : {
               tag: 'checker',
               name: form.fieldId,
@@ -123,7 +123,7 @@ function renderCard(view) {
         // pair the desktop card offers; one submit carries both names.
         ...(form.customFieldId === undefined
           ? []
-          : [{ tag: 'input', name: form.customFieldId, placeholder: plainText('补充说明（可选）') }]),
+          : [{ tag: 'input', name: form.customFieldId, placeholder: plainText(messages().notePlaceholder) }]),
         {
           ...button(form.submitLabel, 'primary', form.payload),
           form_action_type: 'submit',
@@ -146,8 +146,8 @@ function renderCard(view) {
  * @param context - core-provided host: `ctx`, resolved `config`, `binding`, `log`.
  * @returns the channel contract this core consumes.
  */
-export async function create({ ctx, config: rawConfig, binding, log }) {
-  const config = resolveConfig(rawConfig)
+export async function create({ ctx, config: rawConfig, binding, log, messages }) {
+  const config = resolveConfig(rawConfig, messages)
   const appIdRef = credentialRef(config.appIdRef)
   const appSecretRef = credentialRef(config.appSecretRef)
 
@@ -172,7 +172,7 @@ export async function create({ ctx, config: rawConfig, binding, log }) {
       const bound = (await recipient().catch(() => undefined))?.id
       if (typeof sender !== 'string' || sender === '' || sender !== bound) {
         log.debug('忽略非接收人的卡片操作。')
-        return { toast: { type: 'warning', content: '只有绑定的接收人可以操作' } }
+        return { toast: { type: 'warning', content: messages().notRecipient } }
       }
       const settled = await onAction?.({
         payload: action?.value,
@@ -180,7 +180,7 @@ export async function create({ ctx, config: rawConfig, binding, log }) {
         messageId: data?.context?.open_message_id,
         sender,
       })
-      if (settled === undefined) return { toast: { type: 'warning', content: '该请求已失效' } }
+      if (settled === undefined) return { toast: { type: 'warning', content: messages().requestExpired } }
       return { toast: { type: settled.accepted ? 'success' : 'warning', content: settled.toast } }
     },
     'im.message.receive_v1': async (data) => {
@@ -397,7 +397,7 @@ export async function create({ ctx, config: rawConfig, binding, log }) {
         data: {
           receive_id: id,
           msg_type: 'interactive',
-          content: JSON.stringify(renderCard(view)),
+          content: JSON.stringify(renderCard(view, messages)),
         },
       })
       return response?.data?.message_id
@@ -406,7 +406,7 @@ export async function create({ ctx, config: rawConfig, binding, log }) {
       if (handle === undefined) return
       await transport?.client.im.message.patch({
         path: { message_id: handle },
-        data: { content: JSON.stringify(renderCard(view)) },
+        data: { content: JSON.stringify(renderCard(view, messages)) },
       })
     },
     close() {
