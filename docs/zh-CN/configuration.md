@@ -1,5 +1,7 @@
 # 配置
 
+[← 全部文档](../README.md)
+
 所有配置都有默认值，开箱即用。这一页是"想改某一项"时的参考。英文版为
 [../configuration.md](../configuration.md)。
 

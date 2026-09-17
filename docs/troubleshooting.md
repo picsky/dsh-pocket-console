@@ -1,5 +1,7 @@
 # Troubleshooting
 
+[← All documentation](README.md)
+
 Symptoms in the order you are likely to meet them: installing, first binding, then
 cards that arrive or do not.
 

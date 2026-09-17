@@ -37,68 +37,38 @@ dsh web
 
 ## The real-composition check
 
-`npm test` builds its own context. That is the right shape for behaviour and the
-wrong shape for activation: a hand-built context does not enforce Cordis's
-service rules, so a plugin that reads an undeclared service, misnames an export,
-or never activates still passes — and then fails on the machine that installed
-it. `npm run e2e` packs the tree with `pnpm` (the tool a release publishes with,
-so the tarball it installs is the one a release builds), installs that tarball into
-a scratch `DSH_HOME`, boots the real `dsh web`, exchanges the printed launch token
-for the browser cookie, and reads `/__pocket/state` with it — and checks the same
-route refuses the same request without that cookie. It needs `pnpm install` first
-(the tarball bundles its transport), the `dsh` release the plugin is verified
-against (`npm install -g @deepseek-ai/dsh@0.1.6-alpha.1`), and a network for that
-install; everything else stays on the machine. CI runs it in the `composition`
-job.
+`npm test` builds its own context, and that is the wrong shape for activation: a hand-built
+context does not enforce Cordis's service rules, so a plugin that reads an undeclared
+service, misnames an export, or never activates still passes — and then fails on the machine
+that installed it. `npm run e2e` is the check that closes that gap, by installing the packed
+tarball into a scratch `DSH_HOME` and booting the real `dsh web`.
 
-## Publishing
+It is what CI's `composition` job runs, and [docs/development.md](docs/development.md) says
+what it does at each step and what it needs. `npm test` staying green is not a substitute
+for it: a change that touches activation, the manifest, or the published file list wants
+both.
 
-See [docs/releasing.md](docs/releasing.md) for the tag-driven release, the one-time
-trusted-publisher setup on npm, and what the workflow checks before it publishes.
+## Publishing and releasing
 
-The short version:
+Maintainer work, and it has one home: [docs/releasing.md](docs/releasing.md). That page
+covers the one-time trusted-publisher setup on npm, what the tag-driven workflow checks
+before it publishes, how to publish by hand when the workflow cannot run, and what to do
+when npm itself falls over.
 
-The published tarball must carry every runtime library inside it. `package.json`'s
-`bundleDependencies` embeds `@larksuiteoapi/node-sdk` — and through it
-`protobufjs`, `axios`, and `ws` — and `qrcode` as well, so a consumer's profile resolves nothing that
-needs a build permission. Packing without an install produces a tarball with
-none of it and no warning, so `scripts/verify-pack.mjs` refuses from `prepack`.
+Two things about the payload are worth knowing from here, because they constrain what a
+change may do rather than only how a release is cut:
 
-```sh
-pnpm install     # the one step that needs the network, and what fills the bundle payload
-pnpm test
-pnpm publish     # or: pnpm pack, then dsh plugin add ./dsh-pocket-console-<version>.tgz
-```
+**The published tarball must carry every runtime library inside it.**
+`package.json`'s `bundleDependencies` embeds `@larksuiteoapi/node-sdk` — and through it
+`protobufjs`, `axios`, and `ws` — and `qrcode` as well, so a consumer's profile resolves
+nothing that needs a build permission. Packing without an install produces a tarball with
+none of it and no warning, which is why `scripts/verify-pack.mjs` refuses from `prepack`.
 
-`pnpm-workspace.yaml` pins the hoisted linker the bundle needs and declines
-`protobufjs`'s no-op postinstall for this repository's own install — the same
-decision a consumer installing from git has to make for themselves.
-
-## Releasing
-
-The first release is published by hand, because npm configures trusted
-publishing on a package that already exists:
-
-```sh
-pnpm install
-pnpm test
-pnpm publish     # needs a credential this machine can use: `npm login`, or a
-                 # granular access token with "Bypass 2FA" enabled
-```
-
-Every release after that is token-free. `.github/workflows/release.yml`
-publishes on a `v*` tag through npm's **trusted publishing**: the job exchanges
-its GitHub OIDC identity for a short-lived credential, so no token lives in this
-repository, in a secret, or on a maintainer's machine.
-
-One-time setup, on npm: the package's settings → **Trusted Publisher** → GitHub
-Actions, naming repository `picsky/dsh-pocket-console` and workflow
-`release.yml`. Then:
-
-```sh
-npm version patch        # or minor / major; commits and tags the bump
-git push --follow-tags
-```
+**Only `pnpm` can build that tarball.** `pnpm-workspace.yaml` pins the hoisted linker the
+bundle needs and declines `protobufjs`'s no-op postinstall for this repository's own
+install — the same decision a consumer installing from git has to make for themselves. A
+tarball built by `npm pack` is refused by the registry outright; `docs/releasing.md` says
+why.
 
 ## What a change needs
 
@@ -144,13 +114,20 @@ check:parity` refuses a *published* document that links into it: this file is pu
 so it names the path rather than linking it. That boundary is the point — a note a
 reader of the package needs belongs in `docs/`, not there.
 
-**Docs in both languages.** `README.md` is English and the primary document;
-`README.zh-CN.md` is its counterpart. Update both. They are the only bilingual
-documents: `docs/` (the reference pages and the decision records), `SECURITY.md`,
-`CHANGELOG.md`, this file, and `providers/README.md` are English-only, on the same
-reasoning that the source, the commit messages, and the issue tracker are — one copy
-to keep true. `README.zh-CN.md` says so, and a request for a translated page is a
-worthwhile issue rather than a silent gap.
+**Docs in both languages, or in one with a reason.** `README.md` is English and the
+primary document; `README.zh-CN.md` is its counterpart, and a change to one belongs in the
+other. Two reference pages are also paired: `docs/configuration.md` with
+`docs/zh-CN/configuration.md`, and `docs/troubleshooting.md` with
+`docs/zh-CN/troubleshooting.md`. Everything else — the decision records,
+`docs/development.md`, `docs/releasing.md`, `SECURITY.md`, `CHANGELOG.md`, this file — is
+English only, on the same reasoning that the source, the commit messages, and the issue
+tracker are: one copy to keep true. `README.zh-CN.md` says so at the top, and a request
+for another translated page is a worthwhile issue rather than a silent gap.
+
+`providers/README.md` is the exception, and it is the wrong way round: the channel
+contract is written in Chinese while every document around it is English, so a reader who
+follows the link from either README meets a wall. It is being translated; until then, treat
+a Chinese page in an English-only set as a defect rather than a precedent.
 
 **A new setting touches six places**, and `npm run check:parity` refuses to pass
 until they agree: the `Config` schema in `index.js`, the `SectionSchema` the
@@ -187,8 +164,10 @@ Open an [issue](https://github.com/picsky/dsh-pocket-console/issues) with:
 - the plugin's log lines (the `pocket-console:` prefixed ones)
 - what you expected and what happened
 
-For a security issue, do not open a public issue — email the maintainer
-listed on the repository profile.
+For a security issue, do not open a public issue, a discussion, or a pull request.
+[SECURITY.md](SECURITY.md) is the channel: GitHub's private vulnerability reporting, which
+keeps the report private while it is worked on. That file also lists what is in scope and
+the invariants a report should be measured against.
 
 ## License
 

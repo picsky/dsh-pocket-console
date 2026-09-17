@@ -1,5 +1,7 @@
 # Releasing
 
+[← All documentation](README.md)
+
 Publishing runs from a tag through npm's **trusted publishing**: the workflow
 exchanges its GitHub OIDC identity for a short-lived publish credential, so no
 npm token exists in this repository, in a secret, or on anyone's machine, and
@@ -40,11 +42,51 @@ The tag starts the workflow, which:
 
 1. requires the tag to name `package.json`'s version, and the run to be a tag at
    all — a manual dispatch from a branch is refused;
-2. runs `npm run check:parity`, so the one setting that lives in six places cannot
+2. proves the job holds **no publish token**, so the OIDC exchange is the only
+   credential it can be using: a stray `NODE_AUTH_TOKEN` or `NPM_TOKEN` fails the run
+   rather than silently turning it back into a token publish;
+3. runs `npm run check:parity`, so the one setting that lives in six places cannot
    ship disagreeing, and no published document links to a file the tarball lacks;
-3. runs the suite;
-4. runs `npm publish --provenance`, whose `prepack` refuses a tarball that lost a
-   bundled library or would import a module `files` does not publish.
+4. runs the suite;
+5. runs `npm publish --provenance`, whose `prepack` refuses a tarball that lost a
+   bundled library or would import a module `files` does not publish;
+6. reads the version back off the registry and fails if it carries **no provenance
+   attestation** — the release asserts what it claims instead of trusting that the
+   previous step meant it.
+
+## Publishing by hand
+
+The workflow is the path. This is the fallback for when it cannot run — the trusted
+publisher is not configured yet, the tag build is broken while the release is not, or npm
+is having a bad day. **The last release, 0.7.7, was published this way**, because the
+workflow was failing at the publish step, so this is a route that has been used rather
+than a theoretical one.
+
+**Use `pnpm publish`, not `npm publish`.** Two separate reasons, and both are fatal:
+
+- **`npm publish` cannot pack this tree at all.** pnpm hard-links its store into
+  `node_modules`, so a tarball built by `npm pack` carries hard-link entries — 1047 of its
+  1133 files. The registry refuses it with `E415 Hard link is not allowed`, because a
+  hard-linked file in a package is a known supply-chain trick. `pnpm pack` writes the same
+  content with no link entries. The repository's own `pnpm-workspace.yaml` sets
+  `nodeLinker: hoisted` for the bundled transport, but that controls *layout*, not how
+  pnpm copies from its store.
+- **The bundled transport is packed from the tree `pnpm install` created**, so the payload
+  a release ships is the payload `pnpm pack` builds. `npm run e2e` packs with `pnpm` for
+  the same reason.
+
+```sh
+pnpm install          # the one step that needs the network, and what fills the bundle payload
+npm test
+pnpm publish          # needs a credential this machine can use: `npm login`, or a
+                      # granular access token with "Bypass 2FA" enabled
+```
+
+Two things a hand publish does **not** get you, and both are worth knowing before choosing
+it: npm generates **no provenance attestation** off a supported CI provider (`npm publish
+--provenance` fails with `Automatic provenance generation not supported for provider:
+null`), and nothing checked the tag against the version first. Verify the version landed
+afterwards — see below.
 
 ## When npm itself falls over
 
@@ -68,16 +110,20 @@ what actually happened:
   again is refused as a duplicate, and re-running the job is the safe move when it
   did not land.
 
-To publish by hand instead, use `pnpm publish` (see CONTRIBUTING) and not `npm
-publish`: the tarball's bundled transport is packed from the tree `pnpm install`
-created.
+One more way the local tooling misleads: a client can print its success line for a publish
+the registry never accepted. **Read the registry, not the tool's summary** — a version is
+published when `pnpm view dsh-pocket-console versions` lists it.
 
 ## After publishing
 
 ```sh
+pnpm view dsh-pocket-console versions      # the registry, which is the authority
 dsh plugin --profile web add dsh-pocket-console@<version>
 ```
 
 The registry's metadata cache can serve the previous release for a few minutes
 after a publish; `pnpm view dsh-pocket-console versions` shows what the registry
 is reporting before the install is retried.
+
+Then, if the release went out by hand, check that CI publishes the **next** one — the
+workflow only proves itself when it is the thing doing the work.

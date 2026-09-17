@@ -12,9 +12,10 @@
 
 > **非官方项目。** 由社区成员独立开发和维护，与 DeepSeek 无隶属关系，也未经过其审核或推荐。安装任何第三方插件前请自行甄别。
 
-> **关于语言**：`README.md` 与本文是双语的入口文档。`docs/` 下的参考页（配置、故障排查、
-> 开发、架构决策）以及 `SECURITY.md`、`CHANGELOG.md`、`CONTRIBUTING.md`、`providers/README.md`
-> 目前只有英文——源码、提交信息与 issue 也一律用英文，这样维护上只有一份要同步。
+> **关于语言**：`README.md` 与本文是双语的入口文档。另有**三页**也做了中英对照：
+> 配置、故障排查、通道契约（`docs/zh-CN/` 下）。其余文档——`docs/development.md`、
+> `docs/releasing.md`、`docs/decisions/`、`SECURITY.md`、`CHANGELOG.md`、`CONTRIBUTING.md`
+> ——目前只有英文，理由和源码、提交信息、issue 用英文一样：只维护一份才不会漂移。
 > 需要哪一页中文，开个 issue 说一声即可。
 
 ---
@@ -353,12 +354,13 @@ npm test
 |---|---|
 | [docs/zh-CN/configuration.md](docs/zh-CN/configuration.md) | 每一项配置、默认值，以及哪些能在设置卡片里运行时修改 |
 | [docs/zh-CN/troubleshooting.md](docs/zh-CN/troubleshooting.md) | 安装、绑定，以及卡片收不到的情况 |
+| [docs/zh-CN/providers.md](docs/zh-CN/providers.md) | 通道契约：写一个飞书之外的传输需要实现什么 |
 | [docs/development.md](docs/development.md) | 测试套件、真实装配检查、对着运行中的部署调试 |
 | [docs/decisions/](docs/decisions/) | 插件为什么长成这样，一个决定一篇记录 |
 | [SECURITY.md](SECURITY.md) | 本插件声明的安全不变式，以及如何上报其中的漏洞 |
 | [CHANGELOG.md](CHANGELOG.md) | 每个版本改了什么 |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 一个改动落地前需要满足什么 |
-| [providers/README.md](providers/README.md) | 通道契约，写给飞书之外的传输 |
+| [providers/README.md](providers/README.md) | 同一份契约的英文主文档 |
 
 ## 许可
 

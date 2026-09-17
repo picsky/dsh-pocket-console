@@ -1,127 +1,156 @@
-# 通道契约（Channel contract）
+# Channel contract
 
-`pocket-console` 的核心只负责：两条 answerer seam、升级计时器、待决注册表、决策解码，
-以及设置命名空间和浏览器卡片调用的同源路由。
-**消息怎么送到手机上、按钮怎么点回来，全部由通道模块负责。**
-换通道 = 新增一个模块 + 改 `channel` 配置项，**不需要改核心**。
+The core of `pocket-console` owns: the two answerer seams, the escalation timer, the
+pending registry, decision decoding, and the settings namespace with the same-origin routes
+the browser card calls.
+**How a message reaches the phone, and how a button press comes back, belongs entirely to
+the channel module.**
+Changing channel = adding one module + pointing the `channel` setting at it. **The core is
+not touched.**
 
-## 模块形状
+中文版：[docs/zh-CN/providers.md](../docs/zh-CN/providers.md)
 
-通道模块是一个 ESM 文件，导出：
+## Shape of a module
+
+A channel is one ESM file exporting:
 
 ```js
-export async function create({ ctx, config, binding, log }) {
+export async function create({ ctx, config, binding, log, messages }) {
   return channel
 }
 ```
 
-| 入参 | 说明 |
+| Argument | Meaning |
 |---|---|
-| `ctx` | Host context。需要 `credentials` 时可自行解析凭据。 |
-| `config` | `channelConfig` 原样透传，**由通道自己解释与校验**（字段集因通道而异）。 |
-| `messages` | 卡片文案字典的读取函数（`() => ({ … })`），随部署的 `locale` 变化。**所有面向用户的文案都从这里取**，语言格式（数字、分隔符、标点）也归它。
-| `binding` | 接收人持久化：`{ read(): Promise<string\|undefined>, write(id): Promise<void>, clear(): Promise<void> }`。底层是本插件的凭据记录，跨重启保留。通道若不需要可忽略。 |
-| `log` | `{ info(message), warn(message, error), debug(message) }`。 |
+| `ctx` | Host context. Resolve credentials from it yourself if the channel needs `credentials`. |
+| `config` | `channelConfig` passed through verbatim. **The channel interprets and validates it** — the field set differs per transport. |
+| `messages` | Reader for the card copy dictionary (`() => ({ … })`), which follows the deployment's `locale`. **Every reader-facing string comes from here**, including language-specific formatting (numbers, separators, punctuation). |
+| `binding` | Recipient persistence: `{ read(): Promise<string\|undefined>, write(id): Promise<void>, clear(): Promise<void> }`. Backed by this plugin's credential record, so it survives a restart. A channel that does not need it may ignore it. |
+| `log` | `{ info(message), warn(message, error), debug(message) }`. |
 
-## channel 对象
+## The `channel` object
 
-| 成员 | 必需 | 说明 |
+| Member | Required | Meaning |
 |---|---|---|
-| `available()` | 否 | 当前能否投递。返回 `false` 时核心**不挂计时器、不升级**，桌面链路保持权威。缺省视为始终可用。 |
-| `supportsForms` | 是 | 能否渲染表单并回传多选/自由文本。`false` 时核心只升级"全是单选选项"的提问，其余留给桌面。 |
-| `deliver(view)` | 是 | 投递一条消息，resolve 出不透明句柄（供 `update` 使用）。失败请抛错——核心会记警告并回落到桌面。 |
-| `update(handle, view)` | 否 | 用新视图替换已投递的消息。缺失时决策后不回报结果。 |
-| `subscribe(onAction)` | 是 | 订阅用户操作。返回取消订阅的函数。 |
-| `close()` | 否 | 释放传输资源。 |
+| `available()` | no | Whether it can deliver right now. On `false` the core **arms no timer and does not escalate**, leaving the desktop chain authoritative. Absent means always available. |
+| `supportsForms` | yes | Whether it can render forms and return multi-select answers or free text. On `false` the core escalates only questions that are *entirely single-select options*; anything else is left to the desktop. |
+| `deliver(view)` | yes | Deliver one message, resolving to an opaque handle for `update`. **Throw on failure** — the core logs a warning and falls back to the desktop. |
+| `update(handle, view)` | no | Replace an already-delivered message with a new view. Without it, a decision is not reported back to the card. |
+| `subscribe(onAction)` | yes | Subscribe to user actions. Returns the unsubscribe function. |
+| `close()` | no | Release transport resources. |
 
-### 上手（enrollment，均为可选）
+### Enrollment (all optional)
 
-需要"扫码绑定"这类一次性上手的通道额外实现这三个成员；不需要上手的通道
-（例如一个固定的 webhook URL）全部省略即可。
+A channel that needs one-time onboarding — "scan to bind" — implements these three
+additional members. A channel that needs none of it (a fixed webhook URL, say) omits them
+all.
 
-| 成员 | 说明 |
+| Member | Meaning |
 |---|---|
-| `enrollmentState()` | 返回当前状态：`{ state: 'unbound' \| 'starting' \| 'awaiting' \| 'bound' \| 'failed', stage?, recipient?, verifyUrl?, expiresIn?, message?, appId?, connected?, slow?, persisted?, persistError? }`。**不得包含任何密钥**（`appId` 不是密钥，它是应用的名字）。`bound` 只允许在**传输真的能收事件之后**发布，并持续反映连接是否在线——卡片把"连上了"当作事实来显示，含糊的乐观状态正是用户无法判断成败的原因。`starting` 时用 `stage: 'creating' \| 'connecting'` 说明在等什么：等二维码（还在创建应用）还是等长连接握手；`slow` 表示这一等已经异常久。卡片据此给出不同文案——**点击后必须立刻能看到"在处理中"**，否则用户无法区分"卡住了"和"正在做"。 |
-| `beginEnrollment(mode?)` | 启动上手流程。必须**幂等**：设备授权轮询会比触发它的 HTTP 请求活得更久，进行中的那一轮要共享而不是每次重启。**返回前先发布等待状态**（返回可以是 Promise）：二维码要一个网络往返才回来，若等 `connect` 自己发布，触发它的那次点击回的就是"它替换掉的那个状态"，卡片上什么都看不到。已经连着传输时直接返回现状，不要再开第二条连接。 |
-| `adoptCredentials({ appId, appSecret })` | 可选：用**用户已有的应用凭据**直接绑定。必须先向平台校验这组凭据再建立连接——长连接的握手对错误凭据是**重试而不是报错**，只有这一次校验能让卡片说出原因；被平台拒绝的凭据不要留在凭据库里，平台不可达时则保留。凭据属于打开它的那条连接，所以换应用时要关掉旧连接。 |
-| `clearEnrollment()` | 撤销绑定与凭据，回到 `unbound`。 |
-| `resume()` | **只用已存凭据重连**，不启动任何上手流程；没有凭据时保持 `unbound` 并返回当前状态。核心在插件加载时调用它，因为"重启后还要点一次绑定"不是用户该承担的事。 |
+| `enrollmentState()` | The current state: `{ state: 'unbound' \| 'starting' \| 'awaiting' \| 'bound' \| 'failed', stage?, recipient?, verifyUrl?, expiresIn?, message?, appId?, connected?, slow?, persisted?, persistError? }`. **It must not carry any secret** (`appId` is not a secret; it is the app's name). `bound` may only be published **after the transport can actually receive events**, and it must keep reflecting whether the connection is up — the card presents "connected" as a fact, and a vague optimistic state is exactly why a user cannot tell success from failure. While `starting`, `stage: 'creating' \| 'connecting'` says what is being waited on: the QR code (the app is still being created) or the long-connection handshake; `slow` means that wait has run unusually long. The card gives different copy for each — **a click must show "working on it" immediately**, or the user cannot tell "stuck" from "in progress". |
+| `beginEnrollment(mode?)` | Start onboarding. Must be **idempotent**: the device-authorization poll outlives the HTTP request that triggered it, so an in-flight run is shared rather than restarted per call. **Publish the waiting state before returning** (the return value may be a Promise): the QR code is one network round trip away, and if publishing waits for `connect`, the click that triggered it answers with *the state it replaced* and the card shows nothing. When a transport is already connected, return the current state instead of opening a second connection. |
+| `adoptCredentials({ appId, appSecret })` | Optional: bind directly with **credentials the user already has**. The pair must be checked against the platform *before* connecting — the long-connection handshake **retries** a wrong pair instead of failing, and this one check is what lets the card state the reason. Do not keep a pair the platform rejected; keep one when the platform was unreachable. Credentials belong to the connection opened with them, so switching app means closing the old connection. |
+| `clearEnrollment()` | Revoke the binding and the credentials, returning to `unbound`. |
+| `resume()` | **Reconnect using stored credentials only**, starting no onboarding. With nothing stored, stay `unbound` and return the current state. The core calls this when the plugin loads, because "click bind again after a restart" is not something a user should have to do. |
 
-核心不会自动启动上手，除非 `webServer` 缺席——那时没有卡片可以询问，
-核心会直接调用 `beginEnrollment()` 并把链接打进日志。
-**有界面时由用户在设置卡片里点按钮触发。**
+The core never starts onboarding by itself, with one exception: when `webServer` is absent
+there is no card to ask, so the core calls `beginEnrollment()` directly and prints the link
+to the log. **With a UI, the user triggers it from a button in the Settings card.**
 
-加载顺序是 `resume()` → 有界面则等待用户点按钮 → 无界面且仍未连接才 `beginEnrollment()`。
-所以一个已经绑定过的部署重启后应当**不打印任何链接、不需要点击**；`resume()` 里
-唯一允许的日志是失败时的警告。
+The load order is `resume()` → wait for the user's click when there is a UI → `beginEnrollment()`
+only when there is no UI and still no connection. So a deployment that has already bound
+should, after a restart, **print no link and need no click**; the only log line `resume()` may
+emit is a warning when it fails.
 
-## 日志
+## Logging
 
-通道要用宿主给的 `log`（`info` / `warn` / `debug`）说话，**不要**让第三方 SDK 直接往终端打印。
-SDK 通常提供 `logger` 与 `loggerLevel`：把它的日志接进 `log.warn` / `log.debug`，
-就让**部署自己的日志级别**决定谁能看到什么，而不是替所有部署决定。
-飞书通道的具体做法：SDK 的启动横幅、每条连接步骤、事件分发器的就绪行都归到 `debug`，
-错误与警告归到 `warn`——正常运行时不刷屏，出问题时照样看得见。
+A channel speaks through the `log` the host hands it (`info` / `warn` / `debug`) and
+**must not** let a third-party SDK print to the terminal directly. SDKs usually expose
+`logger` and `loggerLevel`: route their output into `log.warn` / `log.debug` so that
+**the deployment's own level decides who sees what**, rather than the channel deciding for
+every deployment. What the Feishu channel does: the SDK's startup banner, each connection
+step, and the event dispatcher's ready line all go to `debug`; errors and warnings go to
+`warn` — quiet while it runs, still visible when something is wrong.
 
-## 视图（核心 → 通道）
+## Views (core → channel)
 
 ```js
 {
   title: string,
   tone: 'warning' | 'info' | 'success' | 'danger' | 'muted',
-  body: string[],            // 每项一个文本块
+  body: string[],            // one text block per entry
   buttons: [{ payload, label, tone: 'default' | 'primary' | 'danger' }],
   forms: [{
-    payload,                 // 提交时原样回传
-    fieldId,                 // 提交值到达 onAction(values) 时使用的键
-    options?,                // {label, value}[]；缺省渲染自由文本输入
-    customFieldId?,          // 同一次提交里再带回一个自由文本（多选题的"补充说明"）
+    payload,                 // echoed back verbatim on submit
+    fieldId,                 // the key the submitted value arrives under in onAction(values)
+    options?,                // {label, value}[]; absent renders a free-text input
+    customFieldId?,          // carries one extra free-text value in the same submission
     multiSelect: boolean,
     submitLabel: string,
   }],
 }
 ```
 
-## 操作（通道 → 核心）
+## Actions (channel → core)
 
-通道必须把 `payload` **原样**回传：
+A channel must echo `payload` back **verbatim**:
 
 ```js
 onAction({ payload, values, messageId, sender })
 ```
 
-- `payload`：用户按下的按钮所携带的 `payload`。
-- `values`：表单提交值，形如 `{ [fieldId]: string | string[] }`；非表单按钮时为 `undefined`。
-  一个表单可以同时声明 `fieldId` 与 `customFieldId`，那时两个键在同一次提交里一起到达——
-  多选题的选项与"补充说明"就是这样一起回传的。
-- `messageId`：通道自己的消息句柄，核心不用，供通道实现 `update` 时关联。
-- `sender`：**操作发起者在该通道上的身份**。核心不用它做授权，因为"谁能操作"是通道自己
-  的信任模型；飞书通道就是在这里校验它等于绑定接收人。
+- `payload` — the `payload` carried by the button the user pressed.
+- `values` — form submission, shaped `{ [fieldId]: string | string[] }`; `undefined` for a
+  non-form button. A form may declare both `fieldId` and `customFieldId`, in which case both
+  keys arrive in the same submission — that is how a multi-select answer and its "extra note"
+  travel together.
+- `messageId` — the channel's own message handle. The core does not use it; it is for the
+  channel to correlate when implementing `update`.
+- `sender` — **the acting user's identity on that channel**. The core does not use it for
+  authorization, because "who may act" is the channel's own trust model; the Feishu channel
+  checks here that it equals the bound recipient.
 
-返回值是 `{ toast, accepted }`，通道可据此给用户即时反馈（飞书里映射为 toast 弹窗）。
+The return value is `{ toast, accepted }`, which the channel uses for immediate feedback (in
+Feishu it maps to a toast popup).
 
-## 安全性要求
+## Security requirements
 
-核心已经做了这件事：`payload.rid` 一次性随机、结算后立即失效、
-选项必须来自该问题自己提供的标签。
-**通道的责任是**：
+The core already does its part: `payload.rid` is single-use and random, it dies the moment
+the request settles, and an answer must name a label the question actually offered.
+**The channel's responsibilities are:**
 
-- 不要自行解释或改写 `payload`，不要在没有用户交互时伪造 `onAction` 调用；
-- **校验操作者**：卡片是一张凭证，拿到消息的人都能按。手机上传回的答案会以人类归属进入会话
-  （`{ kind: 'user' }`），所以"这次点击确实来自绑定接收人"必须由通道自己确认——飞书通道
-  用回调里的 `operator.open_id` 对照接收人，不符则直接拒绝并且不调用 `onAction`。
+- Do not interpret or rewrite `payload`, and do not fabricate an `onAction` call without a
+  real user interaction.
+- **Verify the actor.** A card is a capability: whoever holds the message can press its
+  buttons. An answer that comes back from the phone enters the session with human
+  attribution (`{ kind: 'user' }`), so "this press really came from the bound recipient"
+  must be established by the channel itself — the Feishu channel compares the callback's
+  `operator.open_id` against the recipient, and on a mismatch refuses outright without
+  calling `onAction`.
+- **Do not accept a binding from anyone who can merely reach the bot.** The Feishu channel
+  binds only from a direct message to an unbound deployment, never from a group message and
+  never over an existing recipient — see
+  [ADR 0006](../docs/decisions/0006-binding-is-not-up-for-grabs.md). A channel whose
+  transport has a similar "the sender chooses themselves" path owns that same decision.
 
-## 现有通道
+## Shipping a channel as one file
 
-| 模块 | 传输 | 上手方式 |
+A channel is one file because that file is the unit this contract is measured in: a
+transport that is not Feishu is a new file under `providers/`, not a rewrite of the core.
+The reasoning, and what would change it, is recorded in
+[ADR 0009](../docs/decisions/0009-a-channel-is-one-file.md).
+
+## Existing channels
+
+| Module | Transport | Onboarding |
 |---|---|---|
-| `feishu.js` | 飞书长连接（WebSocket），只需出网 | **扫码一键创建应用**（OAuth 2.0 Device Authorization Grant），凭据与接收人自动落到凭据库 |
+| `feishu.js` | Feishu long connection (WebSocket); outbound reach is all it needs | **Scan to create an app in one click** (OAuth 2.0 Device Authorization Grant); the credentials and the recipient land in the credential store automatically |
 
-### 未来通道的候选
+### Candidates for a future channel
 
-| 通道 | 出网即可 | 能否回传 | 备注 |
+| Channel | Outbound only | Can answer | Notes |
 |---|---|---|---|
-| Telegram Bot | ✅ `getUpdates` 长轮询 | ✅ 内联键盘 | `deliver` 发消息，`subscribe` 轮询回调 |
-| ntfy | 需手机能访问服务 | ✅ `X-Actions` 按钮 | 按钮可直连核心自建的小 HTTP 端点 |
-| 企业微信 / 钉钉 | ✅ 长连接 | ✅ 交互卡片 | 与飞书同构，可直接照 `feishu.js` 改写 |
-| Bark / Server酱 | ✅ | ❌ 只推不收 | `supportsForms: false`，只能做通知 |
+| Telegram Bot | ✅ `getUpdates` long poll | ✅ inline keyboard | `deliver` sends, `subscribe` polls for callbacks |
+| ntfy | needs the phone to reach the service | ✅ `X-Actions` buttons | Buttons can call a small HTTP endpoint the host serves itself |
+| WeCom / DingTalk | ✅ long connection | ✅ interactive cards | Structurally identical to Feishu; adapt `feishu.js` directly |
+| Bark / ServerChan | ✅ | ❌ push only | `supportsForms: false`, notification only |

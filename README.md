@@ -279,16 +279,18 @@ real-composition check, and how to debug against a live deployment are in
 
 ## Learn more
 
-| Document | What is in it |
-|---|---|
-| [docs/configuration.md](docs/configuration.md) | Every setting, its default, and which ones the Settings card can change at runtime |
-| [docs/troubleshooting.md](docs/troubleshooting.md) | Installing, binding, and cards that do not arrive |
-| [docs/development.md](docs/development.md) | The suite, the real-composition check, and debugging a live deployment |
-| [docs/decisions/](docs/decisions/) | Why the plugin is shaped the way it is, one record per decision |
-| [SECURITY.md](SECURITY.md) | The invariants this plugin claims, and how to report a hole in one |
-| [CHANGELOG.md](CHANGELOG.md) | What changed in each release |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | What a change needs before it lands |
-| [providers/README.md](providers/README.md) | The channel contract, for a transport that is not Feishu |
+**→ [docs/](docs/)** routes you by job: change a setting, fix something, work on the code,
+cut a release, write a transport, or read why the plugin is shaped the way it is. It also
+says which pages have a Chinese counterpart.
+
+Three are worth naming here because they are not reference material:
+
+- **[SECURITY.md](SECURITY.md)** — the invariants this plugin asserts, what is out of scope,
+  and how to report a hole in one. This plugin is a remote authorization channel, so that
+  list is a claim you can hold the code to.
+- **[CHANGELOG.md](CHANGELOG.md)** — what each release carried. Worth reading before an
+  upgrade.
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — what a change needs before it lands.
 
 ## License
 

@@ -1,5 +1,7 @@
 # Configuration
 
+[← All documentation](README.md)
+
 Every value has a default, so the plugin works with no configuration at all. This
 page is the reference for a deployment that wants to change one.
 

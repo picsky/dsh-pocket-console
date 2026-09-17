@@ -1,5 +1,7 @@
 # Development
 
+[← All documentation](README.md)
+
 Plain ESM JavaScript, **no build step** — nothing here compiles, and the tests need no
 install. Publishing is the one operation that touches dependencies: the transport and
 the QR encoder are bundled into the tarball (`bundleDependencies`), so `pnpm install`

@@ -1,5 +1,7 @@
 # 常见问题
 
+[← 全部文档](../README.md)
+
 按你会遇到的顺序排列：安装、首次绑定、然后是该到却没到的卡片。英文版为 [../troubleshooting.md](../troubleshooting.md)。
 
 **从 GitHub 首次安装停在 `ERR_PNPM_IGNORED_BUILDS`。**

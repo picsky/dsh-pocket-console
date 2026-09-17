@@ -22,7 +22,7 @@
  * Run: npm run check:parity
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -318,8 +318,14 @@ function checkPublishedLinks(manifest, root) {
     for (const match of source.matchAll(/\]\((?!https?:|#|mailto:)([^)]+)\)/g)) {
       const target = match[1].split('#')[0]
       if (target === '') continue
-      const rel = relative(root, resolve(root, dirname(document), target)).split('\\').join('/')
-      if (!isPublished(rel)) {
+      const resolved = resolve(root, dirname(document), target)
+      const rel = relative(root, resolved).split('\\').join('/')
+      // A link may name a directory rather than a file — `docs/` is how a reader reaches
+      // the index inside it. What has to ship is something the reader lands on, so the
+      // directory itself is published when its `README.md` is; a directory with no index
+      // would render as a file listing on GitHub and a 404 on npm.
+      const wanted = existsSync(resolved) && statSync(resolved).isDirectory() ? `${rel}/README.md` : rel
+      if (!isPublished(wanted)) {
         fail(`${document}: links to ${target}, which package.json's files does not publish`)
       }
     }
