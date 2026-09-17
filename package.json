@@ -15,6 +15,7 @@
     "client.js",
     "results.js",
     "routes.js",
+    "mirror.js",
     "providers/feishu.js",
     "providers/README.md",
     "cordis.patch.yml",

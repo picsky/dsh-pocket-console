@@ -20,6 +20,7 @@ import { randomUUID } from 'node:crypto'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import z from '@deepseek-ai/schemastery'
 import { createResultNotifier } from './results.js'
+import { createMirror } from './mirror.js'
 import { registerRoutes } from './routes.js'
 
 /** Plugin name used by the Loader and every diagnostic. */
@@ -211,36 +212,8 @@ export async function apply(ctx, config) {
   const open = new Map()
   let closed = false
 
-  /**
-   * The last decision the phone took, for the browser half to mirror onto the
-   * desktop's own composer. A forwarded request can only be finished by a
-   * browser answering it, so a request the phone answered leaves that composer
-   * waiting; the browser half replays this value through the same client call a
-   * click makes, which clears it.
-   */
-  let desktopSync = null
-  /**
-   * What the browser half has done with the phone's decisions. Only the browser
-   * can see whether a composer closed, so it reports each attempt here; the last
-   * few also ride the state route, which is how a deployment diagnoses a mirror
-   * that is not landing.
-   */
-  const mirrorReports = []
-
-  /**
-   * Describe one phone decision for the browser half.
-   * @param record - the escalation the phone answered.
-   * @param answer - the value the request settled with.
-   * @returns the mirror record the state route serves.
-   */
-  const mirrorOf = (record, answer) => ({
-    id: record.id,
-    kind: record.kind,
-    sessionId: record.request.agent?.id,
-    questions: (record.request.questions ?? []).map(item => item.id),
-    answer,
-    at: Date.now(),
-  })
+  // The decision the phone took, and what the browser half did with it.
+  const mirror = createMirror({ log, settings: () => settings })
 
   // Result notices ride the session firehose rather than a live request, so a
   // turn that ends while nobody is watching still reaches the phone.
@@ -477,7 +450,7 @@ export async function apply(ctx, config) {
     // Only the answer that actually settles the request is mirrored: a click
     // arriving after the desktop already decided changes nothing.
     if (record.complete(payload.v, label, payload.v === ALLOW ? 'success' : 'danger')) {
-      desktopSync = mirrorOf(record, payload.v)
+      mirror.record(record, payload.v)
     }
     return { toast: label }
   }
@@ -530,7 +503,7 @@ export async function apply(ctx, config) {
       `已回答：${clip(answers.map(item => `${item.id}=${item.custom ?? item.selected.join('/')}`).join('；'))}`,
       'success',
     )
-    if (accepted) desktopSync = mirrorOf(record, { answers })
+    if (accepted) mirror.record(record, { answers })
     return { toast: '已提交全部回答' }
   }
 
@@ -550,15 +523,7 @@ export async function apply(ctx, config) {
       }
     }),
     enrollment: await channel.enrollmentState?.() ?? { state: 'unsupported' },
-    /**
-     * The decision the browser half should mirror onto the desktop composer,
-     * while it is still recent enough to belong to the request on screen.
-     */
-    sync: desktopSync !== null && Date.now() - desktopSync.at <= settings.mirrorTtlSeconds * 1000
-      ? desktopSync
-      : null,
-    /** What the browser half last did with a decision, newest last. */
-    mirror: [...mirrorReports],
+    ...mirror.state(),
   })
 
   /** The two mutations the card asks for. */
@@ -570,20 +535,7 @@ export async function apply(ctx, config) {
      * @param body - what the browser half did: status, and why when it could not.
      * @returns the accepted report.
      */
-    mirror: async (body) => {
-      const report = {
-        at: Date.now(),
-        status: typeof body?.status === 'string' ? body.status : 'unknown',
-        ...(typeof body?.reason === 'string' ? { reason: body.reason } : {}),
-        ...(typeof body?.syncId === 'string' ? { syncId: body.syncId } : {}),
-      }
-      mirrorReports.push(report)
-      if (mirrorReports.length > 20) mirrorReports.shift()
-      // The state route carries these; the deployment log only needs them when
-      // someone asks, since a page load alone produces several.
-      log.debug(`桌面镜像：${report.status}${report.reason === undefined ? '' : `（${report.reason}）`}`)
-      return report
-    },
+    mirror: async (body) => mirror.report(body),
   }
 
   // The routes live on the web app's server, which a headless deployment never
