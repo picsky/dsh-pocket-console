@@ -99,6 +99,13 @@ what Feishu is, the contract is missing something and that is the real fix.
 **Docs in both languages.** `README.md` is English and the primary document;
 `README.zh-CN.md` is its counterpart. Update both.
 
+**A new setting touches five places**, and `npm run check:parity` refuses to pass
+until they agree: the `Config` schema in `index.js`, the `SectionSchema` the
+Settings card is built from, the card's own `FIELDS` in `client.js`, the config
+tables in both READMEs, and the commented example in `cordis.patch.yml`.
+`SectionSchema` carries the user-tunable subset; the card, the tables, and the
+example follow it, so a key that exists only in `Config` stays deployment-only.
+
 **No secrets in the environment.** Anything a plugin reads from `process.env` is
 readable by every command the agent runs. Credentials belong in the credential
 store, referenced by name.

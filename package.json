@@ -36,7 +36,8 @@
   },
   "scripts": {
     "test": "node --import ./test/hooks.mjs --test \"tests/**/*.test.mjs\"",
-    "prepack": "node scripts/verify-pack.mjs"
+    "prepack": "node scripts/verify-pack.mjs",
+    "check:parity": "node scripts/check-parity.mjs"
   },
   "keywords": [
     "dsh",

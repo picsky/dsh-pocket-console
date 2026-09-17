@@ -23,7 +23,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      # The suite stubs its four production dependencies through a resolution
+      # One user-tunable setting lives in five places; this refuses to pass
+      # unless Config, SectionSchema, the card, both READMEs, and the bundle
+      # patch agree.
+      - run: npm run check:parity
+      # The suite stubs its five production dependencies through a resolution
       # hook, so there is nothing to install and no credentials or network.
       - run: npm test
 

@@ -16,10 +16,13 @@
 #   - id: pocket-console
 #     config:
 #       channel: dsh-pocket-console/providers/feishu.js
-#       delaySeconds: 600
-#       titlePrefix: DSH
 #       channelConfig:
 #         domain: feishu
+#       delaySeconds: 600
+#       maxDetailChars: 1200
+#       titlePrefix: DSH
+#       resultNotify: idle
+#       resultNotifyCooldownSeconds: 600
 
 - insert:
     - id: pocket-console
