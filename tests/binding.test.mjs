@@ -39,6 +39,26 @@ test('reports unbound state and does not escalate before binding', async () => {
   assert.equal(await result, 'rejected')
 })
 
+test('the launch page can be aimed at an existing app', async () => {
+  const { route, state } = await scaffold()
+
+  // Without a mode the deployment's default decides; `existing` deliberately
+  // turns off createOnly, which is what hides the page's own existing-app entry.
+  await route('POST', '/__pocket/bind', SAME_ORIGIN, {})
+  assert.equal(observed.registerAppCalls.at(-1).createOnly, true, 'the default creates')
+  await scan({ openId: 'ou_scanner' })
+
+  await route('POST', '/__pocket/unbind', SAME_ORIGIN)
+  await route('POST', '/__pocket/bind', SAME_ORIGIN, { mode: 'existing' })
+  assert.equal(
+    observed.registerAppCalls.at(-1).createOnly,
+    false,
+    'binding an existing app keeps the page that lists them',
+  )
+  await scan({ openId: 'ou_scanner' })
+  assert.equal((await state()).enrollment.state, 'bound')
+})
+
 test('a restart reconnects from stored credentials without onboarding', async () => {
   const { state, listenerOf, infos } = await scaffold({}, {
     stored: { appId: 'cli_stored', appSecret: 'secret_stored', recipient: 'ou_stored' },

@@ -66,12 +66,25 @@ dsh plugin --profile web add github:picsky/dsh-pocket-console
 
 重启 `dsh web`，打开 **设置 → 插件 → 插件配置 →「Pocket console」**：
 
-1. 点「开始绑定」
+1. 点「扫码新建应用」，或「绑定已有应用」
 2. 卡片上出现二维码
 3. 用飞书扫码（或在手机上打开同一链接）
 4. 卡片变为「已绑定」并显示接收人
 
-以上就是全部配置。飞书应用、权限、长连接、接收人 id 都来自飞书官方的**一键创建应用**
+**扫码新建**走官方的一键流程，在一个全新应用上把插件需要的东西全部注册好。
+
+**绑定已有应用**打开同一条流程，但保留页面自带的"选择已有应用"入口：选中你已经在用的那个 bot，
+确认页会逐条列出插件将要加给它的权限、一个事件（`im.message.receive_v1`）和一个回调（`card.action.trigger`），
+你同意后才会生效。该入口默认被隐藏（`createOnly: true`），以免误绑已有应用；**绑定已有应用**就是那条明路。
+
+**完全不扫码**也可以：把应用的凭据放进凭据库，键名就是 `DSH_FEISHU_APP_ID` 与 `DSH_FEISHU_APP_SECRET`
+（即 `appIdRef` / `appSecretRef` 指向的名字），插件每次启动都会自己连上。接收人则来自 `receiveId`，
+或者你直接给这个 bot 发一条消息——私聊会自动把发送者绑定为接收人。
+
+**一个飞书应用只服务一个 DSH 实例。** 长连接的事件**不广播**：飞书把每个事件只投递给其中一条连接，
+所以两个实例共用一个 bot 时，审批会随机落到某一侧。请一个实例一个应用，并用 `titlePrefix` 区分。
+
+飞书应用、权限、长连接、接收人 id 都来自飞书官方的**一键创建应用**
 （[OAuth 2.0 Device Authorization Grant](https://open.feishu.cn/document/mcp_open_tools/integrating-agents-with-feishu/overview)），
 链接 **10 分钟内有效、仅可使用一次**。
 
@@ -215,7 +228,7 @@ dsh 自己的远端客户端（编辑器里的 prompt）就是这么做的（`pa
 | `receiveId` | — | 指定接收人则跳过扫码 |
 | `receiveIdType` | `open_id` | `open_id` / `chat_id` / `user_id` / `email` |
 | `appName` / `appDesc` | 见源码 | 扫码确认页上预填的应用信息 |
-| `createOnly` | `true` | 只新建应用，绝不覆盖已有应用 |
+| `createOnly` | `true` | 隐藏启动页的"选择已有应用"入口；卡片里的「绑定已有应用」会在那一次关闭它 |
 
 ## 安全
 

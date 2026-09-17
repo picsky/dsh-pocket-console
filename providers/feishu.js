@@ -241,8 +241,10 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
    * @param run - the generation that started this run.
    * @returns the created credentials, whether or not they were persisted.
    */
-  const createApplication = async (run) => {
-    log.info('未找到飞书凭据，开始一键创建应用；请用飞书扫描或打开下面的链接。')
+  const createApplication = async (run, createOnly = config.createOnly) => {
+    log.info(createOnly === false
+      ? '开始飞书授权流程；请用飞书扫描或打开下面的链接，并在页面上选择已有应用。'
+      : '未找到飞书凭据，开始一键创建应用；请用飞书扫描或打开下面的链接。')
     const result = await Lark.registerApp({
       appPreset: { name: config.appName, desc: config.appDesc },
       addons: {
@@ -253,7 +255,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
         events: { items: { tenant: TENANT_EVENTS } },
         callbacks: { items: CALLBACKS },
       },
-      createOnly: config.createOnly,
+      createOnly,
       onQRCodeReady: announce,
       onStatusChange: (info) => { log.info(`绑定状态：${info.status}`) },
     })
@@ -277,7 +279,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
    * @param options - whether a run without stored credentials may create one.
    * @returns whether a transport is connected.
    */
-  const connect = async (run, { allowCreate = true } = {}) => {
+  const connect = async (run, { allowCreate = true, createOnly } = {}) => {
     const stored = await storedCredentials()
     if (stored === undefined && !allowCreate) {
       // Nothing to resume from. Onboarding belongs to the user's click, not to
@@ -286,7 +288,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       return false
     }
     enrollment = { state: 'starting' }
-    credentials = stored ?? await createApplication(run)
+    credentials = stored ?? await createApplication(run, createOnly)
     if (closed || run !== generation) return false
     const options = {
       appId: credentials.appId,
@@ -333,9 +335,12 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
    * slot so the user can retry from the card.
    * @returns the current enrollment state.
    */
-  const beginEnrollment = () => {
+  const beginEnrollment = (mode) => {
     const run = generation
-    onboarding ??= connect(run).catch((error) => {
+    // `existing` keeps the launch page's own "select an existing app" entry,
+    // which `createOnly` hides. Everything else follows the deployment default.
+    const createOnly = mode === 'existing' ? false : config.createOnly
+    onboarding ??= connect(run, { createOnly }).catch((error) => {
       // A cancelled run must not publish its failure over the enrollment that
       // replaced it, nor clear a retry the user already started.
       if (run !== generation) return

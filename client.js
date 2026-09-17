@@ -25,7 +25,7 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const { useCallback, useEffect, useState } = React
     const h = React.createElement
-    const { IconChevronDownOutline14 } = require('@deepseek-ai/dsh-client-ui-primitives')
+    const { IconChevronDownOutline14, Modal } = require('@deepseek-ai/dsh-client-ui-primitives')
 
     /** Settings namespace; also the `settings.plugin.item` slot key. */
     const NS = 'pocket-console'
@@ -57,16 +57,18 @@ window.__ModuleLoader__.load({
         pendingDelivered: '已送达手机',
         pendingWaiting: '等待桌面',
         scan: '用飞书扫描下面的二维码完成绑定。链接 10 分钟内有效，仅可使用一次。',
-        bind: '开始绑定',
-        rebind: '重新绑定',
+        bind: '扫码新建应用',
+        bindExisting: '绑定已有应用',
         unbind: '解除绑定',
+        cancel: '取消',
+        close: '关闭',
         unbindConfirm: '解除后手机上不再收到审批，确定吗？',
         retry: '重试',
         open: '在手机上打开这个链接',
         copy: '复制链接',
         copied: '已复制',
         loading: '读取中…',
-        delaySeconds: '桌面专享时间',
+        delaySeconds: '桌面专享时间（秒）',
         delaySecondsHint: '桌面在这段时间内可以先答；超时后同一条请求才会发到手机。0 表示同时可答。',
         titlePrefix: '标题前缀',
         titlePrefixHint: '手机消息标题的前缀，用来区分不同部署。',
@@ -102,16 +104,18 @@ window.__ModuleLoader__.load({
         pendingDelivered: 'sent to the phone',
         pendingWaiting: 'waiting on the desktop',
         scan: 'Scan this code with Feishu to finish binding. The link is valid for 10 minutes and can be used once.',
-        bind: 'Start binding',
-        rebind: 'Bind again',
+        bind: 'Scan to create an app',
+        bindExisting: 'Bind an existing app',
         unbind: 'Unbind',
+        cancel: 'Cancel',
+        close: 'Close',
         unbindConfirm: 'Approvals will stop reaching your phone. Continue?',
         retry: 'Retry',
         open: 'Open this link on your phone',
         copy: 'Copy link',
         copied: 'Copied',
         loading: 'Loading…',
-        delaySeconds: 'Desktop head start',
+        delaySeconds: 'Desktop head start (seconds)',
         delaySecondsHint: 'Seconds the desktop may answer before the same request is sent to the phone. 0 makes both answerable at once.',
         titlePrefix: 'Title prefix',
         titlePrefixHint: 'Prefix on every phone message title, for telling deployments apart.',
@@ -417,6 +421,7 @@ window.__ModuleLoader__.load({
       const [failure, setFailure] = useState(null)
       const [busy, setBusy] = useState(false)
       const [copied, setCopied] = useState(false)
+      const [confirmingUnbind, setConfirmingUnbind] = useState(false)
 
       const refresh = useCallback(async (signal) => {
         try {
@@ -445,13 +450,13 @@ window.__ModuleLoader__.load({
       if (!shell.available) return null
 
       /** Run one binding operation, then adopt the enrollment it reports. */
-      const run = async (path) => {
+      const run = async (path, body) => {
         setBusy(true)
         try {
           const response = await fetch(`${ROUTE}${path}`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: '{}',
+            body: JSON.stringify(body ?? {}),
           })
           if (!response.ok) throw new Error(`${path} failed: ${response.status}`)
           const enrollment = await response.json()
@@ -537,14 +542,33 @@ window.__ModuleLoader__.load({
               : null,
             failure !== null ? h('div', { key: 'failure', style: S.error }, failure) : null,
             h('div', { key: 'binding-actions', style: S.actions },
+              // Binding is one decision with two answers: create an app, or point
+              // the same flow at one that already exists. Re-binding was a third
+              // button that did exactly what the first one does — the channel
+              // reconnects from stored credentials on its own at every load.
               enrollment.state === 'bound'
-                ? button(copy.rebind, () => { void run('/bind') }, { disabled: busy })
-                : button(enrollment.state === 'failed' ? copy.retry : copy.bind, () => { void run('/bind') }, { disabled: busy, primary: true }),
-              enrollment.state === 'bound'
-                ? button(copy.unbind, () => {
-                    if (window.confirm(copy.unbindConfirm)) void run('/unbind')
-                  }, { disabled: busy })
-                : null),
+                ? button(copy.unbind, () => { setConfirmingUnbind(true) }, { disabled: busy })
+                : [
+                    button(copy.bind, () => { void run('/bind', { mode: 'create' }) }, { disabled: busy, primary: true }),
+                    button(copy.bindExisting, () => { void run('/bind', { mode: 'existing' }) }, { disabled: busy }),
+                  ]),
+            // The GUI's own dialog, not the browser's: same chrome, same keyboard
+            // handling, and it belongs to the page the reader is already in.
+            h(Modal, {
+              key: 'unbind-confirm',
+              open: confirmingUnbind,
+              onClose: () => { setConfirmingUnbind(false) },
+              title: copy.unbind,
+              closeLabel: copy.close,
+              description: copy.unbindConfirm,
+              footer: [
+                button(copy.cancel, () => { setConfirmingUnbind(false) }, { disabled: busy }),
+                button(copy.unbind, () => {
+                  setConfirmingUnbind(false)
+                  void run('/unbind')
+                }, { disabled: busy, primary: true }),
+              ],
+            }),
           ]
 
       const blocked = !shell.dirty || shell.invalid || shell.saving

@@ -49,7 +49,13 @@ test('the browser half loads through the module loader and registers its card', 
    */
   const baseline = {
     react: FakeReact,
-    '@deepseek-ai/dsh-client-ui-primitives': { IconChevronDownOutline14: () => null },
+    '@deepseek-ai/dsh-client-ui-primitives': {
+      IconChevronDownOutline14: () => null,
+      // The platform's dialog, as a findable node: the card must open this one
+      // instead of the browser's confirm(). A string type keeps the element
+      // inspectable without rendering anything.
+      Modal: 'Modal',
+    },
   }
   /**
    * Load the bundle behind one stand-in shell.
@@ -328,7 +334,15 @@ test('the browser half loads through the module loader and registers its card', 
     const labels = new Map()
     const controls = []
     const chevrons = []
+    const dialogs = []
+    const texts = []
     const walk = (node) => {
+      // Text is collected before the object guard: a label is a string child, and
+      // `typeof` sends it out of the walk otherwise.
+      if (typeof node === 'string') {
+        texts.push(node)
+        return
+      }
       if (node === null || typeof node !== 'object') return
       if (Array.isArray(node)) {
         for (const child of node) walk(child)
@@ -340,12 +354,13 @@ test('the browser half loads through the module loader and registers its card', 
         && String(node.props.style.color ?? '').includes('label-tertiary')) {
         chevrons.push(node)
       }
+      if (node.type === 'Modal') dialogs.push(node)
+      if (typeof node === 'string') texts.push(node)
       walk(node.props?.children)
     }
     walk(tree)
-    return { labels, controls, chevrons }
+    return { labels, controls, chevrons, dialogs, texts }
   }
-
   // The card is a disclosure: it starts collapsed, and opening it is the only way
   // its fields exist at all.
   const closed = collect(renderCard())
@@ -380,5 +395,55 @@ test('the browser half loads through the module loader and registers its card', 
     'rotate(180deg)',
     'an open card points its chevron up, the way every other plugin card does',
   )
+
+  // Binding is one decision with two answers; re-binding was a third button that
+  // did what the first one does, because the channel reconnects on its own. The
+  // binding row lives in the runtime section, so the card needs a state to show.
+  FakeReact.cells[1] = { enrollment: { state: 'unbound' }, settings: {}, pending: [] }
+  const unbound = collect(renderCard())
+  assert.ok(unbound.texts.includes(pairFace.copy.bind), 'the card offers creating an app: ' + JSON.stringify(unbound.texts.slice(0, 12)))
+  assert.ok(unbound.texts.includes(pairFace.copy.bindExisting), 'and binding one that already exists')
+  assert.ok(!unbound.texts.includes(pairFace.copy.rebind ?? '重新绑定'), 're-binding is gone')
+  assert.equal(unbound.dialogs.filter(dialog => dialog.props.open === true).length, 0, 'and nothing is modal yet')
+
+  // Unbinding asks through the GUI's own dialog, not the browser's confirm().
+  const boundRuntime = { enrollment: { state: 'bound', recipient: 'ou_scanner' }, settings: {}, pending: [] }
+  FakeReact.cells[1] = boundRuntime
+  const pressed = []
+  const previousUnbindFetch = globalThis.fetch
+  globalThis.fetch = async (url, options) => {
+    pressed.push({ url: String(url), body: options?.body })
+    return { ok: true, json: async () => ({ state: 'unbound' }) }
+  }
+  try {
+    const boundCard = collect(renderCard())
+    assert.ok(!boundCard.texts.includes(pairFace.copy.bindExisting), 'a bound card offers unbinding only')
+
+    const unbindButton = (function find(node) {
+      if (node === null || typeof node !== 'object') return undefined
+      if (Array.isArray(node)) return node.map(find).find(Boolean)
+      if (node.type === 'button' && node.props.children?.[0] === pairFace.copy.unbind
+        && node.props['aria-expanded'] === undefined) return node
+      return find(node.props?.children)
+    })(renderCard())
+    assert.ok(unbindButton !== undefined, 'a bound card has an unbind control')
+
+    unbindButton.props.onClick()
+    const asking = collect(renderCard()).dialogs.filter(dialog => dialog.props.open === true)
+    assert.equal(asking.length, 1, 'pressing it opens the platform dialog')
+    assert.equal(asking[0].props.description, pairFace.copy.unbindConfirm)
+    assert.equal(pressed.length, 0, 'and nothing is unbound until the dialog is confirmed')
+
+    const confirm = asking[0].props.footer.find(node => node.props.children?.[0] === pairFace.copy.unbind)
+    assert.ok(confirm !== undefined, 'the dialog carries the confirmation')
+    confirm.props.onClick()
+    await sleep(20)
+    assert.ok(
+      pressed.some(call => call.url.endsWith('/__pocket/unbind')),
+      `confirming posts the unbind: ${JSON.stringify(pressed)}`,
+    )
+  } finally {
+    globalThis.fetch = previousUnbindFetch
+  }
 })
 

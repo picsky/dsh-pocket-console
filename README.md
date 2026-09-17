@@ -64,12 +64,20 @@ dsh plugin --profile web add github:picsky/dsh-pocket-console
 
 Restart `dsh web`, then open **Settings → Plugins → Plugin configuration → "Pocket console"**:
 
-1. Click **Start binding**
+1. Click **Scan to create an app**, or **Bind an existing app**
 2. A QR code appears in the card
 3. Scan it with Feishu (or open the same link on your phone)
 4. The card flips to **Bound** and shows your recipient
 
-That is the whole setup. The Feishu app, its permissions, its long connection, and your recipient id come from the official one-click app creation flow ([OAuth 2.0 Device Authorization Grant](https://open.feishu.cn/document/mcp_open_tools/integrating-agents-with-feishu/overview)); the link is valid for 10 minutes and can be used once.
+**Creating** walks the official one-click flow and registers everything the plugin needs on a brand-new app.
+
+**Binding an existing app** opens the same flow with its own "select an existing app" entry left visible: pick the bot you already run, and the confirmation page lists the scopes, the one event (`im.message.receive_v1`), and the one callback (`card.action.trigger`) the plugin will add to it before you agree. That entry is hidden by default (`createOnly: true`) so nobody binds an existing app by accident; **Bind an existing app** is the deliberate way to do it.
+
+**Without any scan**, put the app's credentials in the credential store under the names `DSH_FEISHU_APP_ID` and `DSH_FEISHU_APP_SECRET` (that is what `appIdRef` and `appSecretRef` point at), and the plugin connects on its own at every start. The recipient then comes from `receiveId`, or from you sending the bot any message — a direct message binds its sender.
+
+**One Feishu app serves one DSH instance.** Long-connection events are not broadcast: Feishu delivers each event to a single connection, so two instances sharing a bot would see approvals land on whichever one happened to receive them. Use one app per instance, and `titlePrefix` to tell them apart.
+
+The app's permissions, its long connection, and your recipient id come from the official one-click app creation flow ([OAuth 2.0 Device Authorization Grant](https://open.feishu.cn/document/mcp_open_tools/integrating-agents-with-feishu/overview)); the link is valid for 10 minutes and can be used once.
 
 **You scan once.** The app credentials and the bound recipient live in the credential store, so every later `dsh` start reconnects the long connection on its own — no card, no click. The scan is offered again only after **Unbind**, or from **Rebind**.
 
@@ -186,7 +194,7 @@ Transport settings (`channelConfig`):
 | `receiveId` | — | Name a recipient to skip the scan |
 | `receiveIdType` | `open_id` | `open_id` / `chat_id` / `user_id` / `email` |
 | `appName` / `appDesc` | see source | Prefilled app identity on the confirmation page |
-| `createOnly` | `true` | Only ever create a new app, never overwrite an existing one |
+| `createOnly` | `true` | Hide the launch page's existing-app entry; **Bind an existing app** in the card turns it off for that run |
 
 ## Security
 

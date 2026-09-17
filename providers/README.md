@@ -42,7 +42,7 @@ export async function create({ ctx, config, binding, log }) {
 | 成员 | 说明 |
 |---|---|
 | `enrollmentState()` | 同步返回当前状态：`{ state: 'unbound' \| 'starting' \| 'awaiting' \| 'bound' \| 'failed', recipient?, verifyUrl?, expiresIn?, message? }`。**不得包含任何密钥。** |
-| `beginEnrollment()` | 启动上手流程。必须**幂等**：设备授权轮询会比触发它的 HTTP 请求活得更久，进行中的那一轮要共享而不是每次重启。同步返回当前状态。 |
+| `beginEnrollment(mode?)` | 启动上手流程。必须**幂等**：设备授权轮询会比触发它的 HTTP 请求活得更久，进行中的那一轮要共享而不是每次重启。同步返回当前状态。`mode` 由核心透传：`'create'` 走部署默认；`'existing'` 表示用户要绑定已有应用，通道应**保留**启动页自带的"选择已有应用"入口（飞书通道据此把 `createOnly` 置为 `false`）。 |
 | `clearEnrollment()` | 撤销绑定与凭据，回到 `unbound`。 |
 | `resume()` | **只用已存凭据重连**，不启动任何上手流程；没有凭据时保持 `unbound` 并返回当前状态。核心在插件加载时调用它，因为"重启后还要点一次绑定"不是用户该承担的事。 |
 
