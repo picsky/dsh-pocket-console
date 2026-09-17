@@ -116,7 +116,7 @@ Question shapes:
 - no options → a free-text input plus a Submit button
 - an option `description` renders as an **Options** legend in the body — a button label has no room for it
 
-The desktop follows. An answer given on the phone is mirrored onto the page's own composer, through the same client call a click there makes, so the request settles and the composer clears instead of waiting for a decision that already happened. The mirror also covers approvals. It is a browser-side action because the Host cannot withdraw a forwarded request: the gateway finishes one only when a browser answers it.
+The desktop follows. An answer given on the phone is mirrored onto the page's own composer, through the same client call a click there makes, so the request settles and the composer clears instead of waiting for a decision that already happened. The mirror also covers approvals. It is a browser-side action because the Host cannot withdraw a forwarded request: the gateway finishes one only when a browser answers it. The browser half reports each attempt — `loaded`, `watching`, `applied`, or `skipped` with its reason — and the Host logs it and serves the last few on its state route, so a mirror that is not landing says which step it reached.
 
 ## Result notices
 
