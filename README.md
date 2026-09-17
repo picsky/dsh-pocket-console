@@ -136,6 +136,7 @@ What suppresses or delays a notice:
 - One session notifies at most once per `resultNotifyCooldownSeconds`.
 - Delegated sessions are not reported separately; the session that asked for the subagent is.
 - A session whose agent the host has already reclaimed is not resumed, and says so in the log.
+- A notice stops accepting a reply as soon as it is superseded by a newer result, `resultNoticeTtlSeconds` pass, or new input arrives in the session from any surface — the card is rewritten to say which. Replying to a notice whose session moved on would otherwise inject an instruction written against a superseded answer.
 
 The instruction enters the session as **your message**, attributed the way the harness attributes human input: the surface a person is speaking through mints it, which is what dsh's own remote client does with an editor prompt (`packages/acp/acp/src/session.ts`). That attribution is also what keeps the instruction visible in the Web flow: anything else is rendered as injected context, folded into the turn's process. It therefore carries human authority too — a feature that requires human input accepts it — and the log does not distinguish it from a message typed at the desk.
 
@@ -172,6 +173,7 @@ Every value has a default, so the plugin works with no configuration. To tune it
 | `resultNotify` | `off` | `idle` sends each stopped session's result to the phone |
 | `resultNotifyCooldownSeconds` | `600` | Shortest gap between two result notices for one session |
 | `mirrorTtlSeconds` | `60` | How long a phone decision may still close the desktop composer |
+| `resultNoticeTtlSeconds` | `1800` | How long a result notice keeps accepting a reply |
 
 Transport settings (`channelConfig`):
 

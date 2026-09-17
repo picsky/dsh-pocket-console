@@ -69,6 +69,12 @@ export const Config = z.object({
    * @default 60
    */
   mirrorTtlSeconds: z.natural().default(60),
+  /**
+   * Seconds a result notice keeps accepting a reply. Past it the card still
+   * shows the result, but the instruction it would inject is refused.
+   * @default 1800
+   */
+  resultNoticeTtlSeconds: z.natural().default(1800),
 })
 
 /** Approval outcome meaning "this one call may proceed". */
@@ -100,6 +106,8 @@ const SectionSchema = z.object({
   resultNotifyCooldownSeconds: z.natural().default(600),
   /** Seconds a phone decision stays on offer for the desktop mirror. */
   mirrorTtlSeconds: z.natural().default(60),
+  /** Seconds a result notice keeps accepting a reply. */
+  resultNoticeTtlSeconds: z.natural().default(1800),
 })
 
 /**
@@ -300,6 +308,7 @@ export async function apply(ctx, config) {
     resultNotify: config.resultNotify,
     resultNotifyCooldownSeconds: config.resultNotifyCooldownSeconds,
     mirrorTtlSeconds: config.mirrorTtlSeconds,
+    resultNoticeTtlSeconds: config.resultNoticeTtlSeconds,
   })
   let settings = entry
   // The provider owns the section, so none can be installed before one exists.

@@ -99,6 +99,10 @@ export function createResultNotifier({ ctx, log, channel, settings, now = () => 
 
     const id = noticeId()
     const answer = track.message.text
+    // One live notice per session: the newest result is the one worth replying
+    // to, and an older card that still accepted a reply would inject an
+    // instruction the reader wrote against a superseded answer.
+    retire(session, '**这条结果已被新的结果取代**，请用最新那条回复。')
     const view = {
       title: `${settings().titlePrefix} 结果`,
       tone: 'info',
@@ -106,7 +110,7 @@ export function createResultNotifier({ ctx, log, channel, settings, now = () => 
       buttons: [],
       forms: [{ payload: { nid: id, submit: true }, fieldId: INSTRUCTION_FIELD, submitLabel: '发送给 agent' }],
     }
-    noticeSet(id, { session, handle: undefined })
+    noticeSet(id, { session, handle: undefined, at: now() })
     track.ended = undefined
     track.sentAt = now()
     try {
@@ -125,6 +129,36 @@ export function createResultNotifier({ ctx, log, channel, settings, now = () => 
     notices.set(id, notice)
   }
 
+  /**
+   * Retire every outstanding notice for one session.
+   *
+   * A notice is an offer to reply, and it is only honest while the result it
+   * carries is still the session's latest word. Superseding, new input, and the
+   * age limit all end it the same way: the rid stops being accepted and the card
+   * says why.
+   * @param session - the session whose notices are dropped.
+   * @param headline - what the card says instead of the input box.
+   * @returns how many notices were retired.
+   */
+  const retire = (session, headline) => {
+    let retired = 0
+    for (const [id, notice] of [...notices]) {
+      if (String(notice.session) !== String(session)) continue
+      notices.delete(id)
+      retired += 1
+      if (notice.handle === undefined) continue
+      void Promise.resolve(channel.update(notice.handle, {
+        title: `${settings().titlePrefix} 结果`,
+        tone: 'muted',
+        body: [headline],
+        buttons: [],
+        forms: [],
+      })).catch(error => { log.warn('结果卡片改写失败', error) })
+    }
+    if (retired > 0) log.debug(`结果通知失效：${headline}`)
+    return retired
+  }
+
   /** An unguessable, single-use notice rid. */
   function noticeId() {
     return `n${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`
@@ -139,6 +173,10 @@ export function createResultNotifier({ ctx, log, channel, settings, now = () => 
       // Only a session a person started is worth reporting; a delegated one is
       // reported through the session that asked for it.
       track.eligible = true
+      // Somebody spoke — at the desk or from the phone. Whatever the notice
+      // carried is no longer the session's latest word, so it stops taking
+      // replies instead of injecting one into a conversation that moved on.
+      retire(session.id, '**该结果已有新消息**，这条通知不再接受回复。')
     }
     if (event.type === 'assistant/message' && event.surfaceOp === 'append') {
       const blocks = event.data?.message?.content ?? []
@@ -178,6 +216,11 @@ export function createResultNotifier({ ctx, log, channel, settings, now = () => 
     if (notice === undefined) return { toast: '该结果已过期', accepted: false }
     const text = typeof values?.[INSTRUCTION_FIELD] === 'string' ? values[INSTRUCTION_FIELD].trim() : ''
     if (text === '') return { toast: '指令为空，未发送', accepted: false }
+    // An old notice stops being an offer even when nothing replaced it.
+    if (now() - notice.at > settings().resultNoticeTtlSeconds * 1000) {
+      retire(notice.session, '**这条通知已过期**，不再接受回复。')
+      return { toast: '该通知已过期', accepted: false }
+    }
     const agent = ctx.get?.('agents')?.get?.(notice.session)
     if (agent === undefined) {
       return { toast: '会话已不在运行，指令未发送', accepted: false }

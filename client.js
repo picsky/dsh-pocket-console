@@ -41,6 +41,7 @@ window.__ModuleLoader__.load({
       { field: 'resultNotify', kind: 'select', options: ['off', 'idle'] },
       { field: 'resultNotifyCooldownSeconds', kind: 'number' },
       { field: 'mirrorTtlSeconds', kind: 'number' },
+      { field: 'resultNoticeTtlSeconds', kind: 'number' },
     ]
 
     const COPY = {
@@ -83,6 +84,8 @@ window.__ModuleLoader__.load({
         resultNotifyCooldownSecondsHint: '同一个会话两次结果通知之间的最短间隔，避免连续短任务刷屏。',
         mirrorTtlSeconds: '桌面镜像有效期（秒）',
         mirrorTtlSecondsHint: '手机作出的决定在这段时间内仍会镜像到桌面面板；过期后重开的页面不会补上。',
+        resultNoticeTtlSeconds: '结果通知有效期（秒）',
+        resultNoticeTtlSecondsHint: '超过这段时间，那条结果通知不再接受回复（会话已有新消息时也会立即失效）。',
         overridden: '已覆盖',
         reset: '恢复默认',
         invalidNumber: '请填一个数字，留空表示恢复默认。',
@@ -134,6 +137,8 @@ window.__ModuleLoader__.load({
         resultNotifyCooldownSecondsHint: 'Shortest gap between two result notices for one session, so short turns do not flood the channel.',
         mirrorTtlSeconds: 'Desktop mirror window (s)',
         mirrorTtlSecondsHint: 'How long a phone decision may still close the panel on this page. A page opened later never replays an expired one.',
+        resultNoticeTtlSeconds: 'Notice reply window (s)',
+        resultNoticeTtlSecondsHint: 'Past this, a result notice stops accepting a reply. New input in the session ends it immediately.',
         overridden: 'Overridden',
         reset: 'Reset',
         invalidNumber: 'Enter a number, or leave it blank to inherit the default.',
@@ -354,6 +359,7 @@ window.__ModuleLoader__.load({
           resultNotify: fieldState('resultNotify'),
           resultNotifyCooldownSeconds: fieldState('resultNotifyCooldownSeconds'),
           mirrorTtlSeconds: fieldState('mirrorTtlSeconds'),
+          resultNoticeTtlSeconds: fieldState('resultNoticeTtlSeconds'),
         }),
         edit(field, text) { staged.set(field, { text, clear: false }); failed = false; publish() },
         resetField(field) {
@@ -587,6 +593,7 @@ window.__ModuleLoader__.load({
           field(FIELDS[3], copy.resultNotify, copy.resultNotifyHint),
           field(FIELDS[4], copy.resultNotifyCooldownSeconds, copy.resultNotifyCooldownSecondsHint),
           field(FIELDS[5], copy.mirrorTtlSeconds, copy.mirrorTtlSecondsHint),
+          field(FIELDS[6], copy.resultNoticeTtlSeconds, copy.resultNoticeTtlSecondsHint),
 
           h('div', { style: S.footer },
             shell.failed ? h('p', { style: S.failed, role: 'status' }, copy.saveFailed) : null,

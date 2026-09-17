@@ -23,26 +23,28 @@ import {
  * @param emit - the `session/event` listener.
  * @param id - session id.
  * @param answer - the answer text.
+ * @param options - whether the round opens with something a person said, and
+ *   which turn number it is.
  */
-function runTurn(emit, id, answer = '构建已经通过。') {
-  emit({ id }, { type: 'user/message', data: { source: { kind: 'user' } } })
-  emit({ id }, { type: 'turn/start', data: { turn: 1 } })
+function runTurn(emit, id, answer = '构建已经通过。', { said = true, turn = 1 } = {}) {
+  if (said) emit({ id }, { type: 'user/message', data: { source: { kind: 'user' } } })
+  emit({ id }, { type: 'turn/start', data: { turn } })
   emit({ id }, {
     type: 'assistant/message',
     surfaceOp: 'append',
-    data: { turn: 1, message: { content: [{ type: 'text', text: '我先看看' }, { type: 'tool-call', name: 'pwsh' }] } },
+    data: { turn, message: { content: [{ type: 'text', text: '我先看看' }, { type: 'tool-call', name: 'pwsh' }] } },
   })
   emit({ id }, {
     type: 'assistant/message',
     surfaceOp: 'append',
-    data: { turn: 1, message: { content: [{ type: 'tool-call', name: 'pwsh' }] } },
+    data: { turn, message: { content: [{ type: 'tool-call', name: 'pwsh' }] } },
   })
   emit({ id }, {
     type: 'assistant/message',
     surfaceOp: 'append',
-    data: { turn: 1, message: { content: [{ type: 'text', text: answer }] } },
+    data: { turn, message: { content: [{ type: 'text', text: answer }] } },
   })
-  emit({ id }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+  emit({ id }, { type: 'turn/end', data: { turn, reason: { kind: 'completed' } } })
 }
 
 
@@ -130,5 +132,78 @@ test('holds the next notice until the cooldown has passed', async () => {
   emit({ id: 's_2' }, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
   await sleep(1100)
   assert.equal(observed.created.length, 1, 'the same session stays quiet inside the cooldown')
+})
+
+test('a notice stops taking replies once the session has new input', async () => {
+  const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle' })
+  await bind(route, { openId: 'ou_scanner' })
+  const followed = []
+  agents.set('s_1', { status: 'idle', followup: (message) => { followed.push(message) } })
+  const emit = listenerOf('session/event').handler
+
+  runTurn(emit, 's_1')
+  await sleep(1100)
+  const submit = callbackValues(sentCard()).find(value => value.submit === true)
+
+  // The reader types at the desk. That result is no longer the session's latest
+  // word, so replying to it would inject an instruction written against it.
+  emit({ id: 's_1' }, { type: 'user/message', data: { source: { kind: 'user' } } })
+  await sleep(20)
+  assert.equal(observed.patched.length, 1, 'the card says why it stopped')
+  assert.match(JSON.stringify(JSON.parse(observed.patched[0].data.content)), /已有新消息/)
+
+  const refused = await clickCard(submit, { value: '接着做' })
+  assert.equal(refused.toast.type, 'warning')
+  assert.match(refused.toast.content, /已过期/)
+  await sleep(10)
+  assert.deepEqual(followed, [], 'a superseded notice injects nothing')
+})
+
+test('a newer notice retires the one before it', async () => {
+  const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle', resultNotifyCooldownSeconds: 0 })
+  await bind(route, { openId: 'ou_scanner' })
+  const followed = []
+  agents.set('s_3', { status: 'idle', followup: (message) => { followed.push(message) } })
+  const emit = listenerOf('session/event').handler
+
+  runTurn(emit, 's_3', '第一轮完成。', { turn: 1 })
+  await sleep(1100)
+  const first = callbackValues(sentCard()).find(value => value.submit === true)
+
+  // A later round with nothing said in between, so only superseding can retire
+  // the first card rather than the new-input rule.
+  runTurn(emit, 's_3', '第二轮完成。', { said: false, turn: 2 })
+  await sleep(1100)
+  assert.equal(observed.created.length, 2, 'the newest result is offered too')
+  const second = callbackValues(JSON.parse(observed.created[1].data.content))
+    .find(value => value.submit === true)
+
+  const stale = await clickCard(first, { value: '按第一轮来' })
+  assert.match(stale.toast.content, /已过期/)
+  await sleep(10)
+  assert.deepEqual(followed, [], 'the older notice injects nothing')
+
+  const live = await clickCard(second, { value: '按第二轮来' })
+  assert.equal(live.toast.content, '已发送给 agent')
+  await sleep(10)
+  assert.equal(followed.length, 1, 'the newest notice still works')
+})
+
+test('a notice past its window stops taking replies', async () => {
+  const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle', resultNoticeTtlSeconds: 0 })
+  await bind(route, { openId: 'ou_scanner' })
+  const followed = []
+  agents.set('s_4', { status: 'idle', followup: (message) => { followed.push(message) } })
+  const emit = listenerOf('session/event').handler
+
+  runTurn(emit, 's_4')
+  await sleep(1100)
+  const submit = callbackValues(sentCard()).find(value => value.submit === true)
+
+  const refused = await clickCard(submit, { value: '再改一下' })
+  assert.equal(refused.toast.type, 'warning')
+  assert.match(refused.toast.content, /已过期/)
+  await sleep(10)
+  assert.deepEqual(followed, [], 'an expired notice injects nothing')
 })
 
