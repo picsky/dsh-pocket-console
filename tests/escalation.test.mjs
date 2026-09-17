@@ -13,8 +13,31 @@ import {
   bind,
   callbackValues,
   sentCard,
+  SAME_ORIGIN,
   observed,
 } from './support/harness.mjs'
+
+test('the phone card follows the language the page reports', async () => {
+  const { route, listenerOf } = await scaffold()
+  await bind(route, { openId: 'ou_scanner' })
+
+  // What the browser half posts on every state report; the Host has no other way
+  // to know which language the reader is reading in.
+  const reported = await route('POST', '/__pocket/mirror', SAME_ORIGIN, { status: 'loaded', lang: 'en' })
+  assert.equal(reported.status, 200)
+
+  const approval = listenerOf('approval/request')
+  const desktop = Promise.withResolvers()
+  const result = approval.handler(
+    { toolName: 'pwsh', reason: 'needs the workspace', signal: new AbortController().signal },
+    () => desktop.promise,
+  )
+  await sleep(1200)
+  assert.match(JSON.stringify(sentCard()), /Tool approval/, 'the card follows the page')
+
+  desktop.resolve('rejected')
+  assert.equal(await result, 'rejected')
+})
 
 test('only the bound recipient can answer a card', async () => {
   const { route, listenerOf } = await scaffold()

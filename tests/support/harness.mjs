@@ -60,13 +60,19 @@ async function directMessage(openId) {
   })
 }
 
-/** One HTTP request shaped as the webserver hands it to a route handler. */
-function makeRequest(method, path, headers = {}) {
+/**
+ * One HTTP request shaped as the webserver hands it to a route handler.
+ * @param body - a JSON body to deliver, when the case posts one.
+ */
+function makeRequest(method, path, headers = {}, body) {
+  const chunks = body === undefined ? [] : [Buffer.from(JSON.stringify(body))]
   return {
     method,
     url: path,
     headers: { host: HOST, ...headers },
-    async *[Symbol.asyncIterator]() {},
+    async *[Symbol.asyncIterator]() {
+      for (const chunk of chunks) yield chunk
+    },
   }
 }
 
@@ -231,11 +237,11 @@ async function scaffold(configOverrides = {}, { services = ['settings', 'webServ
   await sleep(10)
 
   /** Drive the registered same-origin route. */
-  const route = async (method, path, headers) => {
+  const route = async (method, path, headers, body) => {
     const handler = routes[0]
     assert.ok(handler, 'expected the plugin to register a route')
     const res = makeResponse()
-    await handler.handler(makeRequest(method, path, headers), res)
+    await handler.handler(makeRequest(method, path, headers, body), res)
     return res.captured
   }
   const json = (captured) => JSON.parse(captured.body)

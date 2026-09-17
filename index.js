@@ -160,29 +160,14 @@ export async function apply(ctx, config) {
   if (typeof module.create !== 'function') {
     throw new TypeError(`pocket-console: channel ${config.channel} must export create()`)
   }
-  // The channel renders its own chrome, so it reads the same copy the core does.
-  const channel = await module.create({
-    ctx,
-    config: config.channelConfig ?? {},
-    binding: createBinding(ctx),
-    log,
-    messages: () => messagesFor(config.locale),
-  })
-
-  // A restart must not need the Settings card. Credentials and recipient are
-  // persisted, so the channel reconnects from what it already holds; a channel
-  // without a resume path, or a deployment with nothing stored, is unaffected.
-  try {
-    await channel.resume?.()
-  } catch (error) {
-    log.warn('channel resume failed', error)
-  }
-
   /**
    * Effective user-tunable configuration. The composition entry is the base
    * layer; a mounted settings provider lets the Settings card override it at
    * runtime, and losing that provider restores exactly what the deployment
    * composed. The card polls its own state route, so no change push is needed.
+   *
+   * It is resolved before the channel because the copy thunk below reads it: a
+   * channel resolves its own defaults at creation, and one of them is copy.
    */
   const entry = Object.freeze({
     delaySeconds: config.delaySeconds,
@@ -194,6 +179,34 @@ export async function apply(ctx, config) {
     locale: config.locale,
   })
   let settings = entry
+
+  /**
+   * The interface language a browser reported, until it reports another. The Host
+   * cannot see a browser's language any other way, and a deployment whose page
+   * never opens leaves its own `locale` in charge.
+   */
+  let uiLocale
+  /** The card copy in the language the reader is actually reading. */
+  const messages = () => messagesFor(uiLocale ?? settings.locale)
+
+  // The channel renders its own chrome, so it reads the same copy the core does.
+  const channel = await module.create({
+    ctx,
+    config: config.channelConfig ?? {},
+    binding: createBinding(ctx),
+    log,
+    messages,
+  })
+
+  // A restart must not need the Settings card. Credentials and recipient are
+  // persisted, so the channel reconnects from what it already holds; a channel
+  // without a resume path, or a deployment with nothing stored, is unaffected.
+  try {
+    await channel.resume?.()
+  } catch (error) {
+    log.warn('channel resume failed', error)
+  }
+
   // The provider owns the section, so none can be installed before one exists.
   // `inject` waits for the service instead of reading it once, which takes the
   // card off the load order; a deployment composing no provider keeps resolving
@@ -209,8 +222,6 @@ export async function apply(ctx, config) {
 
   // The decision the phone took, and what the browser half did with it.
   const mirror = createMirror({ log, settings: () => settings })
-  /** The card copy in the deployment's language, read per render. */
-  const messages = () => messagesFor(settings.locale)
 
   // The escalation machine owns the timer, the race, and the pending registry;
   // this file only wires it to the two seams and the channel's actions.
@@ -239,7 +250,11 @@ export async function apply(ctx, config) {
      * @param body - what the browser half did: status, and why when it could not.
      * @returns the accepted report.
      */
-    mirror: async (body) => mirror.report(body),
+    mirror: async (body) => {
+      // The page is the only source for which language its reader is reading.
+      if (body?.lang === 'zh' || body?.lang === 'en') uiLocale = body.lang
+      return mirror.report(body)
+    },
   }
 
   // The routes live on the web app's server, which a headless deployment never

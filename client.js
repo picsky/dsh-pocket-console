@@ -629,6 +629,17 @@ window.__ModuleLoader__.load({
         return null
       }
 
+      /**
+       * The interface language, as the shell publishes it on <html>.
+       * @returns a known locale, or undefined when the page names none.
+       */
+      function documentLanguage() {
+        const tag = globalThis.document?.documentElement?.lang
+        if (typeof tag !== 'string' || tag === '') return undefined
+        const base = tag.toLowerCase().split('-')[0]
+        return base === 'zh' || base === 'en' ? base : undefined
+      }
+
       /** Read the Host's last phone decision, or null when it offers none. */
       const readSync = async () => {
         const response = await fetch(`${ROUTE}/state`, { headers: { accept: 'application/json' } })
@@ -649,6 +660,9 @@ window.__ModuleLoader__.load({
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             status,
+            // The Host has no other way to know which language this reader is
+            // reading, and the phone card should not disagree with the page.
+            ...(documentLanguage() === undefined ? {} : { lang: documentLanguage() }),
             ...(reason === undefined ? {} : { reason }),
             ...(syncId === undefined ? {} : { syncId }),
           }),
