@@ -27,8 +27,12 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
-      # The tarball embeds its transport, which is packed from the hoisted tree.
+          # No `registry-url` on purpose. Supplying it makes setup-node write an
+          # `.npmrc` whose auth token is a placeholder, and npm then attempts a
+          # token publish instead of the OIDC exchange this job exists for — on
+          # Node 24 that ends in npm's own `Exit handler never called!` crash
+          # after a successful pack. The default registry is npmjs.com, so the
+          # only thing `registry-url` added here was a way to fail.
       - uses: pnpm/action-setup@v6
         with:
           version: 11
@@ -36,6 +40,16 @@ jobs:
       - name: npm must be new enough for a trusted publisher
         run: |
           node -e "const v = require('node:child_process').execSync('npm -v').toString().trim(); const [major, minor] = v.split('.').map(Number); console.log('npm', v); if (major < 11 || (major === 11 && minor < 5)) { console.error('npm ' + v + ' cannot publish through a trusted publisher (needs >= 11.5.1)'); process.exit(1) }"
+      # Belt and braces: a publish that reaches the registry without a token is
+      # what proves the OIDC exchange happened. A stray token in the environment
+      # would silently turn this back into a token publish.
+      - name: No publish token may be present
+        run: |
+          if [ -n "${NODE_AUTH_TOKEN:-}" ] || [ -n "${NPM_TOKEN:-}" ]; then
+            echo "a publish token is set in the environment; this job must publish through OIDC instead"
+            exit 1
+          fi
+          echo "no publish token present — the OIDC exchange is the only credential"
       # A manual run exists to retry a tag, not to publish whatever a branch
       # happens to hold, so both entries land on the same requirement.
       - name: The run must be the tag it publishes
@@ -61,3 +75,20 @@ jobs:
       # `prepack` refuses a tarball that lost a bundled library or would close
       # over a module `files` does not publish, so what npm receives can start.
       - run: npm publish --provenance
+      # Assert what the release claims, rather than trusting that the last step
+      # meant it: the version has to be on the registry, and it has to carry the
+      # attestation this job exists to produce.
+      - name: The registry carries this version, with provenance
+        run: |
+          node -e "
+          const { execSync } = require('node:child_process');
+          const version = require('./package.json').version;
+          const meta = JSON.parse(execSync('npm view dsh-pocket-console@' + version + ' --json', { encoding: 'utf8' }));
+          console.log('published', meta.name + '@' + meta.version);
+          const attestations = meta.dist && meta.dist.attestations;
+          if (attestations === undefined || attestations === null) {
+            console.error('the published version carries no provenance attestation');
+            process.exit(1);
+          }
+          console.log('attestation present:', JSON.stringify(attestations).slice(0, 160));
+          "
