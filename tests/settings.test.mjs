@@ -11,7 +11,22 @@ import {
   scaffold,
   bind,
   observed,
+  SAME_ORIGIN,
 } from './support/harness.mjs'
+
+test('mirror reports ride the state route without filling the log', async () => {
+  const { route, state, infos, debugs } = await scaffold()
+
+  const accepted = await route('POST', '/__pocket/mirror', SAME_ORIGIN)
+  assert.equal(accepted.status, 200, 'the browser half can always report')
+
+  const snapshot = await state()
+  assert.equal(snapshot.mirror.length, 1, 'the report is on the state route')
+  assert.equal(snapshot.mirror[0].status, 'unknown', 'an empty report is still recorded')
+  assert.equal(snapshot.settings.mirrorTtlSeconds, 60, 'the mirror window is served as a setting')
+  assert.ok(!infos.some(line => line.includes('桌面镜像')), 'a page load must not fill the deployment log')
+  assert.ok(debugs.some(line => line.includes('桌面镜像')), 'and it stays available when the logger is asked')
+})
 
 test('registers a settings namespace and the same-origin route', async () => {
   const { sections, routes } = await scaffold()

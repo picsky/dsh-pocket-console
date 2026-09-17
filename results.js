@@ -81,14 +81,14 @@ export function createResultNotifier({ ctx, log, channel, settings, now = () => 
     if (!isAnswer(track.message)) return
     const delay = settings().resultNotifyCooldownSeconds * 1000
     if (track.sentAt !== undefined && now() - track.sentAt < delay) {
-      log.info('结果未通知：同一会话仍在冷却期内。')
+      log.debug('结果未通知：同一会话仍在冷却期内。')
       return
     }
     // `ctx.get`, not `ctx.agents`: reading a service property without an
     // `inject` declaration throws, and this feature is optional.
     const agent = ctx.get?.('agents')?.get?.(session)
     if (agent === undefined) {
-      log.info('结果未通知：该会话没有活跃 agent（本版本不恢复已回收的会话）。')
+      log.debug('结果未通知：该会话没有活跃 agent（本版本不恢复已回收的会话）。')
       return
     }
     if (agent.status !== 'idle') {

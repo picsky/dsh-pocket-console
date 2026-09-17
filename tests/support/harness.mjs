@@ -94,6 +94,7 @@ async function scaffold(configOverrides = {}, { services = ['settings', 'webServ
   const disposers = []
   const warnings = []
   const infos = []
+  const debugs = []
   const values = new Map()
   const records = new Map()
   const routes = []
@@ -155,6 +156,7 @@ async function scaffold(configOverrides = {}, { services = ['settings', 'webServ
     logger: {
       warn: (error) => { warnings.push(error) },
       info: (message) => { infos.push(String(message)) },
+      debug: (message) => { debugs.push(String(message)) },
     },
     credentials: {
       resolve: async (ref) => (values.has(ref) ? { value: values.get(ref), source: 'file' } : undefined),
@@ -233,7 +235,7 @@ async function scaffold(configOverrides = {}, { services = ['settings', 'webServ
     flushInjects()
   }
   return {
-    config, ctx, listeners, disposers, warnings, infos, values, records,
+    config, ctx, listeners, disposers, warnings, infos, debugs, values, records,
     routes, sections, route, json, state, listenerOf, compose, agents,
   }
 }

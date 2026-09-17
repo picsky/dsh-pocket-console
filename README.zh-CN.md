@@ -198,6 +198,7 @@ dsh 自己的远端客户端（编辑器里的 prompt）就是这么做的（`pa
 | `titlePrefix` | `DSH` | 卡片标题前缀 |
 | `resultNotify` | `off` | `idle` 表示把停下来的会话结果发到手机 |
 | `resultNotifyCooldownSeconds` | `600` | 同一个会话两次结果通知之间的最短间隔 |
+| `mirrorTtlSeconds` | `60` | 手机决定仍可镜像到桌面面板的时长 |
 
 通道配置（`channelConfig`）：
 

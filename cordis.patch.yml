@@ -23,6 +23,7 @@
 #       titlePrefix: DSH
 #       resultNotify: idle
 #       resultNotifyCooldownSeconds: 600
+#       mirrorTtlSeconds: 60
 
 - insert:
     - id: pocket-console

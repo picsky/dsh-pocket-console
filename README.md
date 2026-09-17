@@ -171,6 +171,7 @@ Every value has a default, so the plugin works with no configuration. To tune it
 | `titlePrefix` | `DSH` | Card title prefix |
 | `resultNotify` | `off` | `idle` sends each stopped session's result to the phone |
 | `resultNotifyCooldownSeconds` | `600` | Shortest gap between two result notices for one session |
+| `mirrorTtlSeconds` | `60` | How long a phone decision may still close the desktop composer |
 
 Transport settings (`channelConfig`):
 

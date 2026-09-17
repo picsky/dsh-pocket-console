@@ -62,6 +62,13 @@ export const Config = z.object({
    * @default 600
    */
   resultNotifyCooldownSeconds: z.natural().default(600),
+  /**
+   * Seconds a phone decision stays on offer for the browser half to mirror onto
+   * the desktop composer. Long enough to cover a page that is already open,
+   * short enough that a reloaded page never replays an old answer.
+   * @default 60
+   */
+  mirrorTtlSeconds: z.natural().default(60),
 })
 
 /** Approval outcome meaning "this one call may proceed". */
@@ -91,6 +98,8 @@ const SectionSchema = z.object({
   resultNotify: z.union(['off', 'idle']).default('off'),
   /** Seconds before the same session may notify again. */
   resultNotifyCooldownSeconds: z.natural().default(600),
+  /** Seconds a phone decision stays on offer for the desktop mirror. */
+  mirrorTtlSeconds: z.natural().default(60),
 })
 
 /**
@@ -245,6 +254,12 @@ export async function apply(ctx, config) {
       ctx.logger?.warn?.(new Error(`pocket-console: ${message}`, { cause: failure }))
     },
     info: (message) => { ctx.logger?.info?.(`pocket-console: ${message}`) },
+    /**
+     * Routine diagnostics: what the plugin decided and why it skipped. These are
+     * frequent by nature — every page load, every panel transition — so they stay
+     * out of the deployment log unless the logger is asked for them.
+     */
+    debug: (message) => { ctx.logger?.debug?.(`pocket-console: ${message}`) },
   }
 
   // A relative specifier means a local `--patch` overlay; a bare one means an
@@ -284,6 +299,7 @@ export async function apply(ctx, config) {
     titlePrefix: config.titlePrefix,
     resultNotify: config.resultNotify,
     resultNotifyCooldownSeconds: config.resultNotifyCooldownSeconds,
+    mirrorTtlSeconds: config.mirrorTtlSeconds,
   })
   let settings = entry
   // The provider owns the section, so none can be installed before one exists.
@@ -311,8 +327,6 @@ export async function apply(ctx, config) {
    * click makes, which clears it.
    */
   let desktopSync = null
-  /** How long a mirror stays on offer. A reload must not replay an old answer. */
-  const DESKTOP_SYNC_TTL_MS = 60_000
   /**
    * What the browser half has done with the phone's decisions. Only the browser
    * can see whether a composer closed, so it reports each attempt here; the last
@@ -648,7 +662,7 @@ export async function apply(ctx, config) {
      * The decision the browser half should mirror onto the desktop composer,
      * while it is still recent enough to belong to the request on screen.
      */
-    sync: desktopSync !== null && Date.now() - desktopSync.at <= DESKTOP_SYNC_TTL_MS
+    sync: desktopSync !== null && Date.now() - desktopSync.at <= settings.mirrorTtlSeconds * 1000
       ? desktopSync
       : null,
     /** What the browser half last did with a decision, newest last. */
@@ -673,7 +687,9 @@ export async function apply(ctx, config) {
       }
       mirrorReports.push(report)
       if (mirrorReports.length > 20) mirrorReports.shift()
-      log.info(`桌面镜像：${report.status}${report.reason === undefined ? '' : `（${report.reason}）`}`)
+      // The state route carries these; the deployment log only needs them when
+      // someone asks, since a page load alone produces several.
+      log.debug(`桌面镜像：${report.status}${report.reason === undefined ? '' : `（${report.reason}）`}`)
       return report
     },
   }
