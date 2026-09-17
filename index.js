@@ -558,8 +558,17 @@ export async function apply(ctx, config) {
       async () => ({
         namespace: NAME,
         settings: { ...settings },
-        /** Escalations whose message is already with the user. */
-        pending: open.size,
+        /** Open escalations, each with what it is waiting on. */
+        pending: [...open.values()].map((record) => {
+          const question = record.request.questions?.[0]
+          return {
+            kind: record.kind,
+            summary: clip(record.kind === 'approval'
+              ? record.request.toolName
+              : question?.header ?? question?.question ?? ''),
+            delivered: record.delivered,
+          }
+        }),
         enrollment: await channel.enrollmentState?.() ?? { state: 'unsupported' },
       }),
       {

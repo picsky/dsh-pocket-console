@@ -243,7 +243,7 @@ test('reports unbound state and does not escalate before binding', async () => {
 
   const snapshot = await state()
   assert.equal(snapshot.namespace, 'pocket-console')
-  assert.equal(snapshot.pending, 0)
+  assert.deepEqual(snapshot.pending, [], 'nothing is open before a request arrives')
   assert.equal(snapshot.enrollment.state, 'unbound')
   assert.equal(observed.registerAppCalls.length, 0, 'nothing starts until the card asks')
 
@@ -578,57 +578,205 @@ test('a failed onboarding degrades to desktop-only instead of breaking startup',
   for (const dispose of disposers) dispose()
 })
 
+test('reports what is still pending, and whether the phone already has it', async () => {
+  const { route, state, listenerOf } = await scaffold({ delaySeconds: 1 })
+  await bind(route)
+
+  const desktop = Promise.withResolvers()
+  void listenerOf('user-questions/request').handler({
+    questions: [{ id: 'q', header: '发布', question: '现在发布吗？', options: [{ label: '发布' }] }],
+    signal: new AbortController().signal,
+  }, () => desktop.promise)
+  void listenerOf('approval/request').handler(
+    { toolName: 'pwsh', signal: new AbortController().signal },
+    () => desktop.promise,
+  )
+
+  const waiting = (await state()).pending
+  assert.deepEqual(
+    waiting.map(entry => [entry.kind, entry.summary]),
+    [['question', '发布'], ['approval', 'pwsh']],
+    'each open escalation names what it is, so the count is not a dead end',
+  )
+  assert.ok(
+    waiting.every(entry => entry.delivered === false),
+    'nothing has reached the phone before the desktop head start elapses',
+  )
+
+  await sleep(1200)
+  assert.ok((await state()).pending.every(entry => entry.delivered === true))
+  desktop.resolve({ answers: [] })
+})
+
 test('the browser half loads through the module loader and registers its card', async () => {
   // The browser half is hand-written in the client module system's factory
   // format, so it can be executed here against a stand-in shell: this is the
   // only way to check its shape without a browser.
-  const calls = { inject: [], register: [] }
   const FakeReact = {
     createElement: () => null,
     useCallback: (fn) => fn,
     useEffect: () => {},
     useState: (initial) => [initial, () => {}],
   }
-  let loaded
-  globalThis.window = {
-    __ModuleLoader__: {
-      load({ id, factory }) {
-        loaded = {
-          id,
-          exports: factory((specifier) => {
-            assert.equal(specifier, 'react', `the card may only request platform modules, asked for ${specifier}`)
-            return FakeReact
-          }),
-        }
+  /** Bare observable snapshot store, the shape the hooks compartment carries. */
+  const createStore = (initial) => {
+    let current = initial
+    const listeners = new Set()
+    return {
+      getSnapshot: () => current,
+      subscribe(listener) {
+        listeners.add(listener)
+        return () => { listeners.delete(listener) }
       },
-    },
+      set(next) {
+        current = next
+        for (const listener of listeners) listener()
+      },
+      update(mutator) {
+        mutator(current)
+        for (const listener of listeners) listener()
+      },
+    }
   }
-  try {
-    await import('./client.js?verify')
-  } finally {
-    delete globalThis.window
+  const baseline = {
+    react: FakeReact,
+    '@deepseek-ai/dsh-client-ui-primitives': { IconChevronDownOutline14: () => null },
+    '@deepseek-ai/dsh-client-runtime/client': { createSnapshotStore: createStore },
+  }
+  /**
+   * Load the bundle behind one stand-in shell.
+   * @param url - module URL to load, query included.
+   * @returns the id and exports the loader captured.
+   */
+  const load = async (url) => {
+    let loaded
+    const previous = globalThis.window
+    globalThis.window = {
+      __ModuleLoader__: {
+        load({ id, factory }) {
+          loaded = {
+            id,
+            exports: factory((specifier) => {
+              assert.ok(Object.hasOwn(baseline, specifier), `the card may only request baseline modules, asked for ${specifier}`)
+              return baseline[specifier]
+            }),
+          }
+        },
+      },
+    }
+    try {
+      await import(url)
+    } finally {
+      globalThis.window = previous
+    }
+    return loaded
   }
 
+  const loaded = await load('./client.js?verify')
   assert.equal(loaded.id, 'dsh-pocket-console', 'the module-table row id is the package name')
-  assert.deepEqual(loaded.exports.inject, ['slots'])
+  assert.deepEqual(loaded.exports.inject, ['slots', 'settingsScope'])
   assert.equal(typeof loaded.exports.apply, 'function')
 
-  const ctx = {
-    slots: {
-      inject(name, contribute) {
-        calls.inject.push(name)
-        contribute()
-      },
-      register(options, Component) {
-        calls.register.push({ options, Component })
-      },
+  const base = { delaySeconds: 120, maxDetailChars: 1200, titlePrefix: 'DSH' }
+  let section = { ...base }
+  let user
+  const scopeListeners = new Set()
+  const scope = {
+    getSnapshot: () => ({
+      status: 'ready',
+      value: section,
+      base,
+      user,
+      revision: 1,
+      writable: true,
+      mode: 'host',
+    }),
+    subscribe(listener) {
+      scopeListeners.add(listener)
+      return () => { scopeListeners.delete(listener) }
+    },
+    async set(field, value) {
+      user = { ...(user ?? {}), [field]: value }
+      section = { ...section, [field]: value }
+      for (const listener of scopeListeners) listener()
+    },
+    async unset(field) {
+      if (user !== undefined) {
+        const next = { ...user }
+        delete next[field]
+        user = Object.keys(next).length === 0 ? undefined : next
+      }
+      section = { ...section, [field]: base[field] }
+      for (const listener of scopeListeners) listener()
     },
   }
-  loaded.exports.apply(ctx)
+  /**
+   * Apply one loaded browser half against a stand-in host context.
+   * @param module - the loaded browser half.
+   * @returns what the card registered and bound.
+   */
+  const applyTo = (module) => {
+    const seen = { inject: [], register: [], bind: undefined }
+    module.apply({
+      settingsScope: { bind(spec) { seen.bind = spec; return scope } },
+      slots: {
+        inject(name, contribute) {
+          seen.inject.push(name)
+          contribute()
+        },
+        register(options, Component) {
+          seen.register.push({ options, Component })
+        },
+      },
+    })
+    return { ...seen, registered: seen.register.at(-1) }
+  }
 
-  assert.deepEqual(calls.inject, ['settings.plugin.item'])
-  assert.equal(calls.register.length, 1)
-  assert.equal(calls.register[0].options.key, 'pocket-console', 'the card is keyed by the settings namespace')
-  assert.equal(typeof calls.register[0].Component, 'function')
-  assert.equal(typeof calls.register[0].options.inject().copy.title, 'string')
+  const first = applyTo(loaded.exports)
+  assert.deepEqual(first.inject, ['settings.plugin.item'])
+  assert.deepEqual(first.bind, { namespace: 'pocket-console' }, 'the card binds its own settings namespace')
+  assert.equal(first.registered.options.key, 'pocket-console', 'the card is keyed by the settings namespace')
+  assert.equal(typeof first.registered.Component, 'function')
+
+  const face = first.registered.options.inject()
+  assert.equal(typeof face.copy.title, 'string')
+  assert.equal(typeof face.edit, 'function')
+  assert.equal(typeof face.resetField, 'function')
+  assert.equal(typeof face.save, 'function')
+  assert.equal(typeof face.discard, 'function')
+  assert.equal(typeof face.hooks.pocketConsole.getSnapshot, 'function', 'form state rides the hooks compartment')
+
+  // The card edits its own namespace: it stages what the user types, writes on
+  // save, and shows whether the user layer carries a field.
+  const card = face.hooks.pocketConsole
+  assert.equal(card.getSnapshot().shell.dirty, false)
+  assert.deepEqual(card.getSnapshot().delaySeconds, { text: '120', overridden: false, invalid: false })
+
+  face.edit('delaySeconds', '300')
+  assert.equal(card.getSnapshot().shell.dirty, true, 'an edit stages instead of writing')
+  assert.equal(section.delaySeconds, 120, 'nothing reaches the document before a save')
+
+  await face.save()
+  assert.equal(section.delaySeconds, 300, 'a save writes the staged value')
+  assert.equal(card.getSnapshot().shell.dirty, false)
+  assert.equal(card.getSnapshot().delaySeconds.overridden, true, 'the field now carries a user-layer entry')
+
+  face.edit('delaySeconds', '不是数字')
+  assert.equal(card.getSnapshot().delaySeconds.invalid, true, 'a draft the field cannot accept blocks the save')
+  await face.save()
+  assert.equal(section.delaySeconds, 300, 'an invalid draft writes nothing')
+
+  face.resetField('delaySeconds')
+  await face.save()
+  assert.equal(section.delaySeconds, 120, 'a reset re-inherits the composition layer')
+  assert.equal(card.getSnapshot().delaySeconds.overridden, false)
+
+  // The shell publishes the active language on <html>; the card follows it.
+  globalThis.document = { documentElement: { lang: 'zh-CN' } }
+  try {
+    const chinese = await load('./client.js?verify-zh')
+    assert.equal(applyTo(chinese.exports).registered.options.inject().copy.title, '口袋控制台')
+  } finally {
+    delete globalThis.document
+  }
 })

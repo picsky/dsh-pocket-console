@@ -79,7 +79,7 @@ Two design points carry the whole thing:
 - **It registers with `prepend: true`.** The shipped Web forwarding listener does not call `next()` while a browser is connected, so an escalation answerer registered behind it would never run at all.
 - **It calls `next()` first and races the timer.** The desktop chain keeps running unchanged; whichever side answers first wins. Approval semantics do not change — a grant is still one-shot (`allowed-once`).
 
-The browser card talks to the Host half over **same-origin HTTP routes** (`/__pocket/state`, `/bind`, `/unbind`, `/qr.svg`) rather than a Remote method: the Remote type surface is generated and the forwarded-event allowlist is host-owned, so neither is open to out-of-tree plugins. Same-origin reuses the browser's existing session and needs no token.
+The card edits the settings above through the client **settings scope**, so each write is fenced by the revision the card read, and a save is the only thing that writes. Binding and status talk to the Host half over **same-origin HTTP routes** (`/__pocket/state`, `/bind`, `/unbind`, `/qr.svg`) rather than a Remote method: the Remote type surface is generated and the forwarded-event allowlist is host-owned, so neither is open to out-of-tree plugins. Same-origin reuses the browser's existing session and needs no token. `/state` reports the enrollment, the effective settings, and every escalation still open — with what each one is and whether the phone already has it.
 
 ## Answering questions from your phone
 
@@ -88,6 +88,8 @@ The browser card talks to the Host half over **same-origin HTTP routes** (`/__po
 | | Desktop GUI | Phone card |
 |---|---|---|
 | Layout | One question at a time, with Back / Next | All questions visible, answer in any order |
+| Options | A list, each with its description | One full-width button per option, descriptions in the body above |
+| Typed answer | Always available beside the options | Always available beside the options |
 | Answered | Gone once you page past it | **Stays in place**, shows `✅ your choice`, loses its controls |
 | Submit | "Submit" appears on the last question only | Resolves automatically once every question is answered |
 
@@ -95,9 +97,10 @@ All-at-once suits a phone: each card rewrite is a network round trip, so a page-
 
 Question shapes:
 
-- options, single-select → a row of buttons; one tap records the answer
+- options, single-select → one full-width button per option, plus a typed answer for the same question
 - options, multi-select → checkboxes plus a Submit button
 - no options → a free-text input plus a Submit button
+- an option `description` renders as an **Options** legend in the body — a button label has no room for it
 
 ## Configuration
 
@@ -207,7 +210,7 @@ npm test
 
 Nothing to install first: the suite replaces its four production dependencies through a Node module resolution hook (`test/hooks.mjs`), so it needs no credentials and no network.
 
-18 cases cover: settings namespace and route registration, no escalation before binding, the unbound → awaiting → bound state machine, the QR route, cross-origin refusal, unbind cleanup, delayed delivery, card contents, button round-trip, desktop-first suppression, multi-question accumulation and card rewrite, multi-select forms, free text, forged-option refusal, re-binding by direct message, runtime settings changes, cancellation, disposal, failure degradation, and the browser half's load-and-register shape.
+19 cases cover: settings namespace and route registration, no escalation before binding, the unbound → awaiting → bound state machine, the QR route, cross-origin refusal, unbind cleanup, delayed delivery, card contents, button round-trip, desktop-first suppression, multi-question accumulation and card rewrite, multi-select forms, free text, forged-option refusal, re-binding by direct message, the pending report, runtime settings changes, cancellation, disposal, failure degradation, and the browser half's load-and-register shape.
 
 Debug with a local overlay by pointing `channel` at a relative path:
 
