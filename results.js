@@ -64,7 +64,9 @@ export function createResultNotifier({ ctx, log, channel, settings, now = () => 
     if (track.timer !== undefined) clearTimeout(track.timer)
     track.timer = setTimeout(() => {
       track.timer = undefined
-      void fire(session)
+      // A throw here would be an uncaught exception, which the harness treats as
+      // fatal: a notification must never be able to end the process.
+      void fire(session).catch(error => { log.warn('结果通知失败', error) })
     }, settings().delaySeconds * 1000)
     track.timer.unref?.()
   }
@@ -82,7 +84,9 @@ export function createResultNotifier({ ctx, log, channel, settings, now = () => 
       log.info('结果未通知：同一会话仍在冷却期内。')
       return
     }
-    const agent = ctx.agents?.get?.(session)
+    // `ctx.get`, not `ctx.agents`: reading a service property without an
+    // `inject` declaration throws, and this feature is optional.
+    const agent = ctx.get?.('agents')?.get?.(session)
     if (agent === undefined) {
       log.info('结果未通知：该会话没有活跃 agent（本版本不恢复已回收的会话）。')
       return
@@ -174,7 +178,7 @@ export function createResultNotifier({ ctx, log, channel, settings, now = () => 
     if (notice === undefined) return { toast: '该结果已过期', accepted: false }
     const text = typeof values?.[INSTRUCTION_FIELD] === 'string' ? values[INSTRUCTION_FIELD].trim() : ''
     if (text === '') return { toast: '指令为空，未发送', accepted: false }
-    const agent = ctx.agents?.get?.(notice.session)
+    const agent = ctx.get?.('agents')?.get?.(notice.session)
     if (agent === undefined) {
       return { toast: '会话已不在运行，指令未发送', accepted: false }
     }

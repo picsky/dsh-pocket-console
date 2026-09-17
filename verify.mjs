@@ -143,9 +143,6 @@ async function scaffold(configOverrides = {}, { services = ['settings', 'webServ
       warn: (error) => { warnings.push(error) },
       info: (message) => { infos.push(String(message)) },
     },
-    agents: {
-      get: (id) => agents.get(id),
-    },
     credentials: {
       resolve: async (ref) => (values.has(ref) ? { value: values.get(ref), source: 'file' } : undefined),
       set: async (ref, value) => { values.set(ref, value) },
@@ -159,6 +156,11 @@ async function scaffold(configOverrides = {}, { services = ['settings', 'webServ
       deleteRecord: async (key) => { records.delete(key) },
     },
     get(name) {
+      // The agent registry is core rather than an optional service, so it is
+      // reachable whether or not this deployment composed the optional pair.
+      // Reading it through `get` is also what keeps a deployment without it
+      // loadable: a service property read would throw without an `inject`.
+      if (name === 'agents') return { get: (id) => agents.get(id) }
       if (!composed.has(name)) return undefined
       if (name === 'webServer') return webServer
       if (name === 'settings') return settings
@@ -184,7 +186,17 @@ async function scaffold(configOverrides = {}, { services = ['settings', 'webServ
       return disposer
     },
   }
-  await Plugin.apply(ctx, config)
+  // Cordis throws when a service property is read without an `inject`
+  // declaration, so this context does too: a plugin that reaches a service
+  // directly fails here rather than on a user's machine. Services are reached
+  // through `get`, which is the accessor that needs no declaration.
+  const guarded = new Proxy(ctx, {
+    get(target, key) {
+      if (key in target) return target[key]
+      throw new Error(`cannot get property "${String(key)}" without inject`)
+    },
+  })
+  await Plugin.apply(guarded, config)
   await sleep(10)
 
   /** Drive the registered same-origin route. */
@@ -961,7 +973,7 @@ test('stays silent while notifications are off or the session is still working',
 
   const busy = await scaffold({ resultNotify: 'idle' })
   await bind(busy.route, { openId: 'ou_scanner' })
-  busy.agents.set('s_busy', { status: 'working', followup: () => {} })
+  busy.agents.set('s_busy', { status: 'running', followup: () => {} })
   const busyEmit = busy.listenerOf('session/event').handler
   runTurn(busyEmit, 's_busy')
   await sleep(1100)
