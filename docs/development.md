@@ -14,9 +14,10 @@ npm test
 ## The suite
 
 Nothing to install first: the suite replaces its five production dependencies through a
-Node module resolution hook (`test/hooks.mjs`), so it needs no credentials and no
+Node module resolution hook (`tests/fixtures/hooks.mjs`), so it needs no credentials and no
 network. Cases live under `tests/`, one file per domain over the shared harness in
-`tests/support/harness.mjs`.
+`tests/support/harness.mjs`; the hook and the dependency stubs it installs sit in
+`tests/fixtures/`.
 
 | File | What it holds |
 |---|---|

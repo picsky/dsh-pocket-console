@@ -14,16 +14,19 @@ answers the other, and a third one of the same panel answers nothing.
 
 | # | Asset | The question it answers | Where it goes |
 |---|---|---|---|
-| 1 | `hero-pairing.svg` / `hero-pairing.png` | "What is this, in one look?" — the same request on the page and on the phone | Under the title, above **The problem** |
+| 1 | `hero-pairing.png` | "What is this, in one look?" — the same request on the page and on the phone | Under the title, above **The problem** |
 | 2 | `demo.gif` | "Show me the whole loop once" — bind → walk away → approve on the phone → the page settles | The existing commented block under **What it does** |
-| 3 | `phone-approval.svg`, `phone-question.svg`, `phone-result.svg` | "What exactly arrives on my phone?" — the three card shapes | **Answering questions from your phone** and **Result notices** |
-| 4 | `settings-card.svg` + host messages | "How much work is setup?" — the panel, the QR, the terminal line | **Quick start**, step 1 |
+| 3 | `phone-questions.png`, `phone-result.png` | "What exactly arrives on my phone?" — two of the card shapes | **Answering questions from your phone** and **Result notices** |
+| 4 | `settings-card.png` | "How much work is setup?" — the panel, the QR | **Quick start**, step 1 |
 | 5 | a mermaid block (§7) | "Where does this sit in DSH?" — desktop-first, then the timer | **How it works** — shipped |
-
-`demo-storyboard.svg` is the printed board for §3, not a README asset.
 
 Order matters more than count. #1 buys the reader's next ten seconds; #2 buys the
 next minute. If only one thing gets made, make #1. If only two, add #2.
+
+**Everything here is a capture, not a drawing.** Earlier revisions of this folder
+carried five hand-drawn SVGs as stand-ins; they were removed, because a drawing of a
+panel is a picture of something that does not exist. A real capture cannot be out of
+date with the product, and it is not a second thing to maintain.
 
 **What not to do:** six screenshots stacked in a grid. The panel is already
 described in prose and a table; a picture of the same panel a fourth time is
@@ -53,9 +56,10 @@ Without that label the image reads like "we spam your phone", which is the exact
 misreading the **Why not just forward every request to my phone?** section exists
 to correct.
 
-`hero-pairing.svg` in this folder is that layout, drawn with the real copy from
-`messages.js` / `client.js`. Rebuild it from real screenshots once they exist —
-the SVG is a stand-in and a crop guide, not the final asset.
+**Build it from two captures, not from a drawing:** the approval dialog on the page, and
+the same approval as a Feishu card on the phone. Compose them side by side and put the
+relative timing between them. The two surfaces must show **the same request** — the same
+tool name and the same reason — or the pairing argument does not land.
 
 ## 3. The GIF: the loop, in ≤ 10 seconds
 
@@ -180,12 +184,13 @@ places, so the two languages do not drift.
 
 ## 7. The diagrams
 
-`sequence-approval.svg` is deliberately **not** shipped, and is not in this folder: a
-hand-drawn sequence diagram goes stale the moment a participant is renamed. The one
-diagram that earns its place is the mermaid block below — it shows the two things prose
-keeps having to re-explain: that the plugin calls `next()` **first**, and that the phone
-is reached by a **timer**, not by default. It is already in **How it works** of both
-READMEs, beside the ASCII waterfall that names the two seams.
+**Diagrams are mermaid, not images.** A drawn sequence diagram goes stale the moment a
+participant is renamed, and it is a file to keep in step; a mermaid block is text, it
+diffs, and GitHub renders it for free. The one diagram that earns its place is the block
+below — it shows the two things prose keeps having to re-explain: that the plugin calls
+`next()` **first**, and that the phone is reached by a **timer**, not by default. It is
+already in **How it works** of both READMEs, beside the ASCII waterfall that names the two
+seams.
 
 ```mermaid
 sequenceDiagram
@@ -218,76 +223,44 @@ connected | failed`, with `reconnecting` in the middle) is the one other
 candidate, and it fits inside **Limitations** or the settings doc — not the root
 README.
 
-## 8. Where each asset goes in the README
+## 8. Where each capture goes
 
-| Asset | Section | English README | Chinese README |
-|---|---|---|---|
-| `hero-pairing` | after the badges and the unofficial notice | needs an `.en` twin | ✅ `hero-pairing.svg` |
-| `demo.gif` | the existing commented block | ✅ | ✅ |
-| `phone-question` | **Answering questions from your phone** | needs an `.en` twin | ✅ `phone-question.svg` |
-| `phone-result` | **Result notices** | needs an `.en` twin | ✅ `phone-result.svg` |
-| `settings-card` | **Quick start**, step 1 | needs an `.en` twin | ✅ `settings-card.svg` |
-| `phone-approval` | **What it does**, beside the phone-as-backup bullet | needs an `.en` twin | ✅ `phone-approval.svg` |
-| a mermaid block | **How it works** | ✅ shipped | ✅ shipped |
+Both READMEs get the same **pictures in the same places** — a bilingual project whose two
+entry points show different screenshots is two projects.
 
-`sequence-approval.svg` is not in this table because it does not exist and is not meant
-to — §7 says why.
+| Asset | English README | Chinese README |
+|---|---|---|
+| `hero-pairing.png` | after the badges and the unofficial notice | same place |
+| `demo.gif` | the existing commented block | same place |
+| `phone-questions.png` | **Answering questions from your phone** | same place |
+| `phone-result.png` | **Result notices** | same place |
+| `settings-card.png` | **Quick start**, step 1 | same place |
+| the mermaid block | **How it works** — already shipped in both | already shipped in both |
 
-Both READMEs get the same **pictures in the same places** — a bilingual project whose
-two entry points show different screenshots is two projects. What they must not get is
-the same **text**: the SVGs in this folder are drawn from the Chinese copy in
-`messages.js` / `client.js`, so they belong in `README.zh-CN.md` and need an English
-twin before `README.md` can use them.
+A capture is **language-bound**: it shows whatever the deployment was running in. So a
+Chinese deployment's screenshots belong in `README.zh-CN.md` and a Chinese card in the
+English README is the same mistake as a Chinese diagram there. Two ways out, in order of
+preference:
 
-Name the pair the way the READMEs are named:
-
-| Chinese README | English README |
-|---|---|
-| `hero-pairing.zh.svg` | `hero-pairing.en.svg` |
-| `settings-card.zh.svg` | `settings-card.en.svg` |
-| `phone-question.zh.svg` | `phone-question.en.svg` |
-| `phone-result.zh.svg` | `phone-result.en.svg` |
-
-The code and identifiers inside a drawing (`bash: rm -rf ./dist`, `open_id`,
-`delaySeconds`) are the same in both, because that is what the product actually
-renders; only the surrounding prose is translated. A captured screenshot replaces both
-variants at once, because it already shows whichever language the deployment was
-running in — and a screenshot of a Chinese card in the English README is the same
-mistake as a Chinese diagram there.
+1. **Capture each surface twice**, once with the interface in each language. This is the
+   honest pair, and it costs one extra pass in the same session.
+2. **Capture once in English** if the pair is not worth the pass, and say so — an English
+   screenshot in a Chinese README reads as a screenshot, not as an untranslated string.
 
 `demo.gif` is language-independent: it is a recording of a running deployment, so it
 appears in both READMEs as it is.
 
-## 9. The insertion snippets
+## 9. Wiring a capture in
 
-Ready to paste, in the order they appear. Every `src` below is already the absolute form
-§6 settled on, so a snippet can go in without failing `check:parity`. `assets/` ships no
-build step, so a `.svg` is referenced exactly like a `.png`.
+Every image in a root README uses an absolute url — §6 says why. The snippets below are
+already in that form, so one can be pasted without failing `check:parity`.
 
-**What is ready today.** Four SVGs in this folder — the hero, the settings card, and
-the two phone cards — are drawn from the real Chinese copy in `messages.js` /
-`client.js`, so they can be wired into `README.zh-CN.md` now. Three things cannot:
-
-- **`demo.gif`** does not exist yet. The snippet below is the one to paste *after*
-  recording; pasting it before puts a broken image on the front page.
-- **The English README has no drawing yet.** Each SVG needs an `.en` twin (see §8)
-  before `README.md` can use one.
-- **A screenshot of a real screen** beats a drawing of one, every time. Replace each
-  `.svg` with a captured `.png` as soon as the capture exists — the draw is a crop guide
-  and a stand-in, not the final asset.
-
-`npm run check:parity` enforces the first half of that: an `<img>` a README actually
-renders must resolve. The commented insertion point for the GIF is deliberately exempt,
-because a plan is not an image.
-
-**Under the title** (replaces nothing; goes between the `> **Unofficial
-project.**` notice and the first `---`):
-
-```html
-<p align="center">
-  <img src="https://raw.githubusercontent.com/picsky/dsh-pocket-console/main/assets/hero-pairing.svg" alt="The same approval on the desktop page and on the phone, reached after 120 seconds" width="880">
-</p>
-```
+**What exists today: nothing.** `demo.gif` and the stills are all still to be captured,
+which is why the README's insertion point is still a commented block. The snippet below
+is the one to paste *after* recording; pasting it before puts a broken image on the front
+page. `npm run check:parity` enforces that: an `<img>` a README actually renders must
+resolve, and the commented insertion point is deliberately exempt because a plan is not an
+image.
 
 **The existing commented GIF block** — replace the comment with:
 
@@ -297,57 +270,13 @@ project.**` notice and the first `---`):
 </p>
 ```
 
-**In `## Answering questions from your phone`**, above the comparison table:
+**Every other capture** follows the same shape, at the width that suits it:
 
 ```html
 <p align="center">
-  <img src="https://raw.githubusercontent.com/picsky/dsh-pocket-console/main/assets/phone-question.svg" alt="Three questions laid out at once, with the answered one kept in place" width="380">
+  <img src="https://raw.githubusercontent.com/picsky/dsh-pocket-console/main/assets/<file>.png" alt="<what it shows>" width="720">
 </p>
 ```
 
-**In `## Result notices`**, after the paragraph that explains the reply box:
-
-```html
-<p align="center">
-  <img src="https://raw.githubusercontent.com/picsky/dsh-pocket-console/main/assets/phone-result.svg" alt="A result notice with a box to reply in" width="380">
-</p>
-```
-
-**In `## Quick start`**, beside step 1:
-
-```html
-<p align="center">
-  <img src="https://raw.githubusercontent.com/picsky/dsh-pocket-console/main/assets/settings-card.svg" alt="The Pocket console settings card: binding buttons, escalation settings, and the pending list" width="720">
-</p>
-```
-
-**In `## How it works`**, in place of the ASCII waterfall diagram — or above it,
-whichever the mermaid renderer on npm turns out to be worth:
-
-````markdown
-```mermaid
-sequenceDiagram
-  autonumber
-  participant A as Agent
-  participant D as DSH harness
-  participant P as dsh-pocket-console
-  participant W as Desktop GUI
-  participant F as Feishu → phone
-
-  A->>D: tool call needs approval
-  D->>P: approval/request (prepend: true)
-  P->>D: next()  — the rest of the chain runs unchanged
-  D->>W: dialog opens and waits
-  P->>P: start delaySeconds (default 120 s)
-  Note over P,F: the timer expires with no desktop answer
-  P->>F: deliver the card
-  F-->>P: recipient taps Allow once
-  P->>D: resolve allowed-once
-  Note over W: the page settles by way of the browser mirror
-```
-````
-
-Every one of these has `width` set. Markdown image syntax cannot express a
-width, and an unsized SVG in a README renders at its intrinsic size — which for
-a 1000 px diagram is often wider than the column, and for a 420 px phone mockup
-is often a postage stamp.
+Set `width` on every one. Markdown image syntax cannot express a width, and an unsized
+capture renders at its intrinsic size — often wider than the column.

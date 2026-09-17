@@ -49,7 +49,7 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "scripts": {
-    "test": "node --import ./test/hooks.mjs --test \"tests/**/*.test.mjs\"",
+    "test": "node --import ./tests/fixtures/hooks.mjs --test \"tests/**/*.test.mjs\"",
     "prepack": "node scripts/verify-pack.mjs",
     "check:parity": "node scripts/check-parity.mjs",
     "e2e": "node scripts/e2e-profile.mjs"

@@ -23,14 +23,18 @@ What exists today, so nobody rebuilds it:
 
 | Asset | State | Blocks |
 |---|---|---|
-| `hero-pairing.svg`, `settings-card.svg`, `phone-question.svg`, `phone-result.svg`, `phone-approval.svg` | Chinese stand-ins, drawn from the real `messages.js` / `client.js` copy, valid and self-contained | An `.en` twin before the English README can use any of them |
-| `demo-storyboard.svg`, `demo-storyboard.md` | The recording plan | Nothing — these are instructions, not assets |
+| `demo-storyboard.md` | The frame-by-frame recording plan | Nothing — it is instructions, not an asset |
 | `demo.gif` | **Does not exist** | §1, and the launch |
+| The stills (`hero-pairing.png`, `settings-card.png`, `phone-questions.png`, `phone-result.png`) | **Do not exist** | Nothing yet; §1 of the asset spec ranks them |
 
-**Not wired into either README yet**, and that is deliberate rather than forgotten: the
-five SVGs are Chinese, so they fit `README.zh-CN.md` only, and wiring one language's
-README before the other's twin exists is how a bilingual project starts showing two
-different pictures.
+Five hand-drawn SVGs stood in for those stills and **were removed**. They were pictures of
+a screen rather than the screen, which is the one thing a `4 MB` plugin with a real UI does
+not need: a capture cannot drift from the product, and it is not a second artefact to keep
+in step. `assets/README.md` now describes captures only.
+
+**Nothing is wired into either README yet**, and that is deliberate rather than forgotten:
+the insertion point is a commented block with the absolute url already in place, so it is
+correct the day the capture exists.
 
 **A trap that is now closed.** `assets/` is not in `package.json`'s `files`, on
 purpose — a 4 MB package does not need 3 MB of GIF. But the README is rendered on

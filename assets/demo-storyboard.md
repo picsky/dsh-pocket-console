@@ -2,7 +2,6 @@
 
 The shot list in [README.md](README.md) says *what* happens. This file says
 *which frames*, so the recording can be made in one pass and exported once.
-Companion to `demo-storyboard.svg`, which draws the same thing as a strip.
 
 ## Output spec
 
@@ -134,10 +133,10 @@ ffmpeg -i demo.mp4 -vf "fps=20,scale=1280:-1:flags=lanczos" -c:v libwebp -lossle
 
 | Left out | Why | Where it goes instead |
 |---|---|---|
-| `ask_user_question` on the phone | A second card shape costs ~2 s and ~40 frames; the approval already teaches "tap to continue" | `phone-question.svg`, or a real still in **Answering questions from your phone** |
-| The result notice and its reply box | Different direction, different mental model — this GIF is about blocking requests | `phone-result.svg` in **Result notices** |
+| `ask_user_question` on the phone | A second card shape costs ~2 s and ~40 frames; the approval already teaches "tap to continue" | A real still in **Answering questions from your phone** |
+| The result notice and its reply box | Different direction, different mental model — this GIF is about blocking requests | A real still in **Result notices** |
 | The QR app-creation wait | Seconds of spinner, no information | S2 exists to say the wait is announced |
-| The 120-second timer | Cannot be shown honestly in a GIF | The caption in S4, and the hero image's arrow |
+| The 120-second timer | Cannot be shown honestly in a GIF | The caption in S4, and a still of the desktop-first card |
 | Any terminal output | Establishes nothing for a GUI product | A still of `logNoCredentials` / `logReady`, beside the settings card |
 | A wrong-credential error path | It is a feature, but it is not the pitch | **Quick start** prose; it is already explained there well |
 
