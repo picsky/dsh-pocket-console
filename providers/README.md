@@ -60,6 +60,7 @@ export async function create({ ctx, config, binding, log }) {
     payload,                 // 提交时原样回传
     fieldId,                 // 提交值到达 onAction(values) 时使用的键
     options?,                // {label, value}[]；缺省渲染自由文本输入
+    customFieldId?,          // 同一次提交里再带回一个自由文本（多选题的"补充说明"）
     multiSelect: boolean,
     submitLabel: string,
   }],
@@ -76,6 +77,8 @@ onAction({ payload, values, messageId })
 
 - `payload`：用户按下的按钮所携带的 `payload`。
 - `values`：表单提交值，形如 `{ [fieldId]: string | string[] }`；非表单按钮时为 `undefined`。
+  一个表单可以同时声明 `fieldId` 与 `customFieldId`，那时两个键在同一次提交里一起到达——
+  多选题的选项与"补充说明"就是这样一起回传的。
 - `messageId`：通道自己的消息句柄，核心不用，供通道实现 `update` 时关联。
 
 返回值是 `{ toast, accepted }`，通道可据此给用户即时反馈（飞书里映射为 toast 弹窗）。

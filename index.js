@@ -54,6 +54,10 @@ export const Config = z.object({
 const ALLOW = 'allowed-once'
 /** Approval outcome meaning "do not proceed". */
 const REJECT = 'rejected'
+/** Form field carrying the chosen options, or the typed answer when none are offered. */
+const FORM_VALUE_FIELD = 'value'
+/** Form field carrying a typed answer beside a multi-select's options. */
+const FORM_CUSTOM_FIELD = 'custom'
 
 /** Settings namespace and browser-card slot key; lowercase-hyphenated per the settings grammar. */
 const NAME = 'pocket-console'
@@ -349,10 +353,15 @@ export async function apply(ctx, config) {
       if (options.length === 0 || question.multiSelect === true) {
         forms.push({
           payload: { rid: record.id, q: question.id, submit: true },
-          fieldId: 'value',
+          fieldId: FORM_VALUE_FIELD,
           ...(options.length === 0
             ? {}
-            : { options: options.map(option => ({ label: option.label, value: option.label })) }),
+            : {
+                options: options.map(option => ({ label: option.label, value: option.label })),
+                // A multi-select answer may carry text beside its choices, so
+                // the form offers the second control the desktop card shows.
+                customFieldId: FORM_CUSTOM_FIELD,
+              }),
           multiSelect: question.multiSelect === true,
           submitLabel: '提交本题',
         })
@@ -370,7 +379,7 @@ export async function apply(ctx, config) {
       // text alone, with no option selected.
       forms.push({
         payload: { rid: record.id, q: question.id, submit: true },
-        fieldId: 'value',
+        fieldId: FORM_VALUE_FIELD,
         submitLabel: '提交其他回答',
       })
     }
@@ -492,9 +501,15 @@ export async function apply(ctx, config) {
 
     let answer
     if (payload.submit === true) {
-      const submitted = values?.value
+      const submitted = values?.[FORM_VALUE_FIELD]
+      const typed = values?.[FORM_CUSTOM_FIELD]
       const selected = Array.isArray(submitted) ? submitted.map(String) : []
-      const custom = typeof submitted === 'string' && submitted !== '' ? submitted : undefined
+      // A form with no options carries its typed answer in the value field; a
+      // multi-select form carries choices there and the typed answer beside
+      // them, which is the pair the desktop card submits.
+      const custom = typeof submitted === 'string' && submitted !== ''
+        ? submitted
+        : typeof typed === 'string' && typed.trim() !== '' ? typed.trim() : undefined
       if (selected.length === 0 && custom === undefined) return undefined
       answer = { id: question.id, selected, ...(custom === undefined ? {} : { custom }) }
     } else {

@@ -119,6 +119,11 @@ function renderCard(view) {
                 value: option.value,
               })),
             },
+        // A multi-select question takes a typed answer beside its choices, the
+        // pair the desktop card offers; one submit carries both names.
+        ...(form.customFieldId === undefined
+          ? []
+          : [{ tag: 'input', name: form.customFieldId, placeholder: plainText('补充说明（可选）') }]),
         {
           ...button(form.submitLabel, 'primary', form.payload),
           form_action_type: 'submit',

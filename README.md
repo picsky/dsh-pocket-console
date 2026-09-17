@@ -92,7 +92,7 @@ The card edits the settings above through the client **settings scope**, so each
 |---|---|---|
 | Layout | One question at a time, with Back / Next | All questions visible, answer in any order |
 | Options | A list, each with its description | One full-width button per option, descriptions in the body above |
-| Typed answer | Always available beside the options | Always available beside the options |
+| Typed answer | Available beside the options | Available beside the options, submitted with them |
 | Answered | Gone once you page past it | **Stays in place**, shows `✅ your choice`, loses its controls |
 | Submit | "Submit" appears on the last question only | Resolves automatically once every question is answered |
 
@@ -101,7 +101,7 @@ All-at-once suits a phone: each card rewrite is a network round trip, so a page-
 Question shapes:
 
 - options, single-select → one full-width button per option, plus a typed answer for the same question
-- options, multi-select → checkboxes plus a Submit button
+- options, multi-select → checkboxes plus an optional typed answer, submitted together
 - no options → a free-text input plus a Submit button
 - an option `description` renders as an **Options** legend in the body — a button label has no room for it
 
@@ -213,7 +213,7 @@ npm test
 
 Nothing to install first: the suite replaces its four production dependencies through a Node module resolution hook (`test/hooks.mjs`), so it needs no credentials and no network.
 
-20 cases cover: settings namespace and route registration, no escalation before binding, the unbound → awaiting → bound state machine, the QR route, cross-origin refusal, unbind cleanup, the unbind race against a late scan, delayed delivery, card contents, button round-trip, desktop-first suppression, multi-question accumulation and card rewrite, multi-select forms, free text, forged-option refusal, re-binding by direct message, the pending report, runtime settings changes, cancellation, disposal, failure degradation, and the browser half's load-and-register shape.
+21 cases cover: settings namespace and route registration, no escalation before binding, the unbound → awaiting → bound state machine, the QR route, cross-origin refusal, unbind cleanup, the unbind race against a late scan, delayed delivery, card contents, button round-trip, desktop-first suppression, multi-question accumulation and card rewrite, multi-select forms with and without a typed answer, free text, forged-option refusal, re-binding by direct message, the pending report, runtime settings changes, cancellation, disposal, failure degradation, and the browser half's load-and-register shape.
 
 Debug with a local overlay by pointing `channel` at a relative path:
 

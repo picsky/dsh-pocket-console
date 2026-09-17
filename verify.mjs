@@ -449,7 +449,35 @@ test('accumulates answers until every question is answered', async () => {
   })
 })
 
-test('accepts a multi-select form submission', async () => {
+test('accepts a multi-select form submission with a typed answer beside the choices', async () => {
+  const { route, listenerOf } = await scaffold()
+  await bind(route)
+  const questions = listenerOf('user-questions/request')
+
+  const desktop = Promise.withResolvers()
+  const result = questions.handler({
+    questions: [{
+      id: 'pick',
+      question: '选哪些？',
+      multiSelect: true,
+      options: [{ label: 'x' }, { label: 'y' }],
+    }],
+    signal: new AbortController().signal,
+  }, () => desktop.promise)
+  await sleep(1200)
+
+  const card = sentCard()
+  const submit = callbackValues(card).find(value => value.submit === true)
+  assert.ok(submit, 'a multi-select question needs a submit button')
+  assert.match(JSON.stringify(card), /"name":"custom"/, 'a multi-select form carries a typed answer beside its choices')
+
+  await clickCard(submit, { value: ['x', 'y'], custom: '带上发布说明' })
+  assert.deepEqual(await result, {
+    answers: [{ id: 'pick', selected: ['x', 'y'], custom: '带上发布说明' }],
+  })
+})
+
+test('a multi-select submission without typed text carries no custom answer', async () => {
   const { route, listenerOf } = await scaffold()
   await bind(route)
   const questions = listenerOf('user-questions/request')
@@ -467,10 +495,12 @@ test('accepts a multi-select form submission', async () => {
   await sleep(1200)
 
   const submit = callbackValues(sentCard()).find(value => value.submit === true)
-  assert.ok(submit, 'a multi-select question needs a submit button')
-
-  await clickCard(submit, { value: ['x', 'y'] })
-  assert.deepEqual(await result, { answers: [{ id: 'pick', selected: ['x', 'y'] }] })
+  await clickCard(submit, { value: ['x'], custom: '   ' })
+  assert.deepEqual(
+    await result,
+    { answers: [{ id: 'pick', selected: ['x'] }] },
+    'blank text is not an answer',
+  )
 })
 
 test('accepts a free-text form submission when the question offers no options', async () => {
