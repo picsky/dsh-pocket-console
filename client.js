@@ -722,6 +722,9 @@ window.__ModuleLoader__.load({
        * The panel renders from the Session UI's pending-interaction snapshot, so
        * that snapshot's transitions are the only direct observation of the panel
        * itself: nothing on the Host can see whether a browser is showing one.
+       * The snapshot holds one entry per session, and each is its own transition,
+       * so a panel opening in a second session is reported even while one is
+       * already showing.
        * @returns a disposer removing the subscription.
        */
       const watchPanel = () => {
@@ -733,12 +736,22 @@ window.__ModuleLoader__.load({
         let last = null
         const announce = () => {
           const pending = source.getSnapshot?.()
-          const entry = pending === undefined ? undefined : [...pending.values()][0]
-          const kind = entry === undefined ? null : String(entry.kind ?? 'unknown')
-          const state = kind === null ? 'closed' : `open:${kind}`
+          const entries = pending === undefined ? [] : [...pending.entries()]
+          const state = entries
+            .map(([id, entry]) => `${String(id)}:${String(entry?.kind ?? 'unknown')}`)
+            .sort()
+            .join(',')
           if (state === last) return
           last = state
-          report(kind === null ? 'panel-closed' : 'panel-open', kind ?? undefined)
+          if (entries.length === 0) {
+            report('panel-closed')
+            return
+          }
+          // The session's tail names which panel moved, so a report can be read
+          // without printing a whole session id.
+          report('panel-open', entries
+            .map(([id, entry]) => `${String(entry?.kind ?? 'unknown')}#${String(id).slice(-4)}`)
+            .join(' '))
         }
         announce()
         const off = source.subscribe(announce)

@@ -238,6 +238,25 @@ test('the browser half loads through the module loader and registers its card', 
     `a showing panel is reported: ${JSON.stringify(reports)}`,
   )
   assert.ok(panelListeners.size >= 1, 'the panel source is subscribed')
+
+  // One entry per session, so a second session's panel is its own transition even
+  // while the first is still showing — which is what a plain open/closed flag hid.
+  uiSession.pendingInteractions.getSnapshot = () => new Map([
+    ['session-1111', { kind: 'question' }],
+    ['session-2222', { kind: 'question' }],
+  ])
+  for (const listener of panelListeners) listener()
+  await sleep(20)
+  const showing = reports.filter(entry => entry.status === 'panel-open').at(-1)
+  assert.match(showing.reason, /question#1111/)
+  assert.match(showing.reason, /question#2222/)
+
+  uiSession.pendingInteractions.getSnapshot = () => new Map([['session-2222', { kind: 'question' }]])
+  for (const listener of panelListeners) listener()
+  await sleep(20)
+  const remaining = reports.filter(entry => entry.status === 'panel-open').at(-1)
+  assert.equal(remaining.reason, 'question#2222', 'the panel that stayed is the one named')
+
   uiSession.pendingInteractions.getSnapshot = () => new Map()
   for (const listener of panelListeners) listener()
   await sleep(20)
