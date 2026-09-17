@@ -31,6 +31,26 @@ jobs:
       # hook, so there is nothing to install and no credentials or network.
       - run: npm test
 
+  composition:
+    name: real composition
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # Only the application that installs the plugin proves it activates: a
+      # hand-built context does not enforce Cordis's service rules, which is how
+      # an undeclared service read once reached a user. Pinned to the release the
+      # plugin is verified against.
+      - run: npm install -g @deepseek-ai/dsh@0.1.6-alpha.1
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      # The tarball carries its transport, so the pack step needs installed deps.
+      - run: pnpm install
+      - run: npm run e2e
+
   package:
     name: publish payload
     runs-on: ubuntu-latest

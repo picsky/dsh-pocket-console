@@ -40,7 +40,8 @@
   "scripts": {
     "test": "node --import ./test/hooks.mjs --test \"tests/**/*.test.mjs\"",
     "prepack": "node scripts/verify-pack.mjs",
-    "check:parity": "node scripts/check-parity.mjs"
+    "check:parity": "node scripts/check-parity.mjs",
+    "e2e": "node scripts/e2e-profile.mjs"
   },
   "keywords": [
     "dsh",

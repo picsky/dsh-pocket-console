@@ -329,6 +329,9 @@ git 依赖会从 registry 解析它自己的依赖，于是 pnpm ≥11 会撞上
 npm test
 ```
 
+`npm run e2e` 是另一件事：它把打好的 tarball 装进一个临时 profile、真启动 `dsh web`，
+用来证明插件**真的被装配起来**——这一步需要 CONTRIBUTING 里写明的 `dsh` 版本。
+
 **不需要先装任何东西**：测试套件通过 Node 的模块解析钩子（`test/hooks.mjs`）
 把五个生产依赖换成桩，因此不需要凭据也不需要网络。
 

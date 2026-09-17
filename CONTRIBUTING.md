@@ -35,6 +35,20 @@ dsh plugin --profile web add .
 dsh web
 ```
 
+## The real-composition check
+
+`npm test` builds its own context. That is the right shape for behaviour and the
+wrong shape for activation: a hand-built context does not enforce Cordis's
+service rules, so a plugin that reads an undeclared service, misnames an export,
+or never activates still passes — and then fails on the machine that installed
+it. `npm run e2e` installs the packed tarball into a scratch `DSH_HOME`, boots
+the real `dsh web`, exchanges the printed launch token for the browser cookie,
+and reads `/__pocket/state` with it — and checks the same route refuses the same
+request without that cookie. It needs the `dsh` release the plugin is verified
+against (`npm install -g @deepseek-ai/dsh@0.1.6-alpha.1`) and a network for that
+install; everything else stays on the machine. CI runs it in the `composition`
+job.
+
 ## Publishing
 
 The published tarball must carry every runtime library inside it. `package.json`'s
