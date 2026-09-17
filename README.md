@@ -138,7 +138,7 @@ What suppresses or delays a notice:
 - One session notifies at most once per `resultNotifyCooldownSeconds`.
 - Delegated sessions are not reported separately; the session that asked for the subagent is.
 - A session whose agent the host has already reclaimed is not resumed, and says so in the log.
-- A notice stops accepting a reply as soon as it is superseded by a newer result, `resultNoticeTtlSeconds` pass, or new input arrives in the session from any surface — the card is rewritten to say which. Replying to a notice whose session moved on would otherwise inject an instruction written against a superseded answer.
+- A notice stops accepting a reply the moment it stops being the session's latest word: a newer result supersedes it, or new input arrives from any surface. There is no time limit — a notice you come back to tomorrow is still an offer. The card is rewritten to say why it stopped, so a reply can never inject an instruction written against a superseded answer.
 
 The instruction enters the session as **your message**, attributed the way the harness attributes human input: the surface a person is speaking through mints it, which is what dsh's own remote client does with an editor prompt (`packages/acp/acp/src/session.ts`). That attribution is also what keeps the instruction visible in the Web flow: anything else is rendered as injected context, folded into the turn's process. It therefore carries human authority too — a feature that requires human input accepts it — and the log does not distinguish it from a message typed at the desk.
 
@@ -163,7 +163,7 @@ Every value has a default, so the plugin works with no configuration. To tune it
     resultNotifyCooldownSeconds: 600
 ```
 
-`locale` chooses the language of the cards sent to the phone; every card string comes from one dictionary (`messages.js`), so a deployment reads in the language it configured — the Settings card itself follows the interface language either way. The other fields below are registered as a **settings namespace**, so they can be changed at runtime without a restart.
+Four settings are the **settings namespace**, changeable at runtime from the Settings card without a restart: `delaySeconds`, `maxDetailChars`, `titlePrefix`, and `resultNotify`. The rest of the table is deployment-level: they exist so a deployment can retune the transport, and a person never has to read about them. The phone card follows the interface language through `messages.js`; `locale` is the fallback for a deployment that never opens the Web UI.
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -175,7 +175,6 @@ Every value has a default, so the plugin works with no configuration. To tune it
 | `resultNotify` | `off` | `idle` sends each stopped session's result to the phone |
 | `resultNotifyCooldownSeconds` | `600` | Shortest gap between two result notices for one session |
 | `mirrorTtlSeconds` | `60` | How long a phone decision may still close the desktop composer |
-| `resultNoticeTtlSeconds` | `1800` | How long a result notice keeps accepting a reply |
 | `locale` | `zh` | Language of the cards sent to the phone (`zh` or `en`) |
 
 Transport settings (`channelConfig`):

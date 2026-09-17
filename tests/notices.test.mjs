@@ -189,8 +189,8 @@ test('a newer notice retires the one before it', async () => {
   assert.equal(followed.length, 1, 'the newest notice still works')
 })
 
-test('a notice past its window stops taking replies', async () => {
-  const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle', resultNoticeTtlSeconds: 0 })
+test('a notice you come back to later is still an offer', async () => {
+  const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle' })
   await bind(route, { openId: 'ou_scanner' })
   const followed = []
   agents.set('s_4', { status: 'idle', followup: (message) => { followed.push(message) } })
@@ -200,11 +200,13 @@ test('a notice past its window stops taking replies', async () => {
   await sleep(1100)
   const submit = callbackValues(sentCard()).find(value => value.submit === true)
 
-  const refused = await clickCard(submit, { value: '再改一下' })
-  assert.equal(refused.toast.type, 'warning')
-  assert.match(refused.toast.content, /已过期/)
+  // Nothing replaced the result and nobody replied, so elapsed time decides
+  // nothing: a notice answered much later is still answered, not refused.
+  await sleep(1200)
+  const accepted = await clickCard(submit, { value: '再改一下' })
+  assert.equal(accepted.toast.type, 'success')
   await sleep(10)
-  assert.deepEqual(followed, [], 'an expired notice injects nothing')
+  assert.equal(followed.length, 1, 'a late reply still reaches the session')
 })
 
 test('the notice copy follows the deployment language', async () => {

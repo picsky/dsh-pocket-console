@@ -110,7 +110,7 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
       buttons: [],
       forms: [{ payload: { nid: id, submit: true }, fieldId: INSTRUCTION_FIELD, submitLabel: messages().sendToAgent }],
     }
-    noticeSet(id, { session, handle: undefined, at: now() })
+    noticeSet(id, { session, handle: undefined })
     track.ended = undefined
     track.sentAt = now()
     try {
@@ -216,11 +216,6 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
     if (notice === undefined) return { toast: messages().noticeGone, accepted: false }
     const text = typeof values?.[INSTRUCTION_FIELD] === 'string' ? values[INSTRUCTION_FIELD].trim() : ''
     if (text === '') return { toast: messages().emptyInstruction, accepted: false }
-    // An old notice stops being an offer even when nothing replaced it.
-    if (now() - notice.at > settings().resultNoticeTtlSeconds * 1000) {
-      retire(notice.session, messages().noticeExpired)
-      return { toast: messages().noticeTtlPassed, accepted: false }
-    }
     const agent = ctx.get?.('agents')?.get?.(notice.session)
     if (agent === undefined) {
       return { toast: messages().noAgent, accepted: false }

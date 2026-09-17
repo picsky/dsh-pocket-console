@@ -54,19 +54,23 @@ export const Config = z.object({
   /**
    * Whether a stopped session's answer is offered to the channel with a box for
    * the next instruction. `'idle'` enables it; `'off'` leaves the channel to
-   * live requests only.
-   * @default 'off'
+   * live requests only. A fresh install notifies, because a result nobody
+   * hears about is the state this plugin exists to fix.
+   * @default 'idle'
    */
-  resultNotify: z.union(['off', 'idle']).default('off'),
+  resultNotify: z.union(['off', 'idle']).default('idle'),
   /**
    * Seconds before the same session may notify again, so a session running many
-   * short turns does not flood the channel.
-   * @default 600
+   * short turns does not flood the channel. The quiet window already collapses a
+   * run of turns; this is the brake for a deployment that sets `delaySeconds` to
+   * zero and watches a session churn.
+   * @default 0
    */
-  resultNotifyCooldownSeconds: z.natural().default(600),
+  resultNotifyCooldownSeconds: z.natural().default(0),
   /**
-   * Language of the cards sent to the phone. The GUI card is bilingual on its
-   * own; this is the copy a person reads in the chat app.
+   * Language of the cards sent to the phone, used until a browser tells the Host
+   * which language the interface is in. A deployment that never opens the Web UI
+   * keeps this copy.
    * @default 'zh'
    */
   locale: z.union(LOCALES).default('zh'),
@@ -77,18 +81,19 @@ export const Config = z.object({
    * @default 60
    */
   mirrorTtlSeconds: z.natural().default(60),
-  /**
-   * Seconds a result notice keeps accepting a reply. Past it the card still
-   * shows the result, but the instruction it would inject is refused.
-   * @default 1800
-   */
-  resultNoticeTtlSeconds: z.natural().default(1800),
 })
 
 /** Settings namespace and browser-card slot key; lowercase-hyphenated per the settings grammar. */
 const NAME = 'pocket-console'
 
-/** The user-tunable slice of this plugin, surfaced as a Settings card. */
+/**
+ * The user-tunable slice of this plugin, surfaced as a Settings card.
+ *
+ * A setting earns a place here when a person could want a different answer and
+ * can reason about the consequence. Timers that only exist to keep the transport
+ * well-behaved — the notice cooldown and the mirror window — stay in `Config`,
+ * where a deployment can still set them and nobody has to read about them.
+ */
 const SectionSchema = z.object({
   /** Seconds the desktop GUI may answer before the channel is used. */
   delaySeconds: z.natural().default(120),
@@ -97,15 +102,7 @@ const SectionSchema = z.object({
   /** Title prefix identifying the deployment. */
   titlePrefix: z.string().default('DSH'),
   /** Whether a stopped session's answer is offered to the channel. */
-  resultNotify: z.union(['off', 'idle']).default('off'),
-  /** Seconds before the same session may notify again. */
-  resultNotifyCooldownSeconds: z.natural().default(600),
-  /** Language of the cards sent to the phone. */
-  locale: z.union(LOCALES).default('zh'),
-  /** Seconds a phone decision stays on offer for the desktop mirror. */
-  mirrorTtlSeconds: z.natural().default(60),
-  /** Seconds a result notice keeps accepting a reply. */
-  resultNoticeTtlSeconds: z.natural().default(1800),
+  resultNotify: z.union(['off', 'idle']).default('idle'),
 })
 
 /**
@@ -194,7 +191,6 @@ export async function apply(ctx, config) {
     resultNotify: config.resultNotify,
     resultNotifyCooldownSeconds: config.resultNotifyCooldownSeconds,
     mirrorTtlSeconds: config.mirrorTtlSeconds,
-    resultNoticeTtlSeconds: config.resultNoticeTtlSeconds,
     locale: config.locale,
   })
   let settings = entry

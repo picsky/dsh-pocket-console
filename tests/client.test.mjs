@@ -92,7 +92,7 @@ test('the browser half loads through the module loader and registers its card', 
     'the bundle requests only modules the shell seeds',
   )
 
-  const base = { delaySeconds: 120, maxDetailChars: 1200, titlePrefix: 'DSH' }
+  const base = { delaySeconds: 120, maxDetailChars: 1200, titlePrefix: 'DSH', resultNotify: 'idle' }
   let section = { ...base }
   let user
   const scopeListeners = new Set()
