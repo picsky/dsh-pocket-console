@@ -30,7 +30,7 @@ window.__ModuleLoader__.load({
 
     const COPY = {
       zh: {
-        title: '口袋审批',
+        title: '口袋控制台',
         bound: '已绑定',
         unbound: '未绑定',
         awaiting: '等待扫码确认',
@@ -52,7 +52,7 @@ window.__ModuleLoader__.load({
         prefix: '标题前缀',
       },
       en: {
-        title: 'Pocket approval',
+        title: 'Pocket console',
         bound: 'Bound',
         unbound: 'Not bound',
         awaiting: 'Waiting for confirmation',

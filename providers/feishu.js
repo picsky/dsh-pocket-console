@@ -65,7 +65,7 @@ function resolveConfig(raw) {
     domain: config.domain === 'lark' ? Lark.Domain.Lark : Lark.Domain.Feishu,
     receiveId: config.receiveId,
     receiveIdType: config.receiveIdType ?? 'open_id',
-    appName: config.appName ?? 'DSH 审批助手',
+    appName: config.appName ?? 'DSH Pocket Console',
     appDesc: config.appDesc ?? '把 DeepSeek Harness 的工具审批与提问送到飞书',
     createOnly: config.createOnly ?? true,
   }
