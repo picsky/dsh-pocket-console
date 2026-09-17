@@ -71,8 +71,8 @@ window.__ModuleLoader__.load({
         copy: '复制链接',
         copied: '已复制',
         loading: '读取中…',
-        delay: '桌面专享时间',
-        delayHint: '桌面在这段时间内可以先答；超时后同一条请求才会发到手机。0 表示同时可答。',
+        delaySeconds: '桌面专享时间',
+        delaySecondsHint: '桌面在这段时间内可以先答；超时后同一条请求才会发到手机。0 表示同时可答。',
         maxDetailChars: '详情截断长度',
         maxDetailCharsHint: '单条原因、问题细节或选项说明渲染到手机上的最大字符数。',
         titlePrefix: '标题前缀',
@@ -128,8 +128,8 @@ window.__ModuleLoader__.load({
         copy: 'Copy link',
         copied: 'Copied',
         loading: 'Loading…',
-        delay: 'Desktop head start',
-        delayHint: 'Seconds the desktop may answer before the same request is sent to the phone. 0 makes both answerable at once.',
+        delaySeconds: 'Desktop head start',
+        delaySecondsHint: 'Seconds the desktop may answer before the same request is sent to the phone. 0 makes both answerable at once.',
         maxDetailChars: 'Detail limit',
         maxDetailCharsHint: 'Longest reason, question detail, or option description rendered on the phone.',
         titlePrefix: 'Title prefix',
@@ -190,7 +190,11 @@ window.__ModuleLoader__.load({
       name: { fontSize: '15px', fontWeight: 600, lineHeight: 1.4, color: 'var(--dsw-alias-label-primary)' },
       description: { fontSize: '13px', lineHeight: 1.5, color: 'var(--dsw-alias-label-tertiary)' },
       chevron: (open) => ({
-        flex: 'none', color: 'var(--dsw-alias-label-tertiary)', transition: 'transform .16s',
+        // The icon takes only size and className: it fills with currentColor, so
+        // the wrapper owns colour and rotation, and inline-flex is what lets the
+        // transform apply at all.
+        display: 'inline-flex', flex: 'none',
+        color: 'var(--dsw-alias-label-tertiary)', transition: 'transform .16s',
         ...(open ? { transform: 'rotate(180deg)' } : {}),
       }),
       badge: {
@@ -590,21 +594,17 @@ window.__ModuleLoader__.load({
             h('span', { style: S.name }, copy.title),
             h('span', { style: S.description }, copy.description)),
           shell.dirty ? h('span', { style: S.badge }, copy.unsaved) : null,
-          h(IconChevronDownOutline14, { style: S.chevron(open) })),
+          h('span', { style: S.chevron(open) }, h(IconChevronDownOutline14, {}))),
 
         open ? h('div', { style: S.body },
           !shell.writable ? h('p', { style: S.notice, role: 'status' }, copy.readOnly) : null,
 
           h('div', { style: S.section }, runtimeRows),
 
-          field(FIELDS[0], copy.delay, copy.delayHint),
-          field(FIELDS[1], copy.maxDetailChars, copy.maxDetailCharsHint),
-          field(FIELDS[2], copy.titlePrefix, copy.titlePrefixHint),
-          field(FIELDS[3], copy.resultNotify, copy.resultNotifyHint),
-          field(FIELDS[4], copy.resultNotifyCooldownSeconds, copy.resultNotifyCooldownSecondsHint),
-          field(FIELDS[5], copy.mirrorTtlSeconds, copy.mirrorTtlSecondsHint),
-          field(FIELDS[6], copy.resultNoticeTtlSeconds, copy.resultNoticeTtlSecondsHint),
-          field(FIELDS[7], copy.locale, copy.localeHint),
+          // Derived from FIELDS, never indexed: a label and its control are the
+          // same spec by construction, which is the one thing a positional list
+          // got wrong the moment a field was inserted in the middle.
+          ...FIELDS.map(spec => field(spec, copy[spec.field], copy[`${spec.field}Hint`])),
 
           h('div', { style: S.footer },
             shell.failed ? h('p', { style: S.failed, role: 'status' }, copy.saveFailed) : null,

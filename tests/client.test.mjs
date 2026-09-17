@@ -16,10 +16,29 @@ test('the browser half loads through the module loader and registers its card', 
   // format, so it can be executed here against a stand-in shell: this is the
   // only way to check its shape without a browser.
   const FakeReact = {
-    createElement: () => null,
+    // Trees instead of nulls: a case has to read what the card renders, not only
+    // that it registered. Element identity is all this needs — no DOM.
+    createElement: (type, props, ...children) => ({
+      type,
+      props: {
+        ...(props ?? {}),
+        children: children.flat().filter(child => child !== null && child !== undefined && child !== false),
+      },
+    }),
     useCallback: (fn) => fn,
     useEffect: () => {},
-    useState: (initial) => [initial, () => {}],
+    // Real state cells in call order, so a case can press the card's header to
+    // open the disclosure and render again, the way a person does.
+    useState: (initial) => {
+      const index = FakeReact.cursor
+      FakeReact.cursor += 1
+      if (!(index in FakeReact.cells)) FakeReact.cells[index] = initial
+      return [FakeReact.cells[index], (next) => {
+        FakeReact.cells[index] = typeof next === 'function' ? next(FakeReact.cells[index]) : next
+      }]
+    },
+    cells: [],
+    cursor: 0,
   }
   /**
    * The shell seeds a fixed module table and nothing else resolves in the page.
@@ -289,5 +308,77 @@ test('the browser half loads through the module loader and registers its card', 
   } finally {
     delete globalThis.document
   }
+
+  // Every rendered label belongs to its own control. A positional list paired a
+  // label with whichever field sat at that index, so inserting one in the middle
+  // showed one field's value under another field's name.
+  const renderedCard = applyTo(loaded.exports)
+  const pairFace = renderedCard.registered.options.inject()
+  const pairStore = pairFace.hooks.pocketConsole
+  /** Render the card once, with the store bound the way the renderer binds it. */
+  const renderCard = () => {
+    FakeReact.cursor = 0
+    return renderedCard.registered.Component({
+      ...pairFace,
+      usePocketConsole: selector => selector(pairStore.getSnapshot()),
+    })
+  }
+
+  const collect = (tree) => {
+    const labels = new Map()
+    const controls = []
+    const chevrons = []
+    const walk = (node) => {
+      if (node === null || typeof node !== 'object') return
+      if (Array.isArray(node)) {
+        for (const child of node) walk(child)
+        return
+      }
+      if (node.type === 'label') labels.set(node.props.htmlFor, node.props.children.join(''))
+      if (node.type === 'input' || node.type === 'select') controls.push(node)
+      if (node.type === 'span' && node.props.style?.display === 'inline-flex'
+        && String(node.props.style.color ?? '').includes('label-tertiary')) {
+        chevrons.push(node)
+      }
+      walk(node.props?.children)
+    }
+    walk(tree)
+    return { labels, controls, chevrons }
+  }
+
+  // The card is a disclosure: it starts collapsed, and opening it is the only way
+  // its fields exist at all.
+  const closed = collect(renderCard())
+  assert.equal(closed.controls.length, 0, 'a collapsed card renders no controls')
+  const header = (function find(node) {
+    if (node === null || typeof node !== 'object') return undefined
+    if (Array.isArray(node)) return node.map(find).find(Boolean)
+    if (node.type === 'button' && node.props['aria-expanded'] !== undefined) return node
+    return find(node.props?.children)
+  })(renderCard())
+  assert.ok(header !== undefined, 'the card has a disclosure header')
+  header.props.onClick()
+  const { labels, controls, chevrons } = collect(renderCard())
+
+  const projection = pairStore.getSnapshot()
+  assert.ok(controls.length >= 3, `an open card renders its controls: ${controls.length}`)
+  for (const control of controls) {
+    const field = String(control.props.id).replace('pocket-console-', '')
+    assert.ok(projection[field] !== undefined, `${field} is a projected field`)
+    // A positional list paired a label with whichever field sat at that index,
+    // so a mispairing showed one field's value under another field's name.
+    assert.equal(control.props.value, projection[field].text, `${field} shows its own value`)
+    assert.equal(labels.get(control.props.id), pairFace.copy[field], `${field} carries its own label`)
+  }
+
+  // The icon takes only size and className, so the wrapper owns colour and
+  // rotation: without it the chevron kept the header's colour and never turned.
+  assert.equal(chevrons.length, 1, 'the chevron is wrapped in its own element')
+  assert.equal(chevrons[0].props.children.length, 1, 'and the icon sits inside it')
+  assert.equal(
+    chevrons[0].props.style.transform,
+    'rotate(180deg)',
+    'an open card points its chevron up, the way every other plugin card does',
+  )
 })
 
