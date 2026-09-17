@@ -51,6 +51,32 @@ pnpm publish     # or: pnpm pack, then dsh plugin add ./dsh-pocket-console-<vers
 `protobufjs`'s no-op postinstall for this repository's own install — the same
 decision a consumer installing from git has to make for themselves.
 
+## Releasing
+
+The first release is published by hand, because npm configures trusted
+publishing on a package that already exists:
+
+```sh
+pnpm install
+pnpm test
+pnpm publish     # needs a credential this machine can use: `npm login`, or a
+                 # granular access token with "Bypass 2FA" enabled
+```
+
+Every release after that is token-free. `.github/workflows/release.yml`
+publishes on a `v*` tag through npm's **trusted publishing**: the job exchanges
+its GitHub OIDC identity for a short-lived credential, so no token lives in this
+repository, in a secret, or on a maintainer's machine.
+
+One-time setup, on npm: the package's settings → **Trusted Publisher** → GitHub
+Actions, naming repository `picsky/dsh-pocket-console` and workflow
+`release.yml`. Then:
+
+```sh
+npm version patch        # or minor / major; commits and tags the bump
+git push --follow-tags
+```
+
 ## What a change needs
 
 **Tests.** `npm test` must stay green, and new behavior needs a case. The suite

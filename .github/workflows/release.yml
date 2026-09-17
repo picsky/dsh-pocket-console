@@ -1,0 +1,46 @@
+name: Release
+
+# Publishes through npm's trusted publishing: this job exchanges its GitHub
+# OIDC identity for a short-lived publish credential, so no npm token exists in
+# this repository, in a secret, or on a maintainer's machine. Two things must
+# hold before it can work: the package must already exist on npm, and the
+# package must name this workflow as its trusted publisher.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: publish to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # What npm exchanges for the publish credential. Without it the registry
+      # asks for a token this workflow deliberately does not have.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # The tarball embeds its transport, which is packed from the hoisted tree.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - run: pnpm install
+      - name: npm must be new enough for a trusted publisher
+        run: |
+          node -e "const v = require('node:child_process').execSync('npm -v').toString().trim(); const [major, minor] = v.split('.').map(Number); console.log('npm', v); if (major < 11 || (major === 11 && minor < 5)) { console.error('npm ' + v + ' cannot publish through a trusted publisher (needs >= 11.5.1)'); process.exit(1) }"
+      - name: The tag must name the version being published
+        if: github.ref_type == 'tag'
+        run: |
+          node -e "const version = require('./package.json').version; const tag = process.env.GITHUB_REF_NAME.replace(/^v/, ''); if (version !== tag) { console.error('tag ' + process.env.GITHUB_REF_NAME + ' does not name version ' + version); process.exit(1) } console.log('tag names version', version)"
+      - run: pnpm test
+      # `prepack` refuses a tarball that lost its bundled transport, so what
+      # npm publishes carries it and a consumer's profile needs no build permission.
+      - run: npm publish
