@@ -18,10 +18,10 @@
 #       channel: dsh-pocket-console/providers/feishu.js
 #       channelConfig:
 #         domain: feishu
-#       delaySeconds: 600
+#       delaySeconds: 120
 #       titlePrefix: DSH
 #       resultNotify: idle
-#       resultNotifyCooldownSeconds: 600
+#       resultNotifyCooldownSeconds: 0
 #       mirrorTtlSeconds: 60
 #       locale: zh
 

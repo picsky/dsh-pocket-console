@@ -20,10 +20,10 @@ const REPORT_HISTORY = 20
 
 /**
  * Create the mirror record.
- * @param options - the logger, the effective settings thunk, and the clock.
+ * @param options - the logger, the effective settings thunk, the copy thunk, and the clock.
  * @returns recording, reporting, and the state-route fields.
  */
-export function createMirror({ log, settings, now = () => Date.now() }) {
+export function createMirror({ log, settings, messages = () => ({}), now = () => Date.now() }) {
   /** The last decision the phone took, with the session it belongs to. */
   let decision = null
   /** What the browser half did with each decision, newest last. */
@@ -59,9 +59,14 @@ export function createMirror({ log, settings, now = () => Date.now() }) {
       }
       reports.push(report)
       if (reports.length > REPORT_HISTORY) reports.shift()
+      // The decision has been carried across the gap it existed for, so it stops
+      // being offered. Without this a reload, or a second tab, finds the same
+      // decision still pending and replays an answer onto a request that is
+      // already settled — which fails on every poll, forever.
+      if (report.status === 'applied' && report.syncId === decision?.id) decision = null
       // The state route carries these; the deployment log only needs them when
       // someone asks, since a page load alone produces several.
-      log.debug(`桌面镜像：${report.status}${report.reason === undefined ? '' : `（${report.reason}）`}`)
+      log.debug(messages().logMirror?.(report.status, report.reason) ?? report.status)
       return report
     },
     /**

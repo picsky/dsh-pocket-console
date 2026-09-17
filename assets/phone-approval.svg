@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="740" viewBox="0 0 420 740" role="img" aria-label="工具审批卡片：批准一次 / 拒绝">
+  <title>工具审批卡片（样张）</title>
+  <defs>
+    <clipPath id="screen"><rect x="52" y="24" width="316" height="652" rx="28"/></clipPath>
+  </defs>
+
+  <rect width="420" height="740" fill="#f4f5f7"/>
+
+  <!-- phone frame -->
+  <rect x="40" y="12" width="340" height="680" rx="40" fill="#1f2329"/>
+  <rect x="52" y="24" width="316" height="652" rx="28" fill="#f7f8fa"/>
+  <g clip-path="url(#screen)">
+    <rect x="52" y="24" width="316" height="652" fill="#f7f8fa"/>
+    <rect x="180" y="32" width="60" height="10" rx="5" fill="#1f2329" opacity="0.85"/>
+
+    <!-- status bar -->
+    <text x="68" y="66" font-size="11" fill="#646a73" font-family="Segoe UI, Arial">9:41</text>
+    <rect x="326" y="58" width="20" height="9" rx="3" fill="none" stroke="#646a73" stroke-width="1.4"/>
+    <rect x="347" y="60" width="3" height="5" rx="1" fill="#646a73"/>
+    <text x="300" y="66" font-size="10" fill="#646a73" text-anchor="end" font-family="Segoe UI, Arial">5G</text>
+
+    <!-- card -->
+    <rect x="76" y="84" width="268" height="620" rx="14" fill="#ffffff" stroke="#e5e6eb"/>
+
+    <text x="92" y="116" font-size="15" font-weight="600" fill="#1f2329" font-family="Segoe UI, Microsoft YaHei, Arial">工具审批</text>
+
+    <text x="92" y="148" font-size="11.5" fill="#646a73" font-family="Segoe UI, Microsoft YaHei, Arial">桌面 120 秒内未应答，已升级到手机。</text>
+    <text x="92" y="166" font-size="11.5" fill="#646a73" font-family="Segoe UI, Microsoft YaHei, Arial">批准仅对本次调用生效。</text>
+
+    <text x="92" y="198" font-size="10.5" fill="#8f959e" font-family="Segoe UI, Microsoft YaHei, Arial">工具</text>
+    <rect x="92" y="206" width="236" height="56" rx="8" fill="#f7f8fa" stroke="#e5e6eb"/>
+    <text x="104" y="228" font-size="11.5" font-family="Consolas, Menlo, monospace" fill="#1f2329">bash: rm -rf ./dist &amp;&amp; pnpm build</text>
+    <text x="104" y="248" font-size="11" font-family="Consolas, Menlo, monospace" fill="#646a73">cwd: /srv/app/checkout</text>
+
+    <text x="92" y="286" font-size="10.5" fill="#8f959e" font-family="Segoe UI, Microsoft YaHei, Arial">调用 ID</text>
+    <text x="92" y="304" font-size="11.5" font-family="Consolas, Menlo, monospace" fill="#1f2329">call_01HZX8K3M2Q</text>
+
+    <text x="92" y="334" font-size="10.5" fill="#8f959e" font-family="Segoe UI, Microsoft YaHei, Arial">原因</text>
+    <text x="92" y="352" font-size="11.5" fill="#1f2329" font-family="Segoe UI, Microsoft YaHei, Arial">删除构建产物目录，属于破坏性操作</text>
+
+    <!-- decisions, bottom-anchored: thumb reach -->
+    <rect x="92" y="600" width="236" height="40" rx="8" fill="#ffffff" stroke="#d0d3d9"/>
+    <text x="210" y="625" font-size="13" font-weight="600" fill="#1f2329" text-anchor="middle" font-family="Segoe UI, Microsoft YaHei, Arial">拒绝</text>
+
+    <rect x="92" y="648" width="236" height="40" rx="8" fill="#3370ff"/>
+    <text x="210" y="673" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle" font-family="Segoe UI, Microsoft YaHei, Arial">批准一次</text>
+  </g>
+
+  <text x="210" y="716" font-size="11" fill="#8f959e" text-anchor="middle" font-family="Segoe UI, Microsoft YaHei, Arial">卡片结构样张 · 文案取自 messages.js</text>
+</svg>

@@ -129,6 +129,11 @@ window.__ModuleLoader__.load({
         readOnly: '当前设置文档只读，修改无法保存。',
         expand: '展开',
         collapse: '收起',
+        qrAlt: '绑定二维码',
+        pendingNote: state => `（${state}）`,
+        requestFailed: (status, what) => `${what} 请求失败（HTTP ${status}）`,
+        stateRequestFailed: status => `读取状态失败：HTTP ${status}`,
+        unknownState: '未知状态',
       },
       en: {
         title: 'Pocket console',
@@ -196,18 +201,34 @@ window.__ModuleLoader__.load({
         readOnly: 'This settings document is read-only, so changes cannot be saved.',
         expand: 'Expand',
         collapse: 'Collapse',
+        qrAlt: 'Binding QR code',
+        pendingNote: state => ` (${state})`,
+        requestFailed: (status, what) => `${what} failed (HTTP ${status})`,
+        stateRequestFailed: status => `Could not read the state: HTTP ${status}`,
+        unknownState: 'unknown state',
       },
     }
 
     /**
-     * Copy for the language the shell published. The locale plugin owns the
-     * `<html lang>` attribute, so reading it keeps this card out of a second
-     * language registry.
-     * @returns the copy table for the active document language.
+     * The language the page is being read in.
+     *
+     * The shell owns `<html lang>` — the locale plugin writes it — so the attribute
+     * is the only source, and reading it is what keeps this card out of a second
+     * language registry. One reader serves both the card and the state report: they
+     * disagreed before (the card fell back to English while the report sent
+     * nothing, leaving the Host's own `locale` to decide), which is how a card and
+     * the phone it escalates to could end up in different languages.
+     *
+     * It is read on every render rather than held in state, so a language switch is
+     * followed by the card's own poll — every three seconds, and every 0.7 while a
+     * binding is settling — without a reload and without this card subscribing to
+     * the locale plugin, which is the coupling the attribute exists to avoid.
+     * @returns the active locale, defaulting to English when the page names none.
      */
-    function copyForDocument() {
-      const lang = typeof document === 'undefined' ? '' : String(document.documentElement?.lang ?? '')
-      return lang.toLowerCase().startsWith('zh') ? COPY.zh : COPY.en
+    function documentLanguage() {
+      const tag = typeof document === 'undefined' ? '' : String(document.documentElement?.lang ?? '')
+      const base = tag.toLowerCase().split('-')[0]
+      return base === 'zh' ? 'zh' : 'en'
     }
 
     /** Inline styles: the shipped cards' tokens and metrics, which this bundle cannot import. */
@@ -306,8 +327,17 @@ window.__ModuleLoader__.load({
     /** A button whose disabled look matches the shipped cards. */
     const button = (label, onClick, options = {}) => h('button', {
       type: 'button',
-      style: { ...(options.primary ? S.primary : S.secondary), ...(options.disabled ? S.disabled : {}) },
+      style: {
+        ...(options.primary ? S.primary : S.secondary),
+        ...(options.disabled ? S.disabled : {}),
+        // A control that is not one of the two card buttons — the inline reset —
+        // brings its own look instead of the shipped pair's.
+        ...(options.style ?? {}),
+      },
       disabled: options.disabled === true,
+      // A label that is only unique in context ("Reset", "Unbind") needs an
+      // accessible name that stands on its own when it is read out of context.
+      ...(options.accessibleName === undefined ? {} : { 'aria-label': options.accessibleName }),
       onClick,
     }, label)
 
@@ -410,11 +440,12 @@ window.__ModuleLoader__.load({
       scope.subscribe(publish)
 
       return {
+        // Derived from the same list the card renders, so a field added there is
+        // a field the snapshot carries: spelling the names out a second time is
+        // how a new setting arrives as `undefined` and takes the render down.
         projection: () => ({
           shell: shell(),
-          delaySeconds: fieldState('delaySeconds'),
-          titlePrefix: fieldState('titlePrefix'),
-          resultNotify: fieldState('resultNotify'),
+          ...Object.fromEntries(FIELDS.map(spec => [spec.field, fieldState(spec.field)])),
         }),
         edit(field, text) { staged.set(field, { text, clear: false }); failed = false; publish() },
         resetField(field) {
@@ -435,12 +466,22 @@ window.__ModuleLoader__.load({
           saving = true
           failed = false
           publish()
-          let landed = true
-          for (const write of writes) landed = await write() && landed
-          if (landed) staged.clear()
-          saving = false
-          failed = !landed
-          publish()
+          try {
+            let landed = true
+            for (const write of writes) landed = await write() && landed
+            if (landed) staged.clear()
+            failed = !landed
+          } catch {
+            // A write rejects when the document moved under it — a revision the
+            // card never read, a read-only document, a provider going away. That
+            // is a failed save, not a failed card: the flag has to come down in
+            // every case, or the card sits on "saving" with both buttons
+            // disabled until the page is reloaded.
+            failed = true
+          } finally {
+            saving = false
+            publish()
+          }
         },
         subscribe(listener) {
           listeners.add(listener)
@@ -478,13 +519,17 @@ window.__ModuleLoader__.load({
       }
     }
 
+
     /**
      * Render one plugin card.
-     * @param props - copy, the form snapshot bound from the hooks compartment, and the form actions.
+     * @param props - the form snapshot bound from the hooks compartment, and the form actions.
      * @returns the card, or nothing when the Host does not serve its namespace.
      */
     function PocketConsoleCard(props) {
-      const copy = props.copy
+      // Resolved per render rather than handed in once, so a language switch is
+      // followed by the card's next poll instead of freezing it at page load. See
+      // `documentLanguage` for why the attribute is read rather than held.
+      const copy = COPY[documentLanguage()]
       const state = props.usePocketConsole(snapshot => snapshot)
       const shell = state.shell
       const [open, setOpen] = useState(false)
@@ -502,14 +547,14 @@ window.__ModuleLoader__.load({
           // The page and the process that serves it are replaced separately, so a
           // 404 here means this page is newer than the host it is talking to.
           if (response.status === 404) throw new Error(copy.hostOutdated)
-          if (!response.ok) throw new Error(`state request failed: ${response.status}`)
+          if (!response.ok) throw new Error(copy.stateRequestFailed(response.status))
           setRuntime(await response.json())
           setFailure(null)
         } catch (error) {
           if (error?.name === 'AbortError') return
           setFailure(String(error?.message ?? error))
         }
-      }, [copy.hostOutdated])
+      }, [copy.hostOutdated, copy.stateRequestFailed])
 
       /** Run one binding operation, then adopt the enrollment it reports. */
       const run = async (path, body) => {
@@ -521,7 +566,9 @@ window.__ModuleLoader__.load({
             body: JSON.stringify(body ?? {}),
           })
           if (response.status === 404) throw new Error(copy.hostOutdated)
-          if (!response.ok) throw new Error(`${path} failed: ${response.status}`)
+          // The reader sees this, so it is copy. Which operation it was is the
+          // reader's own context — the button they just pressed.
+          if (!response.ok) throw new Error(copy.requestFailed(response.status, path.slice(1)))
           const enrollment = await response.json()
           setRuntime(previous => ({ ...previous, enrollment }))
           setFailure(null)
@@ -547,7 +594,9 @@ window.__ModuleLoader__.load({
       }
       const status = enrollment.state === 'starting'
         ? STARTING[stage][enrollment.slow === true ? 'slow' : 'normal']
-        : copy[enrollment.state] ?? copy.unbound
+        // An unrecognized state says so. Falling back to "not bound" would be a
+        // claim the host never made, and a reader cannot tell it from the truth.
+        : copy[enrollment.state] ?? copy.unknownState
       const recipientValue = enrollment.recipient === null || enrollment.recipient === undefined
         ? h('span', null, copy.recipientNone)
         : h('code', null, enrollment.recipient)
@@ -576,19 +625,29 @@ window.__ModuleLoader__.load({
       const field = (fieldSpec, label, hint) => {
         const control = state[fieldSpec.field]
         const id = `pocket-console-${fieldSpec.field}`
+        // The invalid message and the hint describe this control, so a reader
+        // that never sees the layout still gets them when the field is focused.
+        const invalidId = `${id}-invalid`
+        const hintId = `${id}-hint`
         return h('div', { key: fieldSpec.field, style: S.field },
           h('div', { style: S.fieldHead },
             h('label', { style: S.label, htmlFor: id }, label),
             h('span', { style: S.badges },
               control.overridden ? h('span', { style: S.badge }, copy.overridden) : null,
-              button(copy.reset, () => { props.resetField(fieldSpec.field) },
-                { disabled: !control.overridden || !shell.writable }))),
+              // Every field has a button called "Reset", so its accessible name
+              // has to say which field it resets.
+              button(copy.reset, () => { props.resetField(fieldSpec.field) }, {
+                disabled: !control.overridden || !shell.writable,
+                accessibleName: `${copy.reset}: ${label}`,
+                style: S.reset,
+              }))),
           fieldSpec.kind === 'select'
             ? h('select', {
                 id,
                 style: S.input,
                 value: control.text,
                 disabled: !shell.writable,
+                'aria-describedby': hintId,
                 onChange: event => { props.edit(fieldSpec.field, event.target.value) },
               }, fieldSpec.options.map(option => h('option', { key: option, value: option },
                 copy[fieldSpec.labels?.[option] ?? option])))
@@ -598,17 +657,22 @@ window.__ModuleLoader__.load({
                 value: control.text,
                 disabled: !shell.writable,
                 inputMode: fieldSpec.kind === 'number' ? 'numeric' : undefined,
+                'aria-invalid': control.invalid ? true : undefined,
+                'aria-describedby': control.invalid ? `${invalidId} ${hintId}` : hintId,
                 onChange: event => { props.edit(fieldSpec.field, event.target.value) },
               }),
-          control.invalid ? h('p', { style: S.invalid }, copy.invalidNumber) : null,
-          h('p', { style: S.hint }, hint))
+          control.invalid ? h('p', { id: invalidId, style: S.invalid }, copy.invalidNumber) : null,
+          h('p', { id: hintId, style: S.hint }, hint))
       }
 
       /** The binding half of the card: enrollment, what is open, and its controls. */
       const runtimeRows = runtime === null
         ? [h('div', { key: 'loading', style: S.notice }, copy.loading)]
         : [
-            h('div', { key: 'status', style: S.row },
+            // The enrollment state is the loudest thing this card says — it moves
+            // from starting to bound with nobody pressing anything — so it is the
+            // one row a reader who is not looking still needs to hear.
+            h('div', { key: 'status', style: S.row, role: 'status', 'aria-live': 'polite' },
               h('span', { style: S.rowLabel }, copy.title),
               h('span', { style: S.status(tone) },
                 h('span', { style: S.dot(tone), 'aria-hidden': 'true' }),
@@ -629,12 +693,14 @@ window.__ModuleLoader__.load({
               h('span', null, String(pending.length))),
             pending.length > 0
               ? h('ul', { key: 'pending-list', style: S.list }, pending.map((entry, index) => h('li', { key: index, style: S.listItem },
-                  `· ${entry.kind === 'approval' ? copy.pendingApproval : copy.pendingQuestion} ${entry.summary}（${entry.delivered ? copy.pendingDelivered : copy.pendingWaiting}）`)))
+                  `· ${entry.kind === 'approval' ? copy.pendingApproval : copy.pendingQuestion} ${entry.summary}${copy.pendingNote(
+                    entry.delivered ? copy.pendingDelivered : copy.pendingWaiting,
+                  )}`)))
               : null,
             verifyUrl !== undefined && enrollment.state === 'awaiting'
               ? h('div', { key: 'scan', style: S.scanBlock },
                   h('div', { style: S.description }, copy.scan),
-                  h('img', { src: `${ROUTE}/qr.svg`, alt: copy.open, style: S.qr }),
+                  h('img', { src: `${ROUTE}/qr.svg`, alt: copy.qrAlt, style: S.qr }),
                   h('div', { style: { ...S.actions, alignItems: 'center' } },
                     h('a', { href: verifyUrl, target: '_blank', rel: 'noreferrer', style: S.link }, copy.open),
                     button(copied ? copy.copied : copy.copy, () => {
@@ -665,12 +731,13 @@ window.__ModuleLoader__.load({
                     button(copy.changeApp, () => { setAskingAppId(true) }, { disabled: busy }),
                     button(copy.unbind, () => { setConfirmingUnbind(true) }, { disabled: busy }),
                   ]
-                // A connection that is being established is the only state with
-                // nothing to press: a second attempt would abandon the one that
-                // is running. A scan that is waiting still offers the other way
-                // round, and every failed attempt can be retried.
+                // A connection that is being established has no second way to
+                // start: a retry would abandon the attempt that is already
+                // running, and `beginEnrollment` is idempotent for that reason.
+                // It does need a way out, because a handshake can sit here for a
+                // long time and the card must never be a page with no controls.
                 : enrollment.state === 'starting'
-                  ? null
+                  ? [button(copy.unbind, () => { setConfirmingUnbind(true) }, { disabled: busy })]
                   : [
                       button(copy.bind, () => { void run('/bind', { mode: 'create' }) }, { disabled: busy, primary: true }),
                       button(copy.bindExisting, () => { setAskingAppId(true) }, { disabled: busy }),
@@ -744,13 +811,19 @@ window.__ModuleLoader__.load({
           type: 'button',
           style: S.header,
           'aria-expanded': open,
-          'aria-label': `${copy[open ? 'collapse' : 'expand']}: ${copy.title}`,
+          // The label is the button's whole spoken name, so anything the button
+          // shows beside its title has to be in it: an `unsaved` badge the label
+          // omits is a state a reader who is not looking would never hear.
+          'aria-label': [
+            `${copy[open ? 'collapse' : 'expand']}: ${copy.title}`,
+            shell.dirty ? copy.unsaved : undefined,
+          ].filter(Boolean).join(', '),
           onClick: () => { setOpen(!open) },
         },
           h('span', { style: S.headText },
             h('span', { style: S.name }, copy.title),
             h('span', { style: S.description }, copy.description)),
-          shell.dirty ? h('span', { style: S.badge }, copy.unsaved) : null,
+          shell.dirty ? h('span', { style: S.badge, 'aria-hidden': 'true' }, copy.unsaved) : null,
           h('span', { style: S.chevron(open) }, h(IconChevronDownOutline14, {}))),
 
         open ? h('div', { style: S.body },
@@ -779,7 +852,6 @@ window.__ModuleLoader__.load({
       const form = createSettingsForm(scope)
       const store = createSnapshot(form.projection())
       form.subscribe(() => { store.set(form.projection()) })
-      const copy = copyForDocument()
 
       /**
        * Mirror one answer the phone already gave onto this page's composer.
@@ -798,31 +870,52 @@ window.__ModuleLoader__.load({
         // is absent, and reading a service property without an `inject` throws.
         const snapshot = ctx.get?.('uiSession')?.pendingInteractions?.getSnapshot?.()
         if (snapshot?.get === undefined) return 'no pending-interaction source'
-        const ids = Array.isArray(sync.questions) ? sync.questions.join('\u0000') : undefined
-        const matches = pending => ids === undefined || ids === ''
-          || (pending?.questions ?? []).map(item => item?.id).join('\u0000') === ids
+        // An approval carries no question ids, so its identity is its session:
+        // matching on an empty id list would accept *any* pending interaction in
+        // the page and hand an approval to a composer that was asking a question.
+        // A question is identified by the ids both sides read from one request,
+        // and an empty list is never a match.
+        const ids = Array.isArray(sync.questions) ? sync.questions.join('\u0000') : ''
+        const sameSession = (pending) => sync.sessionId !== undefined
+          && String(pending?.sessionId ?? '') === String(sync.sessionId)
+        const matches = (pending) => {
+          if (pending === undefined || pending === null) return false
+          // A question is identified by the ids both sides read from one request,
+          // which is exact on its own — a composer need not carry the session id
+          // for this to be the right composer. An approval carries no ids at all,
+          // so its only identity is the session it belongs to; matching an empty
+          // list would accept *any* interaction in the page and hand an approval
+          // to a composer that was asking a question.
+          if (Array.isArray(sync.questions) && sync.questions.length > 0) {
+            // A composer shown for a *different* session must still not match.
+            if (sync.sessionId !== undefined && pending.sessionId !== undefined
+              && !sameSession(pending)) return false
+            return (pending.questions ?? []).map(item => item?.id).join('\u0000') === ids
+          }
+          return sameSession(pending)
+        }
         // Only the request the phone actually decided: another request in the
         // same session may be pending by the time this poll arrives. The session
         // the Host named is tried first; with it unnamed or keyed differently the
         // question ids decide, since both sides read them from one request.
-        const named = sync.sessionId === undefined ? undefined : snapshot.get(sync.sessionId)
-        const pending = matches(named) ? named : [...snapshot.values()].find(entry => matches(entry))
+        const entry = sync.sessionId === undefined ? undefined : snapshot.get(sync.sessionId)
+        const pending = matches(entry) ? entry : [...snapshot.values()].find(candidate => matches(candidate))
         if (pending === undefined || typeof pending.answer !== 'function') return 'no waiting composer'
+        // An approval must not be handed to a composer that is asking a question:
+        // the outcome would be resolved against the wrong waterfall. A question
+        // is identified by its ids, so the empty list is an approval's alone.
+        if (sync.kind === 'approval' && pending.kind !== undefined && pending.kind !== 'approval') {
+          return 'the waiting composer is not an approval'
+        }
         // A composer that already settled is not a failure — the recorded answer
-        // is the phone's either way, and there is nothing left to mirror.
-        void Promise.resolve(pending.answer(sync.answer)).catch(() => {})
+        // is the phone's either way, and there is nothing left to mirror. The
+        // call can throw synchronously as well as reject, so both are caught.
+        try {
+          void Promise.resolve(pending.answer(sync.answer)).catch(() => {})
+        } catch {
+          return 'the composer had already settled'
+        }
         return null
-      }
-
-      /**
-       * The interface language, as the shell publishes it on <html>.
-       * @returns a known locale, or undefined when the page names none.
-       */
-      function documentLanguage() {
-        const tag = globalThis.document?.documentElement?.lang
-        if (typeof tag !== 'string' || tag === '') return undefined
-        const base = tag.toLowerCase().split('-')[0]
-        return base === 'zh' || base === 'en' ? base : undefined
       }
 
       /** Read the Host's last phone decision, or null when it offers none. */
@@ -846,8 +939,10 @@ window.__ModuleLoader__.load({
           body: JSON.stringify({
             status,
             // The Host has no other way to know which language this reader is
-            // reading, and the phone card should not disagree with the page.
-            ...(documentLanguage() === undefined ? {} : { lang: documentLanguage() }),
+            // reading, and the phone card should not disagree with the page. The
+            // value reported is the one the card itself rendered in, so the two
+            // cannot drift apart even when the page names no language at all.
+            lang: documentLanguage(),
             ...(reason === undefined ? {} : { reason }),
             ...(syncId === undefined ? {} : { syncId }),
           }),
@@ -864,15 +959,32 @@ window.__ModuleLoader__.load({
        */
       const startMirror = () => {
         let stopped = false
-        let applied = null
+        // A decision is attempted once per page. An attempt that could not be
+        // applied is not retried on the next tick: the composer it was meant for
+        // is either gone or already settled, and repeating it would report the
+        // same failure every second for as long as the decision stays on offer.
+        let attempted = null
         let reported = null
+        let inFlight = false
         const poll = async () => {
+          // One poll at a time: two overlapping ticks could both read a decision
+          // as unattempted and apply it twice.
+          if (inFlight || stopped) return
+          inFlight = true
           try {
             const sync = await readSync()
-            if (stopped || sync === null || sync.id === applied) return
-            const reason = applySync(sync)
+            if (stopped || sync === null || sync.id === attempted) return
+            let reason
+            try {
+              reason = applySync(sync)
+            } catch (error) {
+              // A composer that answers by throwing — the already-settled case —
+              // is not a transport failure, and must not escape before `attempted`
+              // is set, which is what used to make this retry forever.
+              reason = String(error?.message ?? error)
+            }
+            attempted = sync.id
             if (reason === null) {
-              applied = sync.id
               console.info(`pocket-console: mirrored the phone's ${String(sync.kind)} decision`)
               report('applied', undefined, sync.id)
               return
@@ -888,6 +1000,8 @@ window.__ModuleLoader__.load({
             const message = String(error?.message ?? error)
             console.info(`pocket-console: mirror poll failed — ${message}`)
             report('error', message)
+          } finally {
+            inFlight = false
           }
         }
         void poll()
@@ -944,7 +1058,11 @@ window.__ModuleLoader__.load({
         name: 'settings.plugin.item',
         key: NS,
         inject: () => ({
-          copy,
+          // The card resolves its own copy per render (see `documentLanguage`), so
+          // this is the table for the language in force right now. It is handed
+          // over for the mount-time reader — a diagnostic, or a test asserting what
+          // the active language renders as — and never becomes the card's copy.
+          copy: COPY[documentLanguage()],
           hooks: { pocketConsole: store },
           edit: form.edit,
           resetField: form.resetField,

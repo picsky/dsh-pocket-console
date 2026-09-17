@@ -53,8 +53,9 @@ jobs:
           }
           console.log('tag names version', version);
           "
-      # One setting lives in five places; publishing a disagreeing tree would ship
-      # the disagreement to every deployment.
+      # One setting lives in six places, and the docs must not link to a file the
+      # tarball lacks; publishing a disagreeing tree would ship the disagreement to
+      # every deployment.
       - run: npm run check:parity
       - run: npm test
       # `prepack` refuses a tarball that lost a bundled library or would close

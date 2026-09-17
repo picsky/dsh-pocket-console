@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-label="GIF 分镜示意：五个镜头的裁剪框、停留时长与字幕位置">
+  <title>demo.gif 分镜板</title>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#5b6474"/>
+    </marker>
+    <marker id="cut" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#f0a020"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="720" fill="#0f1115"/>
+  <text x="48" y="48" font-size="19" font-weight="600" fill="#e8eaed" font-family="Segoe UI, Microsoft YaHei, Arial">demo.gif 分镜板 · 1280×720 · 20 fps · 194 帧 = 9.7 s · ≤ 2.5 MB</text>
+  <text x="48" y="72" font-size="12" fill="#9aa3b2" font-family="Segoe UI, Microsoft YaHei, Arial">橙竖线 = 硬切，不做转场。字幕条固定在 y=632，两个镜头里位置完全一致，切的时候不会跳。</text>
+
+  <!-- frame strip -->
+  <rect x="48" y="96" width="1184" height="212" rx="10" fill="#141821" stroke="#2a2f3a"/>
+  <g font-family="Segoe UI, Microsoft YaHei, Arial">
+    <rect x="72" y="120" width="200" height="164" rx="8" fill="#1b2029" stroke="#2a2f3a"/>
+    <text x="88" y="148" font-size="11" fill="#3370ff" font-family="Consolas, Menlo, monospace">S1 · 00:00.0 - 00:00.8</text>
+    <text x="88" y="176" font-size="12" fill="#e8eaed">设置卡片 · 未绑定</text>
+    <text x="88" y="196" font-size="10.5" fill="#9aa3b2">光标移到高亮按钮上</text>
+    <text x="88" y="214" font-size="10.5" fill="#9aa3b2">不动，只做 hover</text>
+
+    <rect x="296" y="120" width="200" height="164" rx="8" fill="#1b2029" stroke="#2a2f3a"/>
+    <text x="312" y="148" font-size="11" fill="#3370ff" font-family="Consolas, Menlo, monospace">S2 · 00:00.8 - 00:02.3</text>
+    <text x="312" y="176" font-size="12" fill="#e8eaed">点击 → 等待态</text>
+    <text x="312" y="196" font-size="10.5" fill="#9aa3b2">Creating the Feishu</text>
+    <text x="312" y="214" font-size="10.5" fill="#9aa3b2">app… the QR code…</text>
+
+    <rect x="520" y="120" width="200" height="164" rx="8" fill="#1b2029" stroke="#2a2f3a"/>
+    <text x="536" y="148" font-size="11" fill="#3370ff" font-family="Consolas, Menlo, monospace">S3 · 00:02.3 - 00:03.8</text>
+    <text x="536" y="176" font-size="12" fill="#e8eaed">二维码出现</text>
+    <text x="536" y="196" font-size="10.5" fill="#9aa3b2">停留 1.5 s</text>
+    <text x="536" y="214" font-size="10.5" fill="#e0a33e">⚠ 必须打码 / 遮住</text>
+
+    <rect x="744" y="120" width="200" height="164" rx="8" fill="#1b2029" stroke="#2a2f3a"/>
+    <text x="760" y="148" font-size="11" fill="#3370ff" font-family="Consolas, Menlo, monospace">S4 · 00:03.9 - 00:06.9</text>
+    <text x="760" y="176" font-size="12" fill="#e8eaed">手机：卡片到达 → 点批准</text>
+    <text x="760" y="196" font-size="10.5" fill="#9aa3b2">不展示等待，直接</text>
+    <text x="760" y="214" font-size="10.5" fill="#9aa3b2">点 批准一次</text>
+
+    <rect x="968" y="120" width="240" height="164" rx="8" fill="#1b2029" stroke="#2a2f3a"/>
+    <text x="984" y="148" font-size="11" fill="#3370ff" font-family="Consolas, Menlo, monospace">S5 · 00:07.0 - 00:09.5</text>
+    <text x="984" y="176" font-size="12" fill="#e8eaed">回到桌面：对话框结算</text>
+    <text x="984" y="196" font-size="10.5" fill="#9aa3b2">面板关闭 / 变为已处理</text>
+    <text x="984" y="214" font-size="10.5" fill="#9aa3b2">停在静止帧收尾</text>
+
+    <!-- cuts -->
+    <line x1="284" y1="112" x2="284" y2="292" stroke="#f0a020" stroke-width="2" stroke-dasharray="6 4"/>
+    <line x1="732" y1="112" x2="732" y2="292" stroke="#f0a020" stroke-width="2" stroke-dasharray="6 4"/>
+    <line x1="956" y1="112" x2="956" y2="292" stroke="#f0a020" stroke-width="2" stroke-dasharray="6 4"/>
+  </g>
+
+  <!-- timeline -->
+  <rect x="48" y="336" width="1184" height="120" rx="10" fill="#141821" stroke="#2a2f3a"/>
+  <text x="72" y="366" font-size="12" font-weight="600" fill="#c8cdd8" font-family="Segoe UI, Microsoft YaHei, Arial">时间轴（帧号按 20 fps）</text>
+  <g font-family="Consolas, Menlo, monospace" font-size="10.5">
+    <rect x="72" y="384" width="100" height="30" rx="6" fill="#3370ff" opacity="0.85"/>
+    <text x="122" y="404" fill="#ffffff" text-anchor="middle">S1 f0-15</text>
+    <rect x="176" y="384" width="187" height="30" rx="6" fill="#3370ff" opacity="0.65"/>
+    <text x="269" y="404" fill="#ffffff" text-anchor="middle">S2 f16-45</text>
+    <rect x="367" y="384" width="187" height="30" rx="6" fill="#3370ff" opacity="0.5"/>
+    <text x="460" y="404" fill="#ffffff" text-anchor="middle">S3 f46-75</text>
+    <rect x="560" y="384" width="375" height="30" rx="6" fill="#3370ff" opacity="0.65"/>
+    <text x="747" y="404" fill="#ffffff" text-anchor="middle">S4 f78-138</text>
+    <rect x="941" y="384" width="281" height="30" rx="6" fill="#3370ff" opacity="0.85"/>
+    <text x="1081" y="404" fill="#ffffff" text-anchor="middle">S5 f139-190</text>
+  </g>
+  <text x="72" y="438" font-size="10.5" fill="#5b6474" font-family="Segoe UI, Microsoft YaHei, Arial">f76-77 与 f139 无内容：硬切前后各留 2 帧静止，播放器不会糊掉切点。</text>
+
+  <!-- caption band -->
+  <rect x="48" y="480" width="1184" height="196" rx="10" fill="#141821" stroke="#2a2f3a"/>
+  <text x="72" y="510" font-size="12" font-weight="600" fill="#c8cdd8" font-family="Segoe UI, Microsoft YaHei, Arial">字幕条（burn-in）· 每镜头一条，全程同一位置</text>
+
+  <rect x="72" y="528" width="1136" height="132" rx="8" fill="#1b2029"/>
+  <rect x="72" y="612" width="1136" height="34" fill="#000000" opacity="0.55"/>
+  <text x="640" y="634" font-size="14" fill="#ffffff" text-anchor="middle" font-family="Segoe UI, Microsoft YaHei, Arial">2 · 桌面优先，120 秒后才到手机</text>
+
+  <text x="96" y="558" font-size="10.5" fill="#7c8698" font-family="Segoe UI, Microsoft YaHei, Arial">S1 “1 · 扫一次码” ｜ S2 “应用、权限、接收人一次配好” ｜ S3 “二维码：10 分钟、仅可使用一次”</text>
+  <text x="96" y="580" font-size="10.5" fill="#7c8698" font-family="Segoe UI, Microsoft YaHei, Arial">S4 “2 · 桌面优先，120 秒后才到手机” ｜ S5 “桌面页面跟着手机一起结算”</text>
+  <text x="96" y="602" font-size="10.5" fill="#c98a1e" font-family="Segoe UI, Microsoft YaHei, Arial">字幕样式：黑底 55% 不透明，白字，居中；字号 = 画布宽度的 1.1%（1280 → 14 px），不要再大。</text>
+
+  <line x1="640" y1="632" x2="640" y2="632" stroke="none"/>
+  <line x1="1140" y1="634" x2="1190" y2="634" stroke="#5b6474" stroke-width="1.5" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text x="1165" y="624" font-size="9.5" fill="#5b6474" text-anchor="middle" font-family="Segoe UI, Microsoft YaHei, Arial">y=632</text>
+
+  <text x="48" y="706" font-size="11" fill="#5b6474" font-family="Segoe UI, Microsoft YaHei, Arial">这张图只是分镜示意，不要当素材发布；要放 README 的是录出来的 demo.gif。</text>
+</svg>

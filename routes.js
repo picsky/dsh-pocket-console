@@ -19,18 +19,11 @@ import QRCode from 'qrcode'
 /** Same-origin route prefix the browser half calls; it never crosses the `/api` fence. */
 const ROUTE_PREFIX = '/__pocket'
 
+/** Bytes of request body one route accepts before refusing it. */
+const MAX_BODY_BYTES = 64 * 1024
+
 /**
  * Serve the browser half's routes on the webserver that serves the GUI.
- *
- * The browser half cannot call a Host Remote method: that surface is generated
- * and the forwarded-event allowlist is host-owned. It uses routes on the GUI's
- * own server instead — same-origin, so the browser's session cookie already
- * applies and no token of our own is needed.
- *
- * The routes carry what the card needs: the binding, the open requests, and the
- * decision the desktop should mirror. That is not public, so every request goes
- * through the connection's trust fence first, and a deployment without a fence
- * falls back to the same-origin check every mutating call already carries.
  *
  * @param webServer - the route-registration carrier.
  * @param snapshot - thunk returning the current state for the card.
@@ -49,20 +42,46 @@ export function registerRoutes(webServer, snapshot, actions, trust = () => undef
     res.end(payload)
   }
 
-  /** Bound a request body so a malformed caller cannot grow it without limit. */
+  /**
+   * Read a JSON request body, distinguishing a bad request from a broken server.
+   *
+   * A body that is too large or not JSON is the caller's mistake and belongs in the
+   * 400 family: reporting it as 500 tells the reader the plugin failed when it did
+   * not, and buries a genuine server fault among ordinary client errors.
+   * @param req - the incoming request.
+   * @returns the parsed body, an empty object when there is none.
+   * @throws a `status`-tagged error when the body is unusable.
+   */
   const readBody = async (req) => {
     const chunks = []
     let size = 0
     for await (const chunk of req) {
       size += chunk.length
-      if (size > 64 * 1024) throw new Error('body too large')
+      if (size > MAX_BODY_BYTES) throw badRequest('body too large')
       chunks.push(chunk)
     }
     if (size === 0) return {}
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    try {
+      return JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    } catch {
+      throw badRequest('body is not JSON')
+    }
   }
 
-  /** Reject a cross-site mutation; a browser sends `Origin` on every POST. */
+  /** An error the route reports as a client mistake rather than a server fault. */
+  const badRequest = (message) => Object.assign(new Error(message), { status: 400 })
+
+  /**
+   * Reject a cross-site mutation; a browser sends `Origin` on every POST.
+   *
+   * A missing `Origin` is accepted on purpose: a same-origin request from a page that
+   * is not a browser (a health probe, a script on the host) carries none, and the
+   * routes are inside the connection's trust fence wherever a deployment has one. The
+   * check exists to stop a *cross-site* write, which always carries the attacker's
+   * `Origin`.
+   * @param req - the incoming request.
+   * @returns whether the request may mutate.
+   */
   const sameOrigin = (req) => {
     const origin = req.headers.origin
     if (origin === undefined) return true
@@ -148,7 +167,11 @@ export function registerRoutes(webServer, snapshot, actions, trust = () => undef
         }
         json(res, 404, { error: 'unknown route' })
       } catch (error) {
-        json(res, 500, { error: error instanceof Error ? error.message : String(error) })
+        // A body the caller got wrong is reported as their mistake; anything else is
+        // a server fault. Collapsing both into 500 made an oversized or malformed
+        // body look like a broken plugin.
+        const status = typeof error?.status === 'number' ? error.status : 500
+        json(res, status, { error: error instanceof Error ? error.message : String(error) })
       }
     },
   })

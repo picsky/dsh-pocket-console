@@ -40,8 +40,8 @@ The tag starts the workflow, which:
 
 1. requires the tag to name `package.json`'s version, and the run to be a tag at
    all — a manual dispatch from a branch is refused;
-2. runs `npm run check:parity`, so the one setting that lives in five places
-   cannot ship disagreeing;
+2. runs `npm run check:parity`, so the one setting that lives in six places cannot
+   ship disagreeing, and no published document links to a file the tarball lacks;
 3. runs the suite;
 4. runs `npm publish --provenance`, whose `prepack` refuses a tarball that lost a
    bundled library or would import a module `files` does not publish.

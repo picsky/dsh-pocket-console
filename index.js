@@ -228,7 +228,7 @@ export async function apply(ctx, config) {
   })
 
   // The decision the phone took, and what the browser half did with it.
-  const mirror = createMirror({ log, settings: () => settings })
+  const mirror = createMirror({ log, settings: () => settings, messages })
 
   // The escalation machine owns the timer, the race, and the pending registry;
   // this file only wires it to the two seams and the channel's actions.

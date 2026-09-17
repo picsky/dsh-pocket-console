@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="740" viewBox="0 0 420 740" role="img" aria-label="提问卡片：三道题全部铺开，已答的一题变成 ✅">
+  <title>提问卡片（样张）</title>
+  <defs>
+    <clipPath id="screen"><rect x="52" y="24" width="316" height="652" rx="28"/></clipPath>
+  </defs>
+
+  <rect width="420" height="740" fill="#f4f5f7"/>
+  <rect x="40" y="12" width="340" height="680" rx="40" fill="#1f2329"/>
+  <rect x="52" y="24" width="316" height="652" rx="28" fill="#f7f8fa"/>
+
+  <g clip-path="url(#screen)">
+    <rect x="52" y="24" width="316" height="652" fill="#f7f8fa"/>
+    <rect x="180" y="32" width="60" height="10" rx="5" fill="#1f2329" opacity="0.85"/>
+
+    <text x="68" y="66" font-size="11" fill="#646a73" font-family="Segoe UI, Arial">9:41</text>
+    <rect x="326" y="58" width="20" height="9" rx="3" fill="none" stroke="#646a73" stroke-width="1.4"/>
+    <rect x="347" y="60" width="3" height="5" rx="1" fill="#646a73"/>
+
+    <rect x="76" y="84" width="268" height="620" rx="14" fill="#ffffff" stroke="#e5e6eb"/>
+
+    <text x="92" y="114" font-size="15" font-weight="600" fill="#1f2329" font-family="Segoe UI, Microsoft YaHei, Arial">提问</text>
+    <text x="92" y="138" font-size="11.5" fill="#646a73" font-family="Segoe UI, Microsoft YaHei, Arial">进度：已答 1/3</text>
+
+    <!-- question 1: answered, controls gone -->
+    <text x="92" y="172" font-size="12.5" font-weight="600" fill="#1f2329" font-family="Segoe UI, Microsoft YaHei, Arial">1. 部署目标环境？</text>
+    <rect x="92" y="184" width="236" height="36" rx="8" fill="#f0f9f2" stroke="#b7e2c4"/>
+    <text x="104" y="207" font-size="12" fill="#1a7f37" font-family="Segoe UI, Microsoft YaHei, Arial">✅ 生产环境</text>
+
+    <!-- question 2: live, single select -->
+    <text x="92" y="256" font-size="12.5" font-weight="600" fill="#1f2329" font-family="Segoe UI, Microsoft YaHei, Arial">2. 需要哪些迁移脚本？</text>
+    <text x="92" y="278" font-size="10.5" fill="#8f959e" font-family="Segoe UI, Microsoft YaHei, Arial">选项</text>
+    <text x="92" y="294" font-size="10.5" fill="#8f959e" font-family="Segoe UI, Microsoft YaHei, Arial">· 全量重建：可从零复现，但停机时间长</text>
+    <text x="92" y="310" font-size="10.5" fill="#8f959e" font-family="Segoe UI, Microsoft YaHei, Arial">· 增量补丁：停机短，需人工核对</text>
+
+    <rect x="92" y="320" width="236" height="38" rx="8" fill="#ffffff" stroke="#d0d3d9"/>
+    <text x="104" y="344" font-size="12" fill="#1f2329" font-family="Segoe UI, Microsoft YaHei, Arial">全量重建</text>
+    <rect x="92" y="366" width="236" height="38" rx="8" fill="#ffffff" stroke="#d0d3d9"/>
+    <text x="104" y="390" font-size="12" fill="#1f2329" font-family="Segoe UI, Microsoft YaHei, Arial">增量补丁</text>
+
+    <!-- question 2: typed answer beside the options -->
+    <rect x="92" y="414" width="160" height="34" rx="8" fill="#ffffff" stroke="#d0d3d9"/>
+    <text x="104" y="436" font-size="11" fill="#a6a9b0" font-family="Segoe UI, Microsoft YaHei, Arial">输入回答</text>
+    <rect x="260" y="414" width="68" height="34" rx="8" fill="#f2f3f5" stroke="#d0d3d9"/>
+    <text x="294" y="436" font-size="11" fill="#646a73" text-anchor="middle" font-family="Segoe UI, Microsoft YaHei, Arial">提交</text>
+
+    <!-- question 3: live, multi select -->
+    <text x="92" y="486" font-size="12.5" font-weight="600" fill="#1f2329" font-family="Segoe UI, Microsoft YaHei, Arial">3. 需要同步更新的文档？</text>
+    <rect x="98" y="500" width="14" height="14" rx="3" fill="#3370ff"/>
+    <path d="M101 507 l3 3 l5 -6" fill="none" stroke="#ffffff" stroke-width="1.8"/>
+    <text x="122" y="512" font-size="12" fill="#1f2329" font-family="Segoe UI, Microsoft YaHei, Arial">README 的 Quick start</text>
+
+    <rect x="98" y="526" width="14" height="14" rx="3" fill="#ffffff" stroke="#c9cdd4"/>
+    <text x="122" y="538" font-size="12" fill="#1f2329" font-family="Segoe UI, Microsoft YaHei, Arial">docs/configuration.md</text>
+
+    <rect x="98" y="552" width="14" height="14" rx="3" fill="#ffffff" stroke="#c9cdd4"/>
+    <text x="122" y="564" font-size="12" fill="#1f2329" font-family="Segoe UI, Microsoft YaHei, Arial">CHANGELOG.md</text>
+
+    <rect x="92" y="584" width="236" height="34" rx="8" fill="#ffffff" stroke="#d0d3d9"/>
+    <text x="104" y="606" font-size="11" fill="#a6a9b0" font-family="Segoe UI, Microsoft YaHei, Arial">补充说明（可选）</text>
+
+    <text x="92" y="646" font-size="10.5" fill="#8f959e" font-family="Segoe UI, Microsoft YaHei, Arial">全部答完后自动结算，没有最后一题的</text>
+    <text x="92" y="662" font-size="10.5" fill="#8f959e" font-family="Segoe UI, Microsoft YaHei, Arial">“提交”按钮。</text>
+  </g>
+
+  <text x="210" y="716" font-size="11" fill="#8f959e" text-anchor="middle" font-family="Segoe UI, Microsoft YaHei, Arial">三道题一次铺开 · 已答的一题留在原位</text>
+</svg>

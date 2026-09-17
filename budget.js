@@ -45,7 +45,13 @@ export function clipToBytes(value, marker, budget = CARD_TEXT_BUDGET) {
   const text = String(value ?? '')
   if (Buffer.byteLength(text, 'utf8') <= budget) return text
 
-  const room = budget - Buffer.byteLength(marker, 'utf8')
+  const markerSize = Buffer.byteLength(marker, 'utf8')
+  // A marker wider than the budget cannot be appended and still fit: the caller asked
+  // for a bound this marker cannot express, so the marker is what gets clipped rather
+  // than the result silently exceeding the bound it promised.
+  if (markerSize >= budget) return clipToBytes(marker, '', budget)
+
+  const room = budget - markerSize
   let used = 0
   let kept = ''
   // `for…of` walks code points, so a surrogate pair is never split in half.

@@ -23,9 +23,9 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
-      # One user-tunable setting lives in five places; this refuses to pass
-      # unless Config, SectionSchema, the card, both READMEs, and the bundle
-      # patch agree.
+      # One setting lives in six places, and a published document must not link to a
+      # file the tarball lacks; this refuses to pass unless Config, SectionSchema, the
+      # card, both config pages, the bundle patch, and the published file list agree.
       - run: npm run check:parity
       # The suite stubs its five production dependencies through a resolution
       # hook, so there is nothing to install and no credentials or network.

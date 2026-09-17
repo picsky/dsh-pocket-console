@@ -43,7 +43,7 @@ const zh = {
   answersSubmitted: '已提交全部回答',
   requestGone: '该请求已处理或已过期',
   actionUnknown: '无法识别该操作',
-  /** Returned when a channel action arrives with no request behind it. */
+  /** Returned by the channel when a card action names no live request. */
   requestExpired: '该请求已失效',
   notRecipient: '只有绑定的接收人可以操作',
   platformUnreachable: '无法连接飞书开放平台（网络或代理不通）',
@@ -60,13 +60,54 @@ const zh = {
   sendToAgent: '发送给 agent',
   superseded: '**这条结果已被新的结果取代**，请用最新那条回复。',
   readerSpoke: '**该结果已有新消息**，这条通知不再接受回复。',
-  noticeExpired: '**这条通知已过期**，不再接受回复。',
   noticeGone: '该结果已过期',
-  noticeTtlPassed: '该通知已过期',
   emptyInstruction: '指令为空，未发送',
   noAgent: '会话已不在运行，指令未发送',
   sent: '已发送给 agent',
   received: '**已收到指令**，已排入该会话。',
+
+  /**
+   * Deployment log lines, in the deployment's language.
+   *
+   * The log is read by whoever is diagnosing *this* deployment, so it follows the
+   * same `locale` the cards do rather than being split across two languages — a
+   * reader who set `zh` should not have to read half the story in English. Lines
+   * about the plugin's own internals (`index.js`) stay English: they describe the
+   * harness's behaviour, not the deployment's.
+   */
+  logMessageRewriteFailed: '卡片改写失败',
+  logDeliveryFailed: '消息投递失败',
+  logCardTooLarge: '卡片被判定为超出体积上限，按一半长度重投一次。',
+  logMirror: (status, reason) => `桌面镜像：${status}${reason === undefined ? '' : `（${reason}）`}`,
+  logNotRecipient: '忽略非接收人的卡片操作。',
+  logRecipientKept: '该部署已绑定接收人；忽略其他账号的私聊（改绑请在设置卡片里操作）。',
+  logRecipientBound: openId => `绑定接收人：${openId}`,
+  logTransportCloseFailed: '飞书长连接关闭失败',
+  logPublishFailed: '飞书绑定状态发布失败',
+  logOpenLink: (seconds) => `请在手机上打开以下链接完成飞书绑定（${seconds} 秒内有效，仅可使用一次）：`,
+  logNoCredentials: '未找到飞书凭据，开始一键创建应用；请用飞书扫描或打开下面的链接。',
+  logBindStatus: status => `绑定状态：${status}`,
+  logAppCreated: appId => `飞书应用已创建：${appId}`,
+  logReady: '飞书长连接已就绪。',
+  logDisconnected: '飞书长连接断开，正在重连。',
+  logReconnected: '飞书长连接已恢复。',
+  logConnectionFailed: '飞书长连接失败；审批将只保留在桌面',
+  logCredentialsRejected: detail => `飞书凭据未通过校验：${detail}`,
+  logConnecting: '飞书长连接正在建立；就绪后开始接收审批。',
+  logResumeFailed: '飞书通道恢复失败；审批将只保留在桌面',
+  logPersistFailed: '应用凭据未能保存；本次连接仍使用填写的值',
+  logAdopting: '已收到应用凭据，正在校验并连接飞书。',
+  logEnrollmentFailed: '飞书绑定失败；审批将只保留在桌面',
+  logNoticeFailed: '结果通知失败',
+  logNoticeCooling: '结果未通知：同一会话仍在冷却期内。',
+  logNoticeNoAgent: '结果未通知：该会话没有活跃 agent（本版本不恢复已回收的会话）。',
+  logNoticeTooLarge: '通知被判定为超出体积上限，按一半长度重投一次。',
+  logNoticeSent: '结果已发送到手机。',
+  logNoticeSendFailed: '结果发送失败',
+  logNoticeCardFailed: '结果卡片改写失败',
+  logNoticeRetired: headline => `结果通知失效：${headline}`,
+  logInstructionQueued: '已把手机上的指令排入会话。',
+  logInstructionFailed: '指令注入失败',
 }
 
 /** English copy. Same keys, and the same functions for the varying parts. */
@@ -112,13 +153,46 @@ const en = {
   sendToAgent: 'Send to the agent',
   superseded: '**A newer result replaced this one** — reply to that message instead.',
   readerSpoke: '**This session has a newer message**, so this notice no longer accepts a reply.',
-  noticeExpired: '**This notice has expired** and no longer accepts a reply.',
   noticeGone: 'That result has expired',
-  noticeTtlPassed: 'That notice has expired',
   emptyInstruction: 'The instruction was empty, so nothing was sent',
   noAgent: 'That session is no longer running, so nothing was sent',
   sent: 'Sent to the agent',
   received: '**Instruction received** and queued for that session.',
+
+  /** Deployment log lines. See the Chinese dictionary for why these are localized. */
+  logMessageRewriteFailed: 'message rewrite failed',
+  logDeliveryFailed: 'message delivery failed',
+  logCardTooLarge: 'card read as over the size limit; retrying once at half the text.',
+  logMirror: (status, reason) => `desktop mirror: ${status}${reason === undefined ? '' : ` (${reason})`}`,
+  logNotRecipient: 'ignored a card action from someone other than the recipient.',
+  logRecipientKept: 'this deployment already has a recipient; ignored a direct message from another account (change it from the Settings card).',
+  logRecipientBound: openId => `bound recipient: ${openId}`,
+  logTransportCloseFailed: 'closing the Feishu long connection failed',
+  logPublishFailed: 'publishing the Feishu binding state failed',
+  logOpenLink: seconds => `Open this link on your phone to finish binding Feishu (valid ${seconds} seconds, single use):`,
+  logNoCredentials: 'no Feishu credentials found; starting the one-click app creation — scan or open the link below.',
+  logBindStatus: status => `binding status: ${status}`,
+  logAppCreated: appId => `Feishu app created: ${appId}`,
+  logReady: 'the Feishu long connection is ready.',
+  logDisconnected: 'the Feishu long connection dropped; reconnecting.',
+  logReconnected: 'the Feishu long connection is back.',
+  logConnectionFailed: 'the Feishu long connection failed; approvals will stay on the desktop',
+  logCredentialsRejected: detail => `Feishu rejected these credentials: ${detail}`,
+  logConnecting: 'opening the Feishu long connection; approvals start arriving once it is ready.',
+  logResumeFailed: 'restoring the Feishu channel failed; approvals will stay on the desktop',
+  logPersistFailed: 'the app credentials could not be saved; this connection still uses what was entered',
+  logAdopting: 'app credentials received; checking them and connecting to Feishu.',
+  logEnrollmentFailed: 'binding Feishu failed; approvals will stay on the desktop',
+  logNoticeFailed: 'sending the result notice failed',
+  logNoticeCooling: 'no notice: this session is still inside its cooldown.',
+  logNoticeNoAgent: 'no notice: this session has no live agent (this version does not revive a reclaimed session).',
+  logNoticeTooLarge: 'the notice read as over the size limit; retrying once at half the text.',
+  logNoticeSent: 'the result was sent to the phone.',
+  logNoticeSendFailed: 'sending the result failed',
+  logNoticeCardFailed: 'rewriting the result card failed',
+  logNoticeRetired: headline => `result notice retired: ${headline}`,
+  logInstructionQueued: 'the instruction from the phone was queued for the session.',
+  logInstructionFailed: 'injecting the instruction failed',
 }
 
 /** The languages a deployment can choose between. */

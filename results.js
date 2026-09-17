@@ -18,11 +18,10 @@
 
 import { CARD_TEXT_BUDGET, clipToBytes, looksLikeSizeRefusal } from './budget.js'
 
+import { randomUUID } from 'node:crypto'
+
 /** Form field carrying the instruction typed on the phone. */
 const INSTRUCTION_FIELD = 'value'
-
-/** Chat-node kinds that stay outside a turn's folded process. Mirrors ui-chat's own list. */
-const UNFOLDED_KINDS = new Set(['system-prompt', 'user', 'steering', 'turn-process', 'turn-error', 'turn-max-tokens', 'turn-tail'])
 
 /**
  * Whether one Assistant message is a turn's answer.
@@ -36,6 +35,9 @@ export function isAnswer(message) {
   return message !== undefined && message.hasToolCall !== true && message.text.trim() !== ''
 }
 
+/** How many sessions are observed at once before the coldest are forgotten. */
+const TRACK_CAPACITY = 256
+
 /**
  * Watch root sessions, then offer each stopped session's answer to the channel.
  */
@@ -46,14 +48,40 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
   const notices = new Map()
   let installed = false
 
-  /** One session's observation state. */
+  /**
+   * One session's observation state.
+   *
+   * The map is bounded because a long-running deployment meets every session it
+   * ever notifies about, and nothing else retires them: a track is small, but
+   * "one per session forever" is still a leak in a process that stays up for
+   * weeks. Eviction only ever drops a track that is not waiting on a notice, so
+   * a session about to notify keeps its place.
+   */
   const trackOf = (session) => {
     let track = tracks.get(session)
     if (track === undefined) {
-      track = { turn: undefined, message: undefined, ended: undefined, timer: undefined, sentAt: undefined, eligible: false }
+      forgetColdest()
+      track = {
+        turn: undefined, message: undefined, ended: undefined,
+        timer: undefined, sentAt: undefined, eligible: false, touched: now(),
+      }
       tracks.set(session, track)
+    } else {
+      track.touched = now()
     }
     return track
+  }
+
+  /** Drop the coldest idle tracks until the map is inside its capacity. */
+  const forgetColdest = () => {
+    if (tracks.size < TRACK_CAPACITY) return
+    const idle = [...tracks.entries()]
+      .filter(([, track]) => track.timer === undefined)
+      .sort((left, right) => left[1].touched - right[1].touched)
+    // Half the map at once, so the sort is paid for rarely rather than per event.
+    for (const [session] of idle.slice(0, Math.max(1, Math.floor(TRACK_CAPACITY / 2)))) {
+      tracks.delete(session)
+    }
   }
 
   /**
@@ -68,7 +96,7 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
       track.timer = undefined
       // A throw here would be an uncaught exception, which the harness treats as
       // fatal: a notification must never be able to end the process.
-      void fire(session).catch(error => { log.warn('结果通知失败', error) })
+      void fire(session).catch(error => { log.warn(messages().logNoticeFailed, error) })
     }, settings().delaySeconds * 1000)
     track.timer.unref?.()
   }
@@ -83,14 +111,14 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
     if (!isAnswer(track.message)) return
     const delay = settings().resultNotifyCooldownSeconds * 1000
     if (track.sentAt !== undefined && now() - track.sentAt < delay) {
-      log.debug('结果未通知：同一会话仍在冷却期内。')
+      log.debug(messages().logNoticeCooling)
       return
     }
     // `ctx.get`, not `ctx.agents`: reading a service property without an
     // `inject` declaration throws, and this feature is optional.
     const agent = ctx.get?.('agents')?.get?.(session)
     if (agent === undefined) {
-      log.debug('结果未通知：该会话没有活跃 agent（本版本不恢复已回收的会话）。')
+      log.debug(messages().logNoticeNoAgent)
       return
     }
     if (agent.status !== 'idle') {
@@ -120,16 +148,16 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
     try {
       const handle = await channel.deliver(view).catch(async (error) => {
         if (!looksLikeSizeRefusal(error)) throw error
-        log.debug('通知被判定为超出体积上限，按一半长度重投一次。')
+        log.debug(messages().logNoticeTooLarge)
         answer = clipToBytes(track.message.text, messages().truncated, Math.floor(CARD_TEXT_BUDGET / 2))
         return await channel.deliver({ ...view, body: [answer, messages().replyHint] })
       })
       const notice = notices.get(id)
       if (notice !== undefined) notice.handle = handle
-      log.info('结果已发送到手机。')
+      log.info(messages().logNoticeSent)
     } catch (error) {
       notices.delete(id)
-      log.warn('结果发送失败', error)
+      log.warn(messages().logNoticeSendFailed, error)
     }
   }
 
@@ -162,15 +190,22 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
         body: [headline],
         buttons: [],
         forms: [],
-      })).catch(error => { log.warn('结果卡片改写失败', error) })
+      })).catch(error => { log.warn(messages().logNoticeCardFailed, error) })
     }
-    if (retired > 0) log.debug(`结果通知失效：${headline}`)
+    if (retired > 0) log.debug(messages().logNoticeRetired(headline))
     return retired
   }
 
-  /** An unguessable, single-use notice rid. */
+  /**
+   * An unguessable, single-use notice rid.
+   *
+   * The same construction the escalation registry uses, for the same reason: this id
+   * decides whether a reply is accepted, so it is drawn from the platform's CSPRNG
+   * rather than `Math.random()`, whose stream is not meant to be unpredictable.
+   * @returns a fresh notice id.
+   */
   function noticeId() {
-    return `n${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`
+    return `n${randomUUID().replaceAll('-', '').slice(0, 20)}`
   }
 
   /** Observe one session event. */
@@ -251,7 +286,7 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
         // injected context instead.
         source: { kind: 'user' },
       }))
-      log.info('已把手机上的指令排入会话。')
+      log.info(messages().logInstructionQueued)
       if (notice.handle !== undefined) {
         await Promise.resolve(channel.update(notice.handle, {
           title: `${settings().titlePrefix} ${messages().resultTitle}`,
@@ -259,10 +294,10 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
           body: [messages().received],
           buttons: [],
           forms: [],
-        })).catch(error => { log.warn('结果卡片改写失败', error) })
+        })).catch(error => { log.warn(messages().logNoticeCardFailed, error) })
       }
     } catch (error) {
-      log.warn('指令注入失败', error)
+      log.warn(messages().logInstructionFailed, error)
     }
   }
 
@@ -291,7 +326,15 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
      * @returns the toast response, or undefined when this is not a notice action.
      */
     handleAction,
-    /** Unfolded kinds, exported for the README's contract note. */
-    unfoldedKinds: UNFOLDED_KINDS,
+    /**
+     * How many sessions are being observed right now.
+     *
+     * The bound is an invariant of a process that stays up for weeks, and nothing
+     * else can observe it from outside: the map is the only state here that grows
+     * with the deployment's lifetime, so the suite reads it directly rather than
+     * inferring it from timing.
+     * @returns the number of per-session records held.
+     */
+    trackedSessions: () => tracks.size,
   }
 }

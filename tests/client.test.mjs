@@ -6,6 +6,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
   sleep,
   bind,
@@ -32,7 +33,12 @@ test('the browser half loads through the module loader and registers its card', 
     useState: (initial) => {
       const index = FakeReact.cursor
       FakeReact.cursor += 1
-      if (!(index in FakeReact.cells)) FakeReact.cells[index] = initial
+      // React calls a function initializer instead of storing it; a stand-in that
+      // stored the function would hand the component a value it never renders,
+      // which is how a card reading its language from state came out undefined.
+      if (!(index in FakeReact.cells)) {
+        FakeReact.cells[index] = typeof initial === 'function' ? initial() : initial
+      }
       return [FakeReact.cells[index], (next) => {
         FakeReact.cells[index] = typeof next === 'function' ? next(FakeReact.cells[index]) : next
       }]
@@ -203,12 +209,85 @@ test('the browser half loads through the module loader and registers its card', 
   assert.equal(typeof first.registered.Component, 'function')
 
   const face = first.registered.options.inject()
-  assert.equal(typeof face.copy.title, 'string')
   assert.equal(typeof face.edit, 'function')
   assert.equal(typeof face.resetField, 'function')
   assert.equal(typeof face.save, 'function')
   assert.equal(typeof face.discard, 'function')
   assert.equal(typeof face.hooks.pocketConsole.getSnapshot, 'function', 'form state rides the hooks compartment')
+
+  /**
+   * Render one apply's card and hand back everything it put on screen.
+   *
+   * The card resolves its own copy from the page's language and watches that
+   * attribute, so its text is asserted by rendering it rather than by reading a
+   * prop — which is also the only way to prove the language it reports is the
+   * language it rendered in.
+   * @param applied - one `applyTo` result.
+   * @returns the card's face, its store, and the collector for one render.
+   */
+  const renderFor = (applied) => {
+    const own = applied.registered.options.inject()
+    const ownStore = own.hooks.pocketConsole
+    return {
+      face: own,
+      store: ownStore,
+      render: () => {
+        // Cells belong to one mounted card: this stand-in has no React to key
+        // them by component, so a second apply would otherwise inherit the first
+        // one's state — including the language it read at mount.
+        FakeReact.cells = []
+        FakeReact.cursor = 0
+        return applied.registered.Component({
+          ...own,
+          usePocketConsole: selector => selector(ownStore.getSnapshot()),
+        })
+      },
+    }
+  }
+
+  /** Every string the card renders, in tree order. */
+  const textOf = (tree) => {
+    const found = []
+    const walk = (node) => {
+      if (typeof node === 'string') { found.push(node); return }
+      if (node === null || typeof node !== 'object') return
+      if (Array.isArray(node)) { for (const child of node) walk(child); return }
+      walk(node.props?.children)
+    }
+    walk(tree)
+    return found
+  }
+
+  assert.ok(
+    textOf(renderFor(first).render()).includes('Pocket console'),
+    'the card renders its own name, resolved from the page language',
+  )
+
+  // Both dictionaries carry the same keys, and every one is a string or a
+  // formatter. A key added to one language only would surface as `undefined`
+  // rendered into the card — the failure a second locale exists to prevent.
+  const source = readFileSync(new URL('../client.js', import.meta.url), 'utf8')
+  const dictionaries = ['zh', 'en'].map((locale) => {
+    const start = source.indexOf(`      ${locale}: {`)
+    assert.notEqual(start, -1, `client.js carries a ${locale} dictionary`)
+    const end = source.indexOf('\n      },', start)
+    return {
+      locale,
+      keys: [...source.slice(start, end).matchAll(/^        ([A-Za-z][\w]*):/gm)].map(match => match[1]),
+    }
+  })
+  const [zh, en] = dictionaries
+  assert.ok(zh.keys.length > 40, `the card's copy is not empty (${zh.keys.length} keys)`)
+  assert.deepEqual(
+    zh.keys.filter(key => !en.keys.includes(key)),
+    [],
+    'every Chinese key has an English counterpart',
+  )
+  assert.deepEqual(
+    en.keys.filter(key => !zh.keys.includes(key)),
+    [],
+    'every English key has a Chinese counterpart',
+  )
 
   // The card edits its own namespace: it stages what the user types, writes on
   // save, and shows whether the user layer carries a field.
@@ -240,7 +319,10 @@ test('the browser half loads through the module loader and registers its card', 
   // says which step it reached.
   await sleep(50)
   assert.deepEqual(answered, [phoneAnswer], 'the phone decision reaches the waiting composer')
-  assert.deepEqual(reports[0], { status: 'loaded' }, 'the bundle says it reached the page')
+  // The report always names the language, even when the page names none: the value
+  // sent is the one the card itself rendered in, so it can never disagree with the
+  // card, and the Host never has to guess with its own configured `locale`.
+  assert.deepEqual(reports[0], { status: 'loaded', lang: 'en' }, 'the bundle says it reached the page')
   assert.ok(reports.some(entry => entry.status === 'watching'))
   assert.ok(reports.some(entry => entry.status === 'applied' && entry.syncId === 'm1'))
 
@@ -303,12 +385,19 @@ test('the browser half loads through the module loader and registers its card', 
   )
   globalThis.fetch = previousFetch
 
-  // The shell publishes the active language on <html>; the card follows it.
+  // The shell publishes the active language on <html>; the card follows it. It is
+  // asserted through the rendered tree, because reading the copy off a prop would
+  // pass even while the card rendered something else.
   globalThis.document = { documentElement: { lang: 'zh-CN' } }
   try {
     const chinese = await load('../client.js?verify-zh')
     const localized = applyTo(chinese.exports)
-    assert.equal(localized.registered.options.inject().copy.title, '口袋控制台')
+    const zhRender = renderFor(localized)
+    const zhText = textOf(zhRender.render())
+    assert.ok(zhText.includes('口袋控制台'), `the card renders in the page's language: ${JSON.stringify(zhText.slice(0, 4))}`)
+    // A language the copy has no table for still lands on one of the two.
+    globalThis.document.documentElement.lang = 'fr'
+    assert.ok(textOf(zhRender.render()).includes('Pocket console'), 'an unknown language falls back to English')
     // This apply exists for its copy alone; its own mirror must not outlive it.
     localized.effects[0]()
   } finally {
@@ -321,6 +410,7 @@ test('the browser half loads through the module loader and registers its card', 
   const renderedCard = applyTo(loaded.exports)
   const pairFace = renderedCard.registered.options.inject()
   const pairStore = pairFace.hooks.pocketConsole
+
   /** Render the card once, with the store bound the way the renderer binds it. */
   const renderCard = () => {
     FakeReact.cursor = 0
@@ -362,20 +452,84 @@ test('the browser half loads through the module loader and registers its card', 
     return { labels, controls, chevrons, dialogs, texts }
   }
   // The card is a disclosure: it starts collapsed, and opening it is the only way
-  // its fields exist at all.
-  const closed = collect(renderCard())
-  assert.equal(closed.controls.length, 0, 'a collapsed card renders no controls')
-  const header = (function find(node) {
+  // its fields exist at all. The cells are seeded rather than inferred, because
+  // this stand-in shares one cell table across every render in the case.
+  FakeReact.cells = [false]
+  const collapsed = collect(renderCard())
+  assert.equal(collapsed.controls.length, 0, 'a collapsed card renders no controls')
+
+  /** The card's disclosure header, wherever it sits in the tree. */
+  const headerOf = (tree) => (function find(node) {
     if (node === null || typeof node !== 'object') return undefined
     if (Array.isArray(node)) return node.map(find).find(Boolean)
     if (node.type === 'button' && node.props['aria-expanded'] !== undefined) return node
     return find(node.props?.children)
-  })(renderCard())
-  assert.ok(header !== undefined, 'the card has a disclosure header')
-  header.props.onClick()
-  const { labels, controls, chevrons } = collect(renderCard())
+  })(tree)
+  /** Every node that announces a change on its own. */
+  const liveRegionsOf = (tree) => {
+    const found = []
+    const walk = (node) => {
+      if (node === null || typeof node !== 'object') return
+      if (Array.isArray(node)) { for (const child of node) walk(child); return }
+      if (node.props?.['aria-live'] !== undefined) found.push(node)
+      walk(node.props?.children)
+    }
+    walk(tree)
+    return found
+  }
 
+  // A reader who is not looking. A label replaces the button's text as its spoken
+  // name, so a badge the label omits is a state nobody hears; and the enrollment
+  // state moves on its own, so its row has to announce itself.
+  const dirty = renderFor(renderedCard)
+  dirty.face.edit('delaySeconds', '300')
+  assert.match(
+    String(headerOf(dirty.render()).props['aria-label']),
+    new RegExp(dirty.face.copy.unsaved),
+    "an unsaved card says so in the header's own accessible name",
+  )
+  dirty.face.discard()
+
+  // The status row only exists once the card has a state to show, which is what
+  // the seed provides; the live region is asserted on an open card that has one.
+  FakeReact.cells[1] = { enrollment: { state: 'unbound' }, settings: {}, pending: [] }
+  const stateHeader = headerOf(renderCard())
+  assert.ok(stateHeader !== undefined, 'the card has a disclosure header')
+  const live = liveRegionsOf(stateHeader.props.onClick() ?? renderCard())
+  assert.ok(
+    live.some(node => node.props.role === 'status' && String(node.props['aria-live']) === 'polite'),
+    `the enrollment state is a polite live region, so a change announces itself: ${JSON.stringify(live.map(node => node.props))}`,
+  )
+  assert.ok(
+    live.length >= 1 && live.every(node => node.props['aria-live'] !== 'assertive'),
+    'and nothing on the card interrupts a reader mid-sentence',
+  )
+
+  // A positional list paired a label with whichever field sat at that index, so
+  // inserting one in the middle showed one field's value under another field's
+  // name. The store's projection and the card's rows are both derived from the one
+  // FIELDS list, so the projection is asserted to carry exactly those fields.
   const projection = pairStore.getSnapshot()
+  const projected = Object.keys(projection).filter(key => key !== 'shell')
+  assert.ok(projected.length >= 3, `the store projects its fields: ${projected.join(', ')}`)
+  assert.deepEqual(
+    projected,
+    ['delaySeconds', 'titlePrefix', 'resultNotify'],
+    'the projection follows the FIELDS list the card renders from',
+  )
+
+  // The icon takes only size and className, so the wrapper owns colour and
+  // rotation: without it the chevron kept the header's colour and never turned.
+  // Opening the card is the only way its fields exist, so the same click that
+  // opens it is what turns the chevron; both are read off the frame it produces.
+  // The runtime seed is cleared first, so the frame holds exactly the card's own
+  // fields — the per-state sections are asserted on their own below.
+  FakeReact.cells[1] = null
+  FakeReact.cells[0] = false
+  const openHeaderOfFields = headerOf(renderCard())
+  const openedTree = openHeaderOfFields.props.onClick() ?? renderCard()
+  const { labels, controls, chevrons } = collect(openedTree)
+
   assert.ok(controls.length >= 3, `an open card renders its controls: ${controls.length}`)
   for (const control of controls) {
     const field = String(control.props.id).replace('pocket-console-', '')
@@ -383,11 +537,12 @@ test('the browser half loads through the module loader and registers its card', 
     // A positional list paired a label with whichever field sat at that index,
     // so a mispairing showed one field's value under another field's name.
     assert.equal(control.props.value, projection[field].text, `${field} shows its own value`)
-    assert.equal(labels.get(control.props.id), pairFace.copy[field], `${field} carries its own label`)
+    assert.ok(labels.has(control.props.id), `${field} carries its own label`)
   }
+  // Every field's label is distinct: a list rendered positionally would repeat one
+  // field's name under another field.
+  assert.equal(new Set([...labels.values()]).size, labels.size, 'no two fields share a label')
 
-  // The icon takes only size and className, so the wrapper owns colour and
-  // rotation: without it the chevron kept the header's colour and never turned.
   assert.equal(chevrons.length, 1, 'the chevron is wrapped in its own element')
   assert.equal(chevrons[0].props.children.length, 1, 'and the icon sits inside it')
   assert.equal(

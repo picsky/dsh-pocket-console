@@ -3,6 +3,7 @@
 **把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 装进你的口袋。** 当你离开电脑，`dsh-pocket-console` 会把两个**会让 Agent 卡住**的时刻——**工具调用审批**和 **`ask_user_question` 提问**——以飞书交互卡片的形式送到手机上，随时随地批准或作答。
 
 [![npm](https://img.shields.io/npm/v/dsh-pocket-console?label=npm&color=4b6bfb)](https://www.npmjs.com/package/dsh-pocket-console)
+[![CI](https://github.com/picsky/dsh-pocket-console/actions/workflows/ci.yml/badge.svg)](https://github.com/picsky/dsh-pocket-console/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
 ![DSH bundle](https://img.shields.io/badge/DSH-bundle%20plugin-4b6bfb)
@@ -10,6 +11,11 @@
 [English](README.md) · 简体中文
 
 > **非官方项目。** 由社区成员独立开发和维护，与 DeepSeek 无隶属关系，也未经过其审核或推荐。安装任何第三方插件前请自行甄别。
+
+> **关于语言**：`README.md` 与本文是双语的入口文档。`docs/` 下的参考页（配置、故障排查、
+> 开发、架构决策）以及 `SECURITY.md`、`CHANGELOG.md`、`CONTRIBUTING.md`、`providers/README.md`
+> 目前只有英文——源码、提交信息与 issue 也一律用英文，这样维护上只有一份要同步。
+> 需要哪一页中文，开个 issue 说一声即可。
 
 ---
 
@@ -33,8 +39,30 @@
 - **核心与通道解耦**：飞书只是一个按契约实现的传输。接 Telegram、企业微信、钉钉或 ntfy 是**新增一个文件，不是重写**。
 
 <!-- 演示：录一段 GIF（设置卡片 → 扫码 → 手机收到审批），存为 assets/demo.gif，
-     然后把这段注释替换为：
-     <p align="center"><img src="assets/demo.gif" alt="在设置卡片绑定并从手机审批" width="720"></p> -->
+     然后把这段注释替换为下面这一行。
+
+     src 用**绝对地址**是有意的：`assets/` 不在 package.json 的 `files` 里
+     （4 MB 的包不该带 3 MB 的 GIF），而 npm 只重新托管 tarball 里有的文件——
+     所以相对路径 `assets/…` 在 GitHub 上能显示，在 npmjs.com 上会 404。
+     绝对地址两边都能显示。请与 README.md 保持同步。
+
+     <p align="center"><img src="https://raw.githubusercontent.com/picsky/dsh-pocket-console/main/assets/demo.gif" alt="在设置卡片绑定并从手机审批工具调用" width="720"></p> -->
+
+### 为什么不干脆把所有请求都推到手机？
+
+因为真正有意义的场景不是"你不在"，而是"**你就在那儿**"。把所有东西都推到手机上会让桌面变得更难用：
+一串通知不是决策界面，而一张卡片在你正盯着它描述的那个对话框时弹出来，只是噪音。
+所以桌面先答——默认给它两分钟——手机是"没人答"之后才发生的事。
+
+同一条思路还带出三个小决定：
+
+- **桌面会跟着手机走。** 在手机上作答后，你留着没关的页面会用和"在桌面上点一下"完全相同的方式结算，
+  面板关掉，而不是继续等一个已经做过的决定。
+- **提问按原本的形态作答。** `ask_user_question` 收的是一组问题、一次性返回全部答案，
+  所以卡片把题目全部铺开，带进度、多选，以及选项旁边的输入框——而不是把"回答三个问题"
+  在小屏幕上变成三次等待。
+- **跑完的一轮可以顺手把下一步交给你。** 打开 `resultNotify: idle`，会话安静下来后会把结果连同一个
+  输入框发给你，你写的内容会接着这个会话继续跑。
 
 ## 快速开始
 
@@ -101,9 +129,13 @@ dsh plugin --profile web add github:picsky/dsh-pocket-console
 
 **完全不扫码**也可以：把应用的凭据放进凭据库，键名就是 `DSH_FEISHU_APP_ID` 与 `DSH_FEISHU_APP_SECRET`
 （即 `appIdRef` / `appSecretRef` 指向的名字），插件每次启动都会自己连上。接收人则来自 `receiveId`，
-或者你直接给这个 bot 发一条消息——私聊会自动把发送者绑定为接收人。
+或者 bot 收到的一条私聊消息。
 
-凭据就位后只剩接收人：配置 `receiveId`，或者给这个 bot 发一条私聊消息——发送者会被绑定为接收人。
+**谁能成为接收人。** 私聊只会绑定**尚未绑定**的部署：第一个联系到这个 bot 的人被视为它的操作者。
+它**不会**改绑一个**已经绑定**的部署——接收人决定了审批卡片发去哪里、谁的点击算数，
+而卡片本身就是一张凭证，所以仅仅是"能联系到这个 bot"的账号不该能顶替这个角色。
+群消息同样永不绑定，无论被采用的应用带了哪些权限。
+一旦绑定，改接收人是设置卡片的事：用「使用其他应用」，或者先「解除绑定」再发一条新的私聊。
 
 **一个飞书应用只服务一个 DSH 实例。** 长连接的事件**不广播**：飞书把每个事件只投递给其中一条连接，
 所以两个实例共用一个 bot 时，审批会随机落到某一侧。请一个实例一个应用，并用 `titlePrefix` 区分。
@@ -132,16 +164,44 @@ user-questions/request    ─┘         │
                                      └─→ next() → 桌面 GUI → 其它 answerer
 ```
 
-撑起整套设计的只有两点：
+两条链除承载的结果不同之外完全一致，而且插件**从不把请求从桌面手里拿走**——
+它只是往一场竞速里多放一个 answerer，谁先答谁生效。**顺序本身就是全部设计**，值得看一眼：
 
-- **必须 `prepend: true`。** GUI 的转发器在浏览器连上时不会调用 `next()`，排在它后面的 answerer **永远不会执行**。
+```mermaid
+sequenceDiagram
+  autonumber
+  participant A as Agent
+  participant D as DSH harness
+  participant P as dsh-pocket-console
+  participant W as 桌面 GUI
+  participant F as 飞书 → 手机
+
+  A->>D: 工具调用需要审批
+  D->>P: approval/request（prepend: true）
+  P->>D: next() —— 链路其余部分照常运行
+  D->>W: 对话框打开并等待
+  P->>P: 开始 delaySeconds（默认 120 秒）
+  W-->>P: 还没有作答
+  Note over P,F: 计时器到期
+  P->>F: 投递卡片
+  F-->>P: 接收人点了「批准一次」
+  P->>D: 以 allowed-once 结算
+  Note over W: 页面经由浏览器镜像自行结算
+```
+
+从这个形状里掉出三个结论，每一个背后都有一条决策记录：
+
+- **以 `prepend: true` 注册。** DSH 自带的 Web 转发器在浏览器连着时不调用 `next()`，
+  所以排在它后面的升级器**永远不会执行**——见 [ADR 0007](docs/decisions/0007-prepend-and-race-the-desktop.md)。
 - **先 `next()` 再和计时器竞速。** 桌面链路照常跑；谁先答谁生效。审批语义完全不变——授权仍然是一次性的（`allowed-once`）。
+- **手机上答完，桌面面板还在等**，因为页面仍然握着同一条请求。浏览器半边会用"在桌面上点一下"
+  完全相同的那次客户端调用把它关掉——见 [ADR 0002](docs/decisions/0002-desktop-mirror-runs-in-the-browser.md)。
 
 浏览器卡片通过客户端的**设置作用域**（settings scope）修改上面这些设置：每次写入都以它读到的
 revision 为栅栏，只有点「保存」才真正落盘。**保存后在下一次决策就生效，不需要重启**：
 provider 只把取值来源交给插件一次，之后只通知"变了"，插件在每次通知时**重新读那个来源**。
 绑定与状态则走**同源 HTTP 路由**
-（`/__pocket/state`、`/bind`、`/unbind`、`/qr.svg`），而不是 Remote 方法：Remote 的类型面是生成的、
+（`/__pocket/state`、`/bind`、`/unbind`、`/adopt`、`/mirror`、`/qr.svg`），而不是 Remote 方法：Remote 的类型面是生成的、
 转发事件白名单由 Host 拥有，**外部插件两者都插不进去**；同源路由天然复用浏览器已有会话，不需要 token。
 `/state` 回报绑定状态、生效中的设置，以及**当前所有未结算的升级请求**——每一个是什么、是否已经送到手机。
 设置分区与路由都通过 `ctx.inject` **跟随服务**，而不是在加载时读一次快照：所以没有设置 provider 的部署
@@ -195,7 +255,7 @@ Host 记录进日志，并把最近几条挂在 state 路由上；镜像没生�
 
 以下情况不会通知或会延后：
 
-- `resultNotify` 默认是 `off`。
+- `resultNotify` 默认是 `idle`；设成 `off` 就只保留实时请求，不再推送结果。
 - 没有产出结果（只调了工具）的会话不通知。
 - 通知要等 `delaySeconds` 的安静时间；会话还在干活就继续等，所以连续多轮只会合并成一条通知。
 - 同一个会话两次通知之间至少间隔 `resultNotifyCooldownSeconds`。
@@ -208,57 +268,6 @@ Host 记录进日志，并把最近几条挂在 state 路由上；镜像没生�
 dsh 自己的远端客户端（编辑器里的 prompt）就是这么做的（`packages/acp/acp/src/session.ts`）。
 也正是这个归属决定了它在 Web 上**可见**——其它归属会渲染成"注入的上下文"，被折进那一轮的过程里。
 因此它同时带有完整的人类授权（需要人类输入的功能会接受它）；日志里它与你在桌面输入的消息无法区分。
-
-## 配置
-
-所有配置都有默认值，开箱即用。要调整就在自己的 profile 层里覆盖那一行——
-**patch 会替换整个 `config`，所以要写全想保留的键**：
-
-`$DSH_HOME/profiles/web/cordis.patch.yml`
-
-```yaml
-- id: pocket-console
-  config:
-    channel: dsh-pocket-console/providers/feishu.js
-    channelConfig:
-      domain: feishu          # 或 lark
-      appName: Pocket console
-      # receiveId: 'ou_xxx'   # 可选：跳过扫码，直接指定接收人
-    delaySeconds: 600         # 桌面专享时间；0 = 两端同时可答
-    maxDetailChars: 1200
-    titlePrefix: DSH
-    resultNotify: idle        # off（默认）或 idle
-    resultNotifyCooldownSeconds: 600
-```
-
-`locale` 决定发到手机上的卡片语言：所有卡片文案来自同一个字典（`messages.js`），部署配了哪种语言就读哪种；设置卡片本身跟随界面语言。
-其余字段
-其中三项是**设置命名空间**，可在设置卡片里运行时修改、无需重启：`delaySeconds`、`titlePrefix`、`resultNotify`。
-表里其余是**部署级**配置：它们存在是为了让部署能重新调整传输行为，普通用户不需要了解。
-手机卡片语言通过 `messages.js` 跟随界面语言；`locale` 只是"从未打开过 Web UI 的部署"的兜底。
-
-| 字段 | 默认 | 说明 |
-|---|---|---|
-| `channel` | `dsh-pocket-console/providers/feishu.js` | 通道模块 |
-| `channelConfig` | `{}` | 通道自有配置 |
-| `delaySeconds` | `120` | 桌面 GUI 单独作答的时间 |
-| `titlePrefix` | `DSH` | 卡片标题前缀 |
-| `resultNotify` | `off` | `idle` 表示把停下来的会话结果发到手机 |
-| `resultNotifyCooldownSeconds` | `600` | 同一个会话两次结果通知之间的最短间隔 |
-| `mirrorTtlSeconds` | `60` | 手机决定仍可镜像到桌面面板的时长 |
-| `locale` | `zh` | 发到手机上的卡片语言（`zh` 或 `en`） |
-
-通道配置（`channelConfig`）：
-
-| 字段 | 默认 | 说明 |
-|---|---|---|
-| `appIdRef` | `DSH_FEISHU_APP_ID` | 凭据引用名 |
-| `appSecretRef` | `DSH_FEISHU_APP_SECRET` | 凭据引用名 |
-| `domain` | `feishu` | `feishu` 或 `lark` |
-| `receiveId` | — | 指定接收人则跳过扫码 |
-| `receiveIdType` | `open_id` | `open_id` / `chat_id` / `user_id` / `email` |
-| `appName` / `appDesc` | 见源码 | 扫码确认页上预填的应用信息 |
-| `createOnly` | `true` | 一键流程只用于新建；已有应用用它自己的凭据绑定 |
 
 ## 安全
 
@@ -274,6 +283,9 @@ dsh 自己的远端客户端（编辑器里的 prompt）就是这么做的（`pa
 - **只有绑定的接收人能按。** 卡片本身就是一张凭证——拿到消息的人都能按它的按钮——
   所以只有操作者 `open_id` 等于绑定接收人时才受理。手机上给出的答案会变成人类归属的输入，
   这正是这个校验不可省的原因。
+- **接收人本身也不容顶替。** 绑定关系决定了卡片发去哪里、谁的点击算数，所以私聊只绑定未绑定的部署，
+  除此之外一概拒绝并记日志：来自其他账号的私聊、以及任何群消息。顶替接收人就等于把整条审批通道
+  交给"能联系到这个 bot 的任何人"。
 - **所有路由都在连接的信任围栏之后。** `/__pocket` 承载绑定、未结算请求与镜像决定，
   所以只有连接认可这次请求时才会作答（与 `/api` 面同一道围栏）；不可信的调用在任何内容被读取前
   就拿到它的 `401`/`403`。没有 connection 服务的部署退回每次变更调用都做的 `Origin` 校验，
@@ -283,65 +295,8 @@ dsh 自己的远端客户端（编辑器里的 prompt）就是这么做的（`pa
   所以 profile 不会安装任何声明了安装脚本的依赖，更不会执行它们；
   内置的就是官方 SDK 原样发布的代码。
 
-## 常见问题
-
-**从 GitHub 首次安装停在 `ERR_PNPM_IGNORED_BUILDS`。**
-git 依赖会从 registry 解析它自己的依赖，于是 pnpm ≥11 会撞上 `protobufjs` 的 postinstall，
-在你允许或拒绝该脚本之前拒绝完成安装。pnpm 追加的那条占位项**不是决定**——
-把它设为 `false` 再重新执行即可。从 npm 安装不会走到这一步，因为通道是内置的。
-
-**pnpm 往 profile 里写了 `minimumReleaseAgeExclude`，或者装到的还是上一个版本。**
-两者都是 pnpm 对"刚发布不久的版本"的供应链策略，不是本插件要求的：它会把太新的版本压住、
-把不带版本的写法解析到上一个，并把实际放行的那个记进排除项。想立刻拿到新版本就**显式指定版本**——
-`dsh plugin --profile web add dsh-pocket-console@0.1.1`——之后想自动跟随发布，再改回不带版本的写法。
-另外 pnpm 会缓存 registry 元数据，几分钟前刚发布的版本可能在那份缓存刷新前一直看不见。
-
-**设置卡片没出现。**
-卡片按 Host 服务的设置命名空间键控。先确认插件加载了
-（`dsh --profile web --dump-config` 应列出 `# == dsh-pocket-console` 层），
-然后刷新页面——已服务命名空间列表只在文档提交或重连时重读，不在注册时。
-
-**点「开始绑定」失败，或不出二维码。**
-一键创建流程需要能访问 `open.feishu.cn`。如果主机走代理，确认该域名可达。
-
-**点卡片上的操作回 404，或卡片提示"宿主还在运行旧版插件"。**
-页面和提供页面的进程是**分开**替换的：`dsh plugin … add` 之后，页面可能已经是新版，
-而 `dsh web` 还在跑旧代码，卡片要用的那条接口于是不存在。**重启 `dsh web`**
-（只刷新页面不会更新宿主），重启后再刷新页面。
-
-**「无法确认这组凭据」，或原因里点名 App ID / App Secret。**
-插件用你填的那两项直接问了平台，平台拒绝了——说明 App ID 或 App Secret 与线上应用对不上。
-请去开发者后台「凭证与基础信息」重新复制两项（secret 只显示一次，没存下来就重新生成）；
-另外**被拒的那组凭据不会被保留**，这是有意的。若提示的是"平台没有给出明确答复"，
-则说明这台机器连不上 `open.feishu.cn`。
-
-**二维码出来了，但扫码后不完成。**
-链接 10 分钟内有效且只能用一次，点卡片上的「重试」拿新的。
-另外你的飞书账号必须能在所属组织内创建应用；个人版且未加入任何组织时，
-先建一个免费组织并把自己拉进去。
-
-**日志有 `ws client ready`，但点按钮没反应。**
-飞书旧版「消息卡片回传交互」**不支持长连接**，只有新版 `card.action.trigger` 可以。
-确认应用订阅了 `card.action.trigger`——一键创建流程已经帮你配好。
-
-**点按钮回的是「该请求已处理或过期」。**
-这次点击没有对应的存活请求：要么桌面已经先答了那条请求，要么它被取消了——
-一旦产生决定就会改写卡片，按钮本应随之消失。0.1.0 之前的版本读错了卡片回调的字段路径，
-**每次**点击都会回这个提示；如果 profile 里还是那个版本，升级即可。
-
-**审批永远到不了手机。**
-先看卡片报的是什么。**已绑定**且**长连接：已建立**，说明投递链路是通的，问题在别处
-（`delaySeconds`，或接收人还没绑定——给 bot 发一条消息即可）。
-**长连接：已断开，正在重连…** 说明这段时间只有桌面能答。
-**连接失败**后面跟着的就是平台给出的原因。
-
-**能和别的飞书机器人一起跑吗？**
-只有在**不同应用**的前提下可以。飞书长连接是集群模式、不广播，
-两个工具共用一个应用会互相静默丢回调。请新建一个应用。
-
-**和 Auto review 预设兼容吗？**
-审批不兼容。Auto review 下 `approval/policy` 为 `never`，
-工具审批不再经过 `approval/request`，没有东西可以升级。提问升级仍然有效。
+发现了问题？[SECURITY.md](SECURITY.md) 写明怎么私下上报、哪些在范围内，
+以及上面这些不变式里哪些是你**可以拿来要求代码**的断言。
 
 ## 写一个新通道
 
@@ -374,60 +329,36 @@ git 依赖会从 registry 解析它自己的依赖，于是 pnpm ≥11 会撞上
 - **发布出来的包约 4 MB**，因为它把飞书通道连同该通道自己的依赖一起装进了 tarball。
   这正是安装不需要任何构建许可的原因；安装它的机器上不会编译任何东西。
 - **已在真实飞书租户上验证过，但尚未覆盖本版本。** 一键创建应用、长连接、卡片投递、
-  以及卡片回调回到 Host，都在真实应用上跑通过了。卡片回调的字段路径、选项整行、
-  以及自由文本回答是在那次验证**之后**才改的：测试覆盖了它们，但仍需真机确认一次。
-  凭据校验的**拒绝**路径已在真实平台上观察过（`code: 10014, msg: app id not exists`）；
-  它的成功路径与 ready 回调还需要一对真实凭据来确认。
+  以及卡片回调回到 Host，都在真实应用上跑通过了。凭据校验的**两条分支**也都在真实平台上观察过——
+  既包括被平台拒绝的一组（`code: 10014, msg: app id not exists`），也包括一组真实凭据：
+  校验通过 → 长连接就绪 → 带着已存储的接收人报 `bound`（见
+  [ADR 0005](docs/decisions/0005-connected-means-connected.md)）。
+  卡片回调的字段路径、选项整行、以及自由文本回答是在那次验证**之后**才改的：
+  测试覆盖了它们，但仍需真机确认一次。
 
 ## 开发
 
-纯 ESM JavaScript，**无构建步骤**——这里没有任何东西需要编译，测试也不需要先安装。
-唯一会碰到依赖的操作是发布：通道被打进 tarball（`bundleDependencies`），
-所以要在 `pnpm pack` / `pnpm publish` 之前先 `pnpm install`，这样消费方的 profile
-不会解析出任何被闸门拦下的包；缺少它时 `prepack` 会直接拒绝打包。
+纯 ESM JavaScript，**没有构建步骤**，测试也不需要先安装：
 
 ```sh
 npm test
 ```
 
-`npm run e2e` 是另一半，也是 CI 里 `real composition` 那个 job 跑的东西：
-它用 `pnpm` 打包（发布用的就是它，所以这里装的 tarball 就是发布要打的那个），
-把 tarball 装进一个临时 `DSH_HOME`，再真启动 `dsh web`、用启动令牌换到浏览器 cookie。
-**只有它能证明插件在真实 Loader 里被装配起来**——手搓的 context 做不到这一点。
-它需要先 `pnpm install`（tarball 里带着通道依赖），以及 CONTRIBUTING 里写明的 `dsh` 版本。
+一条命令，不需要凭据，不需要网络。安装、测试、真实装配检查，以及怎么对着运行中的部署调试，
+都在 [docs/development.md](docs/development.md)（英文）。
 
-**不需要先装任何东西**：测试套件通过 Node 的模块解析钩子（`test/hooks.mjs`）
-把五个生产依赖换成桩，因此不需要凭据也不需要网络。
+## 延伸阅读
 
-49 个用例覆盖：设置命名空间与路由注册、未绑定时不升级、unbound → awaiting → bound 状态机、
-二维码路由、跨源拒绝、解绑清理、解绑与迟到扫码的竞态、延时发卡、卡片内容、按钮回填、桌面优先抑制、
-多题累积与卡片改写、多选表单（含与补充说明一起提交）、自由文本、伪造选项拒绝、消息重新绑定、待审批明细、
-没有可选服务的部署与它们的迟到到达、运行时设置生效、取消、卸载、失败降级、
-结果通知的投递与一次性指令回传、关闭/忙碌/子会话下的静默、通知冷却、
-通知在被取代或会话有新输入时拒绝回复、迟到回复仍被接受、重启后凭据直连（不触发扫码）、
-手机卡片跟随界面语言、超长详情与超长结果按字节预算截断、被平台因体积拒绝的卡片自动减半重投、
-镜像报告只进状态路由而不刷日志、同一会话与其他会话各自的面板跃迁，
-以及浏览器半"每个标签都配自己的控件、展开时箭头朝上"的渲染断言。
-
-`enrollment` 一组专门覆盖"卡片能宣称什么、什么时候能宣称"：只有 ready 回调之后才报已绑定、
-填写的凭据**经 SDK 自己的客户端**送去平台校验（桩里用的是 SDK 真实的数字枚举 `Domain`，
-把 domain 当域名拼会直接挂测试，而不是发出去）、
-被平台拒绝的凭据无论 SDK 是抛错还是回包都用文字说明原因且不予保留、
-平台不可达时保留已填内容、换应用时关掉旧连接而不是让它继续跑、
-用户改用凭据的那一刻清掉还在显示的验证链接、凭据库拒收时仍用填写值连通并在卡片上说明、
-长连接终结失败带上原因、私聊消息刷新卡片显示的接收人，
-以及卡片对这些状态的渲染——首次使用的引导、失败时的原因、**缺接口时点名要重启宿主**、
-已绑定时列出的应用/接收人/连接状态。
-
-本地用 `--patch` 调试时，把 `channel` 指向相对路径：
-
-```yaml
-- insert:
-    - id: pocket-console
-      name: ./index.js
-      config:
-        channel: ./providers/feishu.js
-```
+| 文档 | 内容 |
+|---|---|
+| [docs/zh-CN/configuration.md](docs/zh-CN/configuration.md) | 每一项配置、默认值，以及哪些能在设置卡片里运行时修改 |
+| [docs/zh-CN/troubleshooting.md](docs/zh-CN/troubleshooting.md) | 安装、绑定，以及卡片收不到的情况 |
+| [docs/development.md](docs/development.md) | 测试套件、真实装配检查、对着运行中的部署调试 |
+| [docs/decisions/](docs/decisions/) | 插件为什么长成这样，一个决定一篇记录 |
+| [SECURITY.md](SECURITY.md) | 本插件声明的安全不变式，以及如何上报其中的漏洞 |
+| [CHANGELOG.md](CHANGELOG.md) | 每个版本改了什么 |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | 一个改动落地前需要满足什么 |
+| [providers/README.md](providers/README.md) | 通道契约，写给飞书之外的传输 |
 
 ## 许可
 

@@ -120,15 +120,45 @@ what Feishu is, the contract is missing something and that is the real fix.
 **A non-obvious choice gets a record.** `docs/decisions/` holds short records of
 why the plugin is shaped the way it is — the no-build-step constraint, the
 browser-side mirror, the human attribution of a phone instruction, the single-file
-browser half. Change one and the record changes with it.
+browser half. Change one and the record changes with it. A record is warranted when
+the decision is invisible from either file that implements it: the prepend-and-race
+ordering ([0007](docs/decisions/0007-prepend-and-race-the-desktop.md)) and the rule
+that a direct message binds but never re-binds ([0006](docs/decisions/0006-binding-is-not-up-for-grabs.md))
+are both unreadable from the code alone.
+
+**A user-visible change moves the changelog.** [CHANGELOG.md](CHANGELOG.md) is what a
+deployment reads before upgrading, so a fix, a behaviour change, or a security
+property belongs there — under **Unreleased** until the version is bumped. A
+behaviour change that could surprise someone gets its own line even when the commit
+is one sentence.
+
+**A security property is a claim, not a comment.** If a change adds or weakens one —
+who may answer, what a card may carry where a secret lives — the invariant list in
+[SECURITY.md](SECURITY.md) is part of the change, and a case in `tests/` is what
+holds it.
+
+**`internal/` is not published.** It holds maintainer notes — starting with
+`internal/launch.md`, the release and announcement checklist. It is deliberately absent
+from `package.json`'s `files`, so an installer never carries it, and `npm run
+check:parity` refuses a *published* document that links into it: this file is published,
+so it names the path rather than linking it. That boundary is the point — a note a
+reader of the package needs belongs in `docs/`, not there.
 
 **Docs in both languages.** `README.md` is English and the primary document;
-`README.zh-CN.md` is its counterpart. Update both.
+`README.zh-CN.md` is its counterpart. Update both. They are the only bilingual
+documents: `docs/` (the reference pages and the decision records), `SECURITY.md`,
+`CHANGELOG.md`, this file, and `providers/README.md` are English-only, on the same
+reasoning that the source, the commit messages, and the issue tracker are — one copy
+to keep true. `README.zh-CN.md` says so, and a request for a translated page is a
+worthwhile issue rather than a silent gap.
 
-**A new setting touches five places**, and `npm run check:parity` refuses to pass
+**A new setting touches six places**, and `npm run check:parity` refuses to pass
 until they agree: the `Config` schema in `index.js`, the `SectionSchema` the
 Settings card is built from, the card's own `FIELDS` in `client.js`, the config
-tables in both READMEs, and the commented example in `cordis.patch.yml`.
+tables in `docs/configuration.md` and `docs/zh-CN/configuration.md`, and the
+commented example in `cordis.patch.yml` — and it holds them to the same
+**defaults**, not only the same names, because a documented default that disagrees
+with the code is read as a promise.
 `SectionSchema` carries the user-tunable subset; the card, the tables, and the
 example follow it, so a key that exists only in `Config` stays deployment-only.
 

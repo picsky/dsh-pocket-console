@@ -114,6 +114,15 @@ async function withDeadline(request, milliseconds, message) {
 const REJECTION_IN_MESSAGE = /code:\s*(\d+)\s*,\s*msg:\s*([^,]+)/
 
 /**
+ * The SDK's own wording when it could not authenticate the pair.
+ *
+ * This is what separates a refusal from any other failure that happens to carry
+ * a `code`/`msg` pair: the credentials are only discarded on a refusal, so the
+ * classification has to rest on evidence the platform produced.
+ */
+const SDK_AUTH_FAILURE = /failed to get tenant_access_token/i
+
+/**
  * The SDK's log, routed into this deployment's log.
  *
  * The SDK prints a startup banner and a line per connection step at info level,
@@ -195,7 +204,14 @@ async function checkCredentials(client, credentials, copy) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     const refusal = REJECTION_IN_MESSAGE.exec(message)
-    if (refusal !== null) {
+    // Only a real refusal may be called one: a rejected pair is discarded from
+    // the store, so a proxy or gateway that happens to echo `code: …, msg: …`
+    // must not be able to delete credentials that work. The SDK says which call
+    // it could not authenticate, and the platform codes it is known to answer
+    // with are the other half of the evidence.
+    const named = refusal === null ? undefined : REJECTION_CODES.get(Number(refusal[1]))
+    if (refusal !== null
+      && (named !== undefined || SDK_AUTH_FAILURE.test(message))) {
       return {
         ok: false,
         kind: 'rejected',
@@ -341,7 +357,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       const sender = data?.operator?.open_id
       const bound = (await recipient().catch(() => undefined))?.id
       if (typeof sender !== 'string' || sender === '' || sender !== bound) {
-        log.debug('忽略非接收人的卡片操作。')
+        log.debug(messages().logNotRecipient)
         return { toast: { type: 'warning', content: messages().notRecipient } }
       }
       const settled = await onAction?.({
@@ -354,16 +370,32 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       return { toast: { type: settled.accepted ? 'success' : 'warning', content: settled.toast } }
     },
     'im.message.receive_v1': async (data) => {
-      // A direct message is the user asking to be reachable here. Re-binding is
-      // how a changed device or account recovers without editing configuration.
+      // A *direct* message is the user asking to be reachable here. A group
+      // message is not: the bot can be in a group it was added to, and the
+      // sender of a group message has not identified themselves as this
+      // deployment's operator. Taking one would hand the recipient — and so
+      // every approval card, and the authority to press its buttons — to
+      // whoever spoke in that group.
+      if (data?.message?.chat_type !== 'p2p') return
       const openId = data?.sender?.sender_id?.open_id
       if (typeof openId !== 'string' || openId === '') return
-      if (await binding.read() === openId) return
+      const current = await binding.read()
+      if (current === openId) return
+      // A direct message is consent to be reachable here, so it binds an
+      // unbound deployment. It must not *re-bind* a bound one: the sender is
+      // whoever can reach the bot, and accepting them would hand the recipient
+      // — and with it every approval card, and the authority to answer one —
+      // to a stranger. Changing the recipient is the Settings card's job, where
+      // it is a deliberate act.
+      if (current !== undefined && current !== '') {
+        log.warn(messages().logRecipientKept)
+        return
+      }
       await binding.write(openId)
       // The card is polling for exactly this: a message the user just sent is
-      // what re-binds them, and the card must stop asking for one.
+      // what binds them, and the card must stop asking for one.
       if (enrollment.state === 'bound') enrollment = { ...enrollment, recipient: openId }
-      log.info(`绑定接收人：${openId}`)
+      log.info(messages().logRecipientBound(openId))
     },
   })
 
@@ -375,6 +407,16 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
 
   /** The one in-flight onboarding run, shared across callers. */
   let onboarding
+
+  /**
+   * Whether this deployment is known to hold app credentials.
+   *
+   * Set by the read that onboarding and resume already perform. It exists so the
+   * stage a click publishes synchronously is the right one: the store read is
+   * asynchronous, and a click that answered `creating` for a deployment that is
+   * merely reconnecting would name the wrong wait.
+   */
+  let credentialsStored = false
 
   /** Whether the long connection has completed a handshake. */
   let connected = false
@@ -401,7 +443,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
     try {
       transport?.wsClient?.close?.()
     } catch (error) {
-      log.warn('飞书长连接关闭失败', error)
+      log.warn(messages().logTransportCloseFailed, error)
     }
     transport = undefined
   }
@@ -431,7 +473,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
    * @param extra - what the attempt could not do, when it could not do it.
    */
   const republish = (run, extra) => {
-    void publishBound(run, extra).catch((error) => { log.warn('飞书绑定状态发布失败', error) })
+    void publishBound(run, extra).catch((error) => { log.warn(messages().logPublishFailed, error) })
   }
 
   /**
@@ -449,7 +491,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
    */
   const announce = (info) => {
     enrollment = { state: 'awaiting', verifyUrl: info.url, expiresIn: info.expireIn }
-    log.info(`请在手机上打开以下链接完成飞书绑定（${info.expireIn} 秒内有效，仅可使用一次）：`)
+    log.info(messages().logOpenLink(info.expireIn))
     log.info(info.url)
   }
 
@@ -462,9 +504,13 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       ctx.credentials.resolve(appIdRef),
       ctx.credentials.resolve(appSecretRef),
     ])
-    return storedId?.value !== undefined && storedSecret?.value !== undefined
+    const pair = storedId?.value !== undefined && storedSecret?.value !== undefined
       ? { appId: storedId.value, appSecret: storedSecret.value }
       : undefined
+    // The one read that knows: remembered so the next click can name its wait
+    // without waiting for a read of its own.
+    credentialsStored = pair !== undefined
+    return pair
   }
 
   /**
@@ -473,7 +519,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
    * @returns the created credentials, whether or not they were persisted.
    */
   const createApplication = async (run, { createOnly = config.createOnly } = {}) => {
-    log.info('未找到飞书凭据，开始一键创建应用；请用飞书扫描或打开下面的链接。')
+    log.info(messages().logNoCredentials)
     const result = await Lark.registerApp({
       appPreset: { name: config.appName, desc: config.appDesc },
       addons: {
@@ -486,7 +532,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       },
       createOnly,
       onQRCodeReady: announce,
-      onStatusChange: (info) => { log.info(`绑定状态：${info.status}`) },
+      onStatusChange: (info) => { log.info(messages().logBindStatus(info.status)) },
     })
 
     // The scan outlives the request that started it, so the user may have
@@ -497,7 +543,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
     await ctx.credentials.set(appSecretRef, result.client_secret)
     const openId = result.user_info?.open_id
     if (typeof openId === 'string' && openId !== '') await binding.write(openId)
-    log.info(`飞书应用已创建：${result.client_id}`)
+    log.info(messages().logAppCreated(result.client_id))
 
     return { appId: result.client_id, appSecret: result.client_secret }
   }
@@ -519,27 +565,31 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       clearSlow()
       connected = true
       republish(run)
-      log.info('飞书长连接已就绪。')
+      log.info(messages().logReady)
     },
     onReconnecting: () => {
       if (closed || run !== generation) return
       connected = false
       republish(run)
-      log.warn('飞书长连接断开，正在重连。')
+      log.warn(messages().logDisconnected)
     },
     onReconnected: () => {
       if (closed || run !== generation) return
       connected = true
       republish(run)
-      log.info('飞书长连接已恢复。')
+      log.info(messages().logReconnected)
     },
     onError: (error) => {
       if (closed || run !== generation) return
-      clearSlow()
       connected = false
       const reason = error instanceof Error ? error.message : String(error)
       enrollment = { state: 'failed', message: messages().connectionFailed(reason) }
-      log.warn('飞书长连接失败；审批将只保留在桌面', error)
+      // A terminal error is the end of this attempt, so its connection is given up
+      // with it. Holding the dead transport would make the card's own retry a no-op:
+      // `beginEnrollment` treats a live transport as work already done and returns
+      // the failure it was asked to replace, so the button would do nothing.
+      closeTransport()
+      log.warn(messages().logConnectionFailed, error)
     },
   })
 
@@ -582,7 +632,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
     if (closed || run !== generation) return enrollment
     if (!check.ok) {
       enrollment = { state: 'failed', message: check.message }
-      log.warn(`飞书凭据未通过校验：${check.message}`)
+      log.warn(messages().logCredentialsRejected(check.message))
       // A pair the user just typed and the platform rejects is not worth
       // keeping: a later boot would retry it and report the same failure with
       // nobody having asked. An unreachable platform proves nothing, so it
@@ -596,6 +646,12 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
 
     const wsClient = new Lark.WSClient({ ...options, ...lifecycle(run) })
     connected = false
+    // Published before the handshake is asked for, because the callbacks that report
+    // it can run synchronously inside `start()` — an error arrives there, and the
+    // handler has to be able to give this connection up. Assigning afterwards meant
+    // the failure closed nothing and then the dead pair was stored anyway, which is
+    // what made the card's retry a no-op.
+    transport = { client, wsClient }
     // Armed before the handshake starts: a connection that reports itself ended
     // must be able to clear a notice that has not fired yet.
     slowTimer = setTimeout(() => {
@@ -605,9 +661,14 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       enrollment = { ...enrollment, slow: true }
     }, CONNECTION_SLOW_MS)
     slowTimer.unref?.()
-    wsClient.start({ eventDispatcher: dispatcher })
-    transport = { client, wsClient }
-    log.info('飞书长连接正在建立；就绪后开始接收审批。')
+    try {
+      wsClient.start({ eventDispatcher: dispatcher })
+    } catch (error) {
+      // A `start` that throws must not leave the pair behind either.
+      closeTransport()
+      throw error
+    }
+    log.info(messages().logConnecting)
     return enrollment
   }
 
@@ -628,9 +689,10 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       if (run !== generation) return enrollment
       enrollment = {
         state: 'failed',
-        message: error instanceof Error ? error.message : String(error),
+        // The card renders this verbatim, so it is copy, not an SDK string.
+        message: messages().connectionFailed(error instanceof Error ? error.message : String(error)),
       }
-      log.warn('飞书通道恢复失败；审批将只保留在桌面', error)
+      log.warn(messages().logResumeFailed, error)
     }
     return enrollment
   }
@@ -662,6 +724,13 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
     // A connection belongs to the credentials it was opened with. Keeping it
     // would leave the previous app receiving while the card named the new one.
     closeTransport()
+    // The recipient belongs to the app it was learned from: Feishu scopes an
+    // `open_id` to the app that resolved it, so the id stored for the previous
+    // app addresses nobody under this one. What is left is an unbound
+    // deployment, and the card says so instead of naming a recipient that can
+    // never receive anything.
+    const hadRecipient = await binding.read() !== undefined
+    if (hadRecipient && config.receiveId === undefined) await binding.clear()
     const entered = { appId: appId.trim(), appSecret: appSecret.trim() }
     // The store can refuse the pair: a deployment whose environment carries the
     // same reference shadows it, and a read-only document cannot be written.
@@ -676,10 +745,10 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
         persisted: false,
         persistError: error instanceof Error ? error.message : String(error),
       }
-      log.warn('应用凭据未能保存；本次连接仍使用填写的值', error)
+      log.warn(messages().logPersistFailed, error)
     }
     persistNotice = persistWarning
-    log.info('已收到应用凭据，正在校验并连接飞书。')
+    log.info(messages().logAdopting)
     return await connect(generation, {
       allowCreate: false,
       credentials: entered,
@@ -704,22 +773,38 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
     const run = generation
     // A live transport is the work already done: starting another would open a
     // second connection to the same app and leave the first one running.
-    if (transport !== undefined) return enrollment
-    if (onboarding === undefined) {
+    if (transport !== undefined || onboarding !== undefined) return enrollment
+    // The run is claimed before the first await. Reading the store suspends, and
+    // two clicks that both suspended would both see no run in flight — then both
+    // create an app, and the second transport replaces the first without closing
+    // it, leaving a live connection nothing holds a reference to. The stage is
+    // published synchronously for the same reason: the click must never answer
+    // with the state it is replacing.
+    const had = credentialsStored
+    enrollment = { state: 'starting', stage: had ? 'connecting' : 'creating' }
+    onboarding = (async () => {
       const stored = await storedCredentials()
-      enrollment = { state: 'starting', stage: stored === undefined ? 'creating' : 'connecting' }
-      onboarding = connect(run, { createOnly: config.createOnly, credentials: stored }).catch((error) => {
-        // A cancelled run must not publish its failure over the enrollment that
-        // replaced it, nor clear a retry the user already started.
-        if (run !== generation) return
-        enrollment = {
-          state: 'failed',
-          message: error instanceof Error ? error.message : String(error),
-        }
-        log.warn('飞书绑定失败；审批将只保留在桌面', error)
-        onboarding = undefined
-      })
-    }
+      if (run !== generation) return enrollment
+      credentialsStored = stored !== undefined
+      // The read is the authority: a deployment that lost its credentials since
+      // the last look is creating an app after all.
+      enrollment = { ...enrollment, stage: stored === undefined ? 'creating' : 'connecting' }
+      return await connect(run, { createOnly: config.createOnly, credentials: stored })
+    })().catch((error) => {
+      // A cancelled run must not publish its failure over the enrollment that
+      // replaced it, nor clear a retry the user already started.
+      if (run !== generation) return enrollment
+      enrollment = {
+        state: 'failed',
+        message: messages().connectionFailed(error instanceof Error ? error.message : String(error)),
+      }
+      log.warn(messages().logEnrollmentFailed, error)
+      return enrollment
+    }).finally(() => {
+      // The slot is free again once this run has settled, so a retry starts a
+      // new one instead of returning the state of the attempt that just failed.
+      if (onboarding !== undefined && run === generation) onboarding = undefined
+    })
     return enrollment
   }
 
@@ -736,7 +821,10 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
   return {
     // Forms need a checker/input component; the SDK and cards support them.
     supportsForms: true,
-    available: () => transport !== undefined,
+    // Only a connection that completed its handshake can receive a press, so
+    // only that connection may take an escalation: the mobile half is useless
+    // without the return path, and escalating to it would stall the request.
+    available: () => transport !== undefined && connected,
     enrollmentState: () => enrollment,
     beginEnrollment,
     adoptCredentials,
@@ -760,8 +848,11 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       return () => { onAction = undefined }
     },
     async deliver(view) {
-      await onboarding
-      if (transport === undefined) throw new Error('feishu channel is not connected')
+      // A pending device-authorization poll can outlive the request that started
+      // it, so awaiting it here would hold a delivery for minutes. The core
+      // treats a throw as "the desktop keeps this one" — which is the honest
+      // answer when the return path is not up yet.
+      if (transport === undefined || !connected) throw new Error('feishu channel is not connected')
       const { id, type } = await recipient()
       const response = await transport.client.im.message.create({
         params: { receive_id_type: type },

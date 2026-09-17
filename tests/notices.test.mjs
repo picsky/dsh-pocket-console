@@ -14,6 +14,7 @@ import {
   callbackValues,
   sentCard,
   observed,
+  SAME_ORIGIN,
 } from './support/harness.mjs'
 
 /**
@@ -252,6 +253,25 @@ test('the notice copy follows the deployment language', async () => {
   assert.equal(settled.toast.content, 'Sent to the agent')
   await sleep(10)
   assert.equal(followed.length, 1)
+})
+
+test('the deployment log follows the deployment language too', async () => {
+  // The log is read by whoever diagnoses *this* deployment, so it follows the same
+  // locale the cards do. Half the story in one language and half in another is what
+  // a reader who set `zh` should not have to work around.
+  const mirrored = async (locale) => {
+    const { route, debugs } = await scaffold({ locale })
+    await route('POST', '/__pocket/mirror', SAME_ORIGIN, { status: 'loaded' })
+    return debugs.join('\n')
+  }
+
+  const english = await mirrored('en')
+  assert.match(english, /desktop mirror: loaded/, `the English deployment logs English: ${english}`)
+  assert.equal(/桌面镜像/.test(english), false, 'and carries no Chinese line')
+
+  const chinese = await mirrored('zh')
+  assert.match(chinese, /桌面镜像：loaded/, `the Chinese deployment logs Chinese: ${chinese}`)
+  assert.equal(/desktop mirror/.test(chinese), false, 'and carries no English line')
 })
 
 

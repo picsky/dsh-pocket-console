@@ -26,6 +26,19 @@ async function adopt(route, body) {
   return await route('POST', '/__pocket/adopt', SAME_ORIGIN, body)
 }
 
+/**
+ * Deliver one raw event envelope, for the cases that are about the envelope
+ * itself rather than about a click the harness already models.
+ * @param event - the envelope's `event` body.
+ */
+async function clickEnvelope(event) {
+  return await observed.dispatcher.invoke({
+    schema: '2.0',
+    header: { event_type: 'im.message.receive_v1' },
+    event,
+  })
+}
+
 test('an adopted app is reported connected only once the connection is up', async () => {
   const { route, json, state } = await scaffold()
   observed.handshake = 'held'
@@ -149,6 +162,33 @@ test('a handshake that fails terminally is reported as a failure', async () => {
   assert.equal((await state()).enrollment.state, 'failed')
 })
 
+test('a terminal handshake failure leaves a retry that actually retries', async () => {
+  // The card offers the way to bind again after a failure. That offer is only real if
+  // the failed attempt gave its connection up: the channel reports `failed`, and if it
+  // still held the dead transport then "try again" would return the same failure
+  // without connecting — a button that looks live and is not.
+  const { route, json, state } = await scaffold()
+  observed.handshake = 'failed'
+  observed.handshakeError = 'code: 1000040343'
+
+  const failed = json(await adopt(route, { appId: 'cli_broken', appSecret: 'secret_broken' }))
+  assert.equal(failed.state, 'failed')
+  assert.equal(observed.started, 1)
+
+  // A platform that answers this time: the retry has to reach it.
+  observed.handshake = 'ready'
+  const retry = json(await route('POST', '/__pocket/bind', SAME_ORIGIN))
+  await sleep(30)
+
+  assert.equal(
+    observed.started,
+    2,
+    'the retry opens a new connection instead of returning the failure it replaced',
+  )
+  assert.equal((await state()).enrollment.state, 'bound', 'and the retry can succeed')
+  assert.ok(retry.state === 'starting' || retry.state === 'bound', `the click reports work: ${retry.state}`)
+})
+
 test('a click on the scan names the wait it started, and never a second connection', async () => {
   const { route, json } = await scaffold({}, {
     stored: { appId: 'cli_stored', appSecret: 'secret_stored', recipient: 'ou_stored' },
@@ -171,10 +211,15 @@ test('a retry after a failed check reports the connection it is starting', async
   observed.tenantToken = {}
 
   const retry = json(await route('POST', '/__pocket/bind', SAME_ORIGIN))
+  // The click answers before the run's first await resolves — that is the point:
+  // the card must show the work it started, not the state it replaced.
   assert.equal(retry.state, 'starting')
   assert.equal(retry.stage, 'connecting', 'not a scan, because there is nothing to create')
-  assert.equal(observed.registerAppCalls.length, 0)
-  assert.equal(observed.started, 1)
+  assert.equal(observed.registerAppCalls.length, 0, 'and the one-click flow is not run')
+  // The run itself is claimed synchronously, so the store read and the connection
+  // follow on their own turn rather than inside the click's own answer.
+  await sleep(20)
+  assert.equal(observed.started, 1, 'and exactly one connection is opened')
 })
 
 test('the SDK log goes to the deployment log at the deployment levels', async () => {
@@ -219,15 +264,52 @@ test('the SDK log goes to the deployment log at the deployment levels', async ()
   )
 })
 
-test('a direct message re-binds the recipient the card is showing', async () => {
-  const { route, json, state } = await scaffold()
+test('a direct message from a bound deployment does not hand the recipient to a stranger', async () => {
+  const { route, state, warnings } = await scaffold()
   await bind(route, { openId: 'ou_first' })
   assert.equal((await state()).enrollment.recipient, 'ou_first')
 
-  await directMessage('ou_second')
+  // The card is a capability: whoever holds a delivered card can press its
+  // buttons, and a press becomes human-attributed input. The recipient is
+  // therefore not something any account that can reach the bot may take over.
+  await directMessage('ou_stranger')
   assert.equal(
     (await state()).enrollment.recipient,
-    'ou_second',
-    'the card stops asking for a message the user has just sent',
+    'ou_first',
+    'a stranger who can message the bot does not become the recipient',
   )
+  assert.ok(
+    warnings.some(error => String(error?.message ?? error).includes('忽略其他账号的私聊')),
+    `and the refusal is logged rather than silent: ${warnings.map(error => String(error?.message ?? error)).join(' | ')}`,
+  )
+
+  // The same account is still itself, so its own messages stay idempotent.
+  await directMessage('ou_first')
+  assert.equal((await state()).enrollment.recipient, 'ou_first')
+})
+
+test('a direct message binds an unbound deployment', async () => {
+  const { route, state } = await scaffold()
+  // A direct message only means anything to a deployment that is reachable at
+  // all, and the dispatcher that carries it belongs to a connection.
+  await adopt(route, { appId: 'cli_owner', appSecret: 'secret_owner' })
+  assert.equal((await state()).enrollment.recipient, null, 'adopting an app leaves no recipient')
+
+  await directMessage('ou_owner')
+  assert.equal((await state()).enrollment.recipient, 'ou_owner', 'the first direct message binds')
+})
+
+test('a group message never binds an unbound deployment', async () => {
+  const { route, state } = await scaffold()
+  await adopt(route, { appId: 'cli_group', appSecret: 'secret_group' })
+  assert.equal((await state()).enrollment.recipient, null)
+
+  // An adopted app can carry any scopes its console has, so a group message can
+  // arrive here. A sender in a group has not identified themselves as this
+  // deployment's operator, so it must not become the recipient.
+  await clickEnvelope({
+    message: { chat_type: 'group' },
+    sender: { sender_id: { open_id: 'ou_group_member' } },
+  })
+  assert.equal((await state()).enrollment.recipient, null, 'a group sender is not the recipient')
 })

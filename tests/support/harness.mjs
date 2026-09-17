@@ -47,7 +47,12 @@ async function clickCard(value, formValue, { operator = bound.recipient } = {}) 
 }
 
 /**
- * Send one direct message, which is how a changed account re-binds.
+ * Send one direct message, which is how an unbound deployment learns who its
+ * operator is.
+ *
+ * The envelope carries `message.chat_type`, because the platform does: a
+ * handler that cannot tell a direct message from a group one cannot refuse the
+ * second, and a group sender is not this deployment's operator.
  * @param openId - the sender's open id.
  * @returns the handler's return value.
  */
@@ -56,16 +61,28 @@ async function directMessage(openId) {
   return await observed.dispatcher.invoke({
     schema: '2.0',
     header: { event_type: 'im.message.receive_v1' },
-    event: { sender: { sender_id: { open_id: openId } } },
+    event: {
+      message: { chat_type: 'p2p' },
+      sender: { sender_id: { open_id: openId } },
+    },
   })
 }
 
 /**
  * One HTTP request shaped as the webserver hands it to a route handler.
- * @param body - a JSON body to deliver, when the case posts one.
+ *
+ * A string body is sent verbatim, so a case can exercise a body that is not JSON or
+ * one past the route's size limit — the two ways a caller gets it wrong. Anything else
+ * is serialised.
+ * @param method - the HTTP method.
+ * @param path - the request path.
+ * @param headers - extra headers, merged over the host.
+ * @param body - a JSON value, or a raw string to send as written.
  */
 function makeRequest(method, path, headers = {}, body) {
-  const chunks = body === undefined ? [] : [Buffer.from(JSON.stringify(body))]
+  const chunks = body === undefined
+    ? []
+    : [Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))]
   return {
     method,
     url: path,

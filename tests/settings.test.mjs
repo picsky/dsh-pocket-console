@@ -99,6 +99,23 @@ test('refuses a cross-origin mutation', async () => {
   assert.equal(observed.registerAppCalls.length, 0, 'a refused request must not start onboarding')
 })
 
+test('a body the caller got wrong is a 400, not a server fault', async () => {
+  const { route, json } = await scaffold()
+
+  // Not JSON at all.
+  const malformed = await route('POST', '/__pocket/bind', SAME_ORIGIN, 'not json {')
+  assert.equal(malformed.status, 400, "a malformed body is the caller's mistake")
+  assert.equal(json(malformed).error, 'body is not JSON')
+
+  // Past the route's own limit, sent verbatim: serialising it would produce valid
+  // JSON, and the size check is the thing under test.
+  const oversized = await route('POST', '/__pocket/bind', SAME_ORIGIN, `"${'x'.repeat(70 * 1024)}"`)
+  assert.equal(oversized.status, 400, 'an oversized body is refused as a bad request')
+  assert.equal(json(oversized).error, 'body too large')
+
+  assert.equal(observed.registerAppCalls.length, 0, 'neither attempt started onboarding')
+})
+
 
 test('a settings change takes effect without a restart', async () => {
   const { route, state, sections, listenerOf } = await scaffold({ delaySeconds: 1 })

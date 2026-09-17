@@ -39,14 +39,12 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
   let closed = false
 
   /**
-   * Bound rendered text; a plan review or a long reason otherwise overflows a
-   * channel's message limit.
-   * @param value - untrusted text from the request.
-   * @returns the text, truncated with a marker when it exceeded the bound.
-   */
-  /**
    * Bound text to what one card may carry.
+   *
+   * A plan review or a long reason otherwise overflows a channel's message limit,
+   * and the budget is in bytes because a CJK character costs three of them.
    * @param value - untrusted text from the request.
+   * @param budget - the byte budget, halved when a delivery is retried.
    * @returns the text, clipped with a marker when it did not fit.
    */
   const clip = (value, budget = CARD_TEXT_BUDGET) => clipToBytes(value, messages().truncated, budget)
@@ -202,6 +200,7 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
       finished: false,
       answers: new Map(),
       settle: Promise.withResolvers(),
+      released: Promise.withResolvers(),
       onAbort: undefined,
     }
     record.view = buildView(record)
@@ -227,10 +226,25 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
       release()
       if (record.delivered && headline !== undefined && typeof channel.update === 'function') {
         void Promise.resolve(channel.update(record.handle, settledView(record, headline, tone)))
-          .catch(error => { log.warn('message rewrite failed', error) })
+          .catch(error => { log.warn(messages().logMessageRewriteFailed, error) })
       }
       if (outcome !== undefined) record.settle.resolve(outcome)
       return true
+    }
+
+    /**
+     * Give up on the phone without settling the request.
+     *
+     * Used when the card cannot be delivered: the desktop branch of the race is
+     * still pending and still authoritative, so the caller keeps waiting on it
+     * rather than receiving an answer nobody gave. The escalation leaves the
+     * registry, and a press that arrives afterwards finds no live request.
+     * @param record - the escalation to release.
+     */
+    const abandon = (record) => {
+      record.finished = true
+      release()
+      record.released.resolve()
     }
 
     record.onAbort = () => { record.complete(undefined, messages().cancelled, 'muted') }
@@ -246,20 +260,28 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
         record.handle = handle
         record.delivered = true
       }).catch((error) => {
-        // A failed delivery must not strand the request: fall through to the
-        // desktop branch, which is still pending.
-        log.warn('message delivery failed', error)
-        record.complete(undefined, undefined, 'muted')
+        log.warn(messages().logDeliveryFailed, error)
+        // The card never arrived, so there is no phone decision to wait for.
+        // Abandon rather than settle: the promise this call returns stays racing
+        // the desktop branch, which is still pending and still authoritative.
+        // Settling it here would end the race with no answer at all and hand the
+        // caller `undefined` — the caller would not know the desktop had never
+        // been consulted, and could not fall back to it.
+        abandon(record)
       })
     }, settings().delaySeconds * 1000)
     record.timer.unref?.()
 
+    // A settled or abandoned escalation must never leave the caller waiting. The
+    // desktop branch is what remains authoritative once the phone is out of the
+    // picture, so the race covers exactly the two live outcomes.
     return Promise.race([
       Promise.resolve(desktop).then((outcome) => {
         record.complete(undefined, messages().answeredAtDesk, 'success')
         return outcome
       }),
       record.settle.promise,
+      record.released.promise.then(() => desktop),
     ])
   }
 
@@ -278,7 +300,7 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
       return await channel.deliver(record.view)
     } catch (error) {
       if (!looksLikeSizeRefusal(error)) throw error
-      log.debug('卡片被判定为超出体积上限，按一半长度重投一次。')
+      log.debug(messages().logCardTooLarge)
       return await channel.deliver(buildView(record, Math.floor(CARD_TEXT_BUDGET / 2)))
     }
   }
@@ -330,7 +352,7 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
       // alone would leave a card that looks untouched.
       if (record.delivered && typeof channel.update === 'function') {
         void Promise.resolve(channel.update(record.handle, buildView(record)))
-          .catch(error => { log.warn('message rewrite failed', error) })
+          .catch(error => { log.warn(messages().logMessageRewriteFailed, error) })
       }
       return { toast: messages().recorded(answered, total) }
     }

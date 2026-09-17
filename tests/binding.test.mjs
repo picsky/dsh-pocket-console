@@ -159,11 +159,17 @@ test('a one-click run that outlives an unbind writes nothing back', async () => 
 })
 
 
-test('re-binding follows a direct message from a new account', async () => {
-  const { route, records } = await scaffold()
+test('a bound deployment keeps its recipient when another account writes in', async () => {
+  const { route, records, warnings } = await scaffold()
   await bind(route, { openId: 'ou_first' })
+
+  // The recipient decides where approval cards go and whose presses are
+  // honoured, so it is not a value any account that can reach the bot may take
+  // over: a direct message binds an unbound deployment, and changes to a bound
+  // one are the Settings card's business.
   await directMessage('ou_second')
-  assert.deepEqual(records.get('pocket-console/recipient').payload, { id: 'ou_second' })
+  assert.deepEqual(records.get('pocket-console/recipient').payload, { id: 'ou_first' })
+  assert.ok(warnings.some(error => String(error?.message ?? error).includes('忽略其他账号的私聊')))
 })
 
 

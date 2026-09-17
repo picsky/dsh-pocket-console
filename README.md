@@ -3,6 +3,7 @@
 **Put [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) in your pocket.** When you step away from the desk, `dsh-pocket-console` forwards the two moments that would otherwise stall an agent — **tool-call approvals** and **`ask_user_question` prompts** — to your phone as Feishu interactive cards, so you can approve or answer from anywhere.
 
 [![npm](https://img.shields.io/npm/v/dsh-pocket-console?label=npm&color=4b6bfb)](https://www.npmjs.com/package/dsh-pocket-console)
+[![CI](https://github.com/picsky/dsh-pocket-console/actions/workflows/ci.yml/badge.svg)](https://github.com/picsky/dsh-pocket-console/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen)
 ![DSH bundle](https://img.shields.io/badge/DSH-bundle%20plugin-4b6bfb)
@@ -33,8 +34,35 @@ Close the browser and walk away, and the agent is stuck until you come back. `ds
 - **Channel-agnostic core.** Feishu is one transport behind a documented contract. Telegram, WeCom, DingTalk, or ntfy are a new file, not a rewrite.
 
 <!-- Demo: record a short GIF of the Settings card → scan → approval arriving on the phone,
-     save it as assets/demo.gif, then replace this comment with:
-     <p align="center"><img src="assets/demo.gif" alt="Binding from the Settings card and approving from the phone" width="720"></p> -->
+     save it as assets/demo.gif, then replace this comment with the line below.
+
+     The src is an ABSOLUTE url on purpose. `assets/` is not in package.json's `files`
+     (a 4 MB package does not need 3 MB of GIF), and npm re-hosts only what the tarball
+     carries — so a relative `assets/…` path renders on GitHub and 404s on npmjs.com.
+     The absolute url lands on both. Keep it in sync with README.zh-CN.md.
+
+     <p align="center"><img src="https://raw.githubusercontent.com/picsky/dsh-pocket-console/main/assets/demo.gif" alt="Binding from the Settings card and approving a tool call from the phone" width="720"></p> -->
+
+### Why not just forward every request to my phone?
+
+Because the interesting case is not the one where you are away — it is the one where
+you are *right there*. Sending everything to the phone makes the desk worse to use; a
+queue of notifications is not a decision surface, and a card that arrives while you are
+looking at the dialog it describes is noise. So the desktop answers first, by default
+for two minutes, and the phone is what happens when nobody does.
+
+Three smaller choices follow from the same idea:
+
+- **The desktop follows the phone.** Answer on the phone and the page you left open
+  settles the same way a click there would — the composer closes instead of waiting for
+  a decision that already happened.
+- **Questions are answered as written.** `ask_user_question` takes an array and returns
+  every answer at once, so the card lays all of them out with progress, multi-select,
+  and a typed answer beside the options — rather than turning "answer three questions"
+  into three waits on a small screen.
+- **A finished run can hand you the next step.** With `resultNotify: idle`, a session
+  that goes quiet sends its answer with a box to reply in, and what you type continues
+  that session.
 
 ## Quick start
 
@@ -84,9 +112,9 @@ The QR code is a round trip to Feishu, so it cannot be instant; what it must nev
 
 The launch page's own "update an existing app" mode is deliberately not used: it needs the same secret anyway, and it adds a polling flow and a ten-minute window in exchange for nothing.
 
-**Without any scan**, put the app's credentials in the credential store under the names `DSH_FEISHU_APP_ID` and `DSH_FEISHU_APP_SECRET` (that is what `appIdRef` and `appSecretRef` point at), and the plugin connects on its own at every start. The recipient then comes from `receiveId`, or from you sending the bot any message — a direct message binds its sender.
+**Without any scan**, put the app's credentials in the credential store under the names `DSH_FEISHU_APP_ID` and `DSH_FEISHU_APP_SECRET` (that is what `appIdRef` and `appSecretRef` point at), and the plugin connects on its own at every start. The recipient then comes from `receiveId`, or from a direct message the bot receives.
 
-Once the credentials are in, the recipient is all that is left: set `receiveId`, or send the bot any direct message and its sender becomes the recipient.
+**Who becomes the recipient.** A direct message binds an *unbound* deployment: the first person to reach the bot is taken to be its operator. It does not re-bind a *bound* one — the recipient decides where approval cards go and whose presses are honoured, and a card is a capability, so an account that can merely reach the bot must not be able to take that role. A group message never binds either, whichever scopes an adopted app carries. Once bound, changing the recipient is the Settings card's business: **Use another app**, or **Unbind** and send a new direct message.
 
 **One Feishu app serves one DSH instance.** Long-connection events are not broadcast: Feishu delivers each event to a single connection, so two instances sharing a bot would see approvals land on whichever one happened to receive them. Use one app per instance, and `titlePrefix` to tell them apart.
 
@@ -113,14 +141,43 @@ user-questions/request    ─┘         │
                                      └─→ next() → desktop GUI → other answerers
 ```
 
-Two design points carry the whole thing:
+The two chains are identical apart from the outcome they carry, and the plugin never
+takes a request away from the desktop — it adds a second answerer to a race and lets
+whichever side answers first win. The ordering is the whole design, so it is worth
+seeing once:
 
-- **It registers with `prepend: true`.** The shipped Web forwarding listener does not call `next()` while a browser is connected, so an escalation answerer registered behind it would never run at all.
+```mermaid
+sequenceDiagram
+  autonumber
+  participant A as Agent
+  participant D as DSH harness
+  participant P as dsh-pocket-console
+  participant W as Desktop GUI
+  participant F as Feishu → phone
+
+  A->>D: tool call needs approval
+  D->>P: approval/request (prepend: true)
+  P->>D: next() — the rest of the chain runs unchanged
+  D->>W: dialog opens and waits
+  P->>P: start delaySeconds (default 120 s)
+  W-->>P: no answer yet
+  Note over P,F: the timer expires
+  P->>F: deliver the card
+  F-->>P: recipient taps Allow once
+  P->>D: resolve allowed-once
+  Note over W: the page settles by way of the browser mirror
+```
+
+Three consequences fall out of that shape, and each is a decision with a record behind
+it:
+
+- **It registers with `prepend: true`.** The shipped Web forwarding listener does not call `next()` while a browser is connected, so an escalation answerer registered behind it would never run at all — [ADR 0007](docs/decisions/0007-prepend-and-race-the-desktop.md).
 - **It calls `next()` first and races the timer.** The desktop chain keeps running unchanged; whichever side answers first wins. Approval semantics do not change — a grant is still one-shot (`allowed-once`).
+- **A phone answer leaves the desktop composer waiting**, because the page is still holding the same request. The browser half closes it by replaying the same client call a click makes — [ADR 0002](docs/decisions/0002-desktop-mirror-runs-in-the-browser.md).
 
-The card edits the settings above through the client **settings scope**, so each write is fenced by the revision the card read, and a save is the only thing that writes. A saved change takes effect on the **next** decision, not at the next restart: the provider hands the plugin a source once and then only reports changes, and the plugin re-reads that source on every report. Binding and status talk to the Host half over **same-origin HTTP routes** (`/__pocket/state`, `/bind`, `/unbind`, `/qr.svg`) rather than a Remote method: the Remote type surface is generated and the forwarded-event allowlist is host-owned, so neither is open to out-of-tree plugins. Same-origin reuses the browser's existing session and needs no token. `/state` reports the enrollment, the effective settings, and every escalation still open — with what each one is and whether the phone already has it. Both the section and the routes follow their services through `ctx.inject` rather than reading them once at load, so a deployment that composes no settings provider installs no section, one that composes no web server logs the binding link instead of serving a card, and either way the plugin still loads and both halves appear whenever the service does.
+The card edits the settings above through the client **settings scope**, so each write is fenced by the revision the card read, and a save is the only thing that writes. A saved change takes effect on the **next** decision, not at the next restart: the provider hands the plugin a source once and then only reports changes, and the plugin re-reads that source on every report. Binding and status talk to the Host half over **same-origin HTTP routes** (`/__pocket/state`, `/bind`, `/unbind`, `/adopt`, `/mirror`, `/qr.svg`) rather than a Remote method: the Remote type surface is generated and the forwarded-event allowlist is host-owned, so neither is open to out-of-tree plugins. Same-origin reuses the browser's existing session and needs no token. `/state` reports the enrollment, the effective settings, and every escalation still open — with what each one is and whether the phone already has it. Both the section and the routes follow their services through `ctx.inject` rather than reading them once at load, so a deployment that composes no settings provider installs no section, one that composes no web server logs the binding link instead of serving a card, and either way the plugin still loads and both halves appear whenever the service does.
 
-**The terminal stays quiet.** The Feishu SDK logs a startup banner, a line per connection step, and a line from its event dispatcher at info level; all of that is routed into this deployment's **debug**, so a running deployment does not read it. Its errors and warnings are routed to warn, where they belong. Turn the deployment's log level up to debug and the SDK's own account of what it is doing comes back with it.
+**The terminal stays quiet.** The Feishu SDK logs a startup banner, a line per connection step, and a line from its event dispatcher at info level; all of that is routed into this deployment's **debug**, so a running deployment does not read it. Its errors and warnings are routed to warn, where they belong. Turn the deployment's log level up to debug and the SDK's own account of what it is doing comes back with it. The plugin's own lines follow the deployment's `locale`, so one deployment reads one language — [ADR 0008](docs/decisions/0008-the-log-speaks-the-deployments-language.md).
 
 ## Answering questions from your phone
 
@@ -151,11 +208,13 @@ Approvals and questions are requests: the harness is waiting, and so is the chan
 
 Set `resultNotify: idle` and, after a session goes quiet, the phone receives a card carrying that turn's **answer** plus a text box. Type the next instruction there and send it: it is delivered to the same session as a new message, and the work continues with the same context. No desktop is involved, and nothing waits on the desktop, so this path cannot strand a card the way a request can.
 
+`idle` is the default, because a result nobody hears about is the state this plugin exists to fix. Set it to `off` from the Settings card when you would rather the channel carried live requests only.
+
 The answer is the message the Web GUI leaves unfolded — the turn's last assistant message that speaks without calling a tool. Everything else in the turn is process the GUI folds away, and a notice never carries it.
 
 What suppresses or delays a notice:
 
-- `resultNotify` is `off` by default.
+- `resultNotify` is `idle` by default; set it to `off` to leave the channel to live requests only.
 - A session that produced no answer (only tool calls) notifies nothing.
 - The notice waits out `delaySeconds` of quiet, and keeps waiting while the session is still working, so a run of turns collapses into one notice.
 - One session notifies at most once per `resultNotifyCooldownSeconds`.
@@ -164,52 +223,6 @@ What suppresses or delays a notice:
 - A notice stops accepting a reply the moment it stops being the session's latest word: a newer result supersedes it, or new input arrives from any surface. There is no time limit — a notice you come back to tomorrow is still an offer. The card is rewritten to say why it stopped, so a reply can never inject an instruction written against a superseded answer.
 
 The instruction enters the session as **your message**, attributed the way the harness attributes human input: the surface a person is speaking through mints it, which is what dsh's own remote client does with an editor prompt (`packages/acp/acp/src/session.ts`). That attribution is also what keeps the instruction visible in the Web flow: anything else is rendered as injected context, folded into the turn's process. It therefore carries human authority too — a feature that requires human input accepts it — and the log does not distinguish it from a message typed at the desk.
-
-## Configuration
-
-Every value has a default, so the plugin works with no configuration. To tune it, override the row in your own profile layer — a patch replaces the row's entire `config`, so restate every key you want to keep:
-
-`$DSH_HOME/profiles/web/cordis.patch.yml`
-
-```yaml
-- id: pocket-console
-  config:
-    channel: dsh-pocket-console/providers/feishu.js
-    channelConfig:
-      domain: feishu          # or lark
-      appName: Pocket console
-      # receiveId: 'ou_xxx'   # optional: skip the scan and name a recipient
-    delaySeconds: 600         # desktop head start; 0 = both sides live at once
-    maxDetailChars: 1200
-    titlePrefix: DSH
-    resultNotify: idle        # off (default) or idle
-    resultNotifyCooldownSeconds: 600
-```
-
-Three settings are the **settings namespace**, changeable at runtime from the Settings card without a restart: `delaySeconds`, `titlePrefix`, and `resultNotify`. The rest of the table is deployment-level: they exist so a deployment can retune the transport, and a person never has to read about them. The phone card follows the interface language through `messages.js`; `locale` is the fallback for a deployment that never opens the Web UI.
-
-| Field | Default | Meaning |
-|---|---|---|
-| `channel` | `dsh-pocket-console/providers/feishu.js` | Transport module |
-| `channelConfig` | `{}` | Transport-owned settings |
-| `delaySeconds` | `120` | How long the desktop GUI answers alone |
-| `titlePrefix` | `DSH` | Card title prefix |
-| `resultNotify` | `off` | `idle` sends each stopped session's result to the phone |
-| `resultNotifyCooldownSeconds` | `600` | Shortest gap between two result notices for one session |
-| `mirrorTtlSeconds` | `60` | How long a phone decision may still close the desktop composer |
-| `locale` | `zh` | Language of the cards sent to the phone (`zh` or `en`) |
-
-Transport settings (`channelConfig`):
-
-| Field | Default | Meaning |
-|---|---|---|
-| `appIdRef` | `DSH_FEISHU_APP_ID` | Credential reference name |
-| `appSecretRef` | `DSH_FEISHU_APP_SECRET` | Credential reference name |
-| `domain` | `feishu` | `feishu` or `lark` |
-| `receiveId` | — | Name a recipient to skip the scan |
-| `receiveIdType` | `open_id` | `open_id` / `chat_id` / `user_id` / `email` |
-| `appName` / `appDesc` | see source | Prefilled app identity on the confirmation page |
-| `createOnly` | `true` | Keep the one-click flow to creating a new app; an existing one is bound with its own credentials |
 
 ## Security
 
@@ -220,47 +233,12 @@ An approval card is a **remote code-execution grant channel**. It is built accor
 - **The app asks for the minimum.** It starts from the minimal preset (`addons.preset: false`, Bot capability only) and adds exactly three scopes, one event, and one callback — not the broad default template with Drive, Wiki, and Bitable access.
 - **Callback payloads are validated.** Buttons carry a single-use random `rid`; an answer must name an option that question actually offered, and the `rid` dies the moment the request settles.
 - **Only the bound recipient can press.** A card is a capability — whoever holds the message can press its buttons — so an action is honored only when the operator's `open_id` is the bound recipient. An answer from the phone becomes human-attributed input, which is exactly why that check is not optional.
+- **The recipient itself is not up for grabs.** Binding is what decides where cards go and whose presses count, so a direct message binds an unbound deployment and nothing more: a message from any other account, and any group message, is refused and logged. Taking the recipient over would hand the whole approval channel to whoever could reach the bot.
 - **Every route is behind the connection's trust fence.** `/__pocket` carries the binding, the open requests, and the mirror decision, so a request is answered only when the connection accepts it (the same fence the `/api` surface uses); an untrusted caller gets its `401`/`403` before anything is read. A deployment without a connection falls back to the `Origin` check on every mutating call, which refuses cross-site writes with `403`.
 - **Outbound only.** The long connection needs no inbound port, no public IP, and no tunnel.
 - **Installing runs nothing.** The tarball ships its transport bundled rather than resolved, so a profile installs no dependency that declares an install script and executes none of them; the bundled code is the official SDK, exactly as it was published.
 
-## Troubleshooting
-
-**The first install from GitHub stops on `ERR_PNPM_IGNORED_BUILDS`.**
-A git dependency resolves its own dependencies from the registry, so pnpm ≥11 meets `protobufjs`'s postinstall and refuses to finish until that script is allowed or declined. The stub pnpm appends is not a decision: set it to `false` in the profile's `pnpm-workspace.yaml` and re-run. Installing from npm never reaches this, because the transport arrives bundled.
-
-**pnpm wrote `minimumReleaseAgeExclude` into the profile, or installed the previous version.**
-Both are pnpm's supply-chain policy for a version published very recently, not something this plugin asks for. It holds a fresh version back, resolves an unpinned spec to the one before it, and records the exclusion that lets the one it did install through. Name the version to take it right away — `dsh plugin --profile web add dsh-pocket-console@0.1.1` — and re-add the plain name later if you would rather track releases automatically. pnpm also caches registry metadata, so a version published minutes ago can stay invisible until that cache refreshes.
-
-**The Settings card does not appear.**
-The card is keyed on the settings namespace the Host serves. Check the plugin loaded (`dsh --profile web --dump-config` should list a `# == dsh-pocket-console` layer), then reload the page — the served namespace list re-reads on a document commit or a reconnect, not on registration.
-
-**"Start binding" fails, or no QR code appears.**
-The one-click flow needs to reach `open.feishu.cn`. If the host is behind a proxy, make sure that host is reachable.
-
-**A card action answers 404, or the card says the host is running an older version.**
-The page and the process serving it are replaced separately: after `dsh plugin … add`, the page can already be the new one while `dsh web` still runs the old code, and a route the card needs is then missing. Restart `dsh web` — reloading the page does not update the host — and reload the page afterwards.
-
-**"Could not verify these credentials", or a reason naming the App ID or App Secret.**
-The plugin asked the platform with exactly the pair you entered and it refused, so the app id or the secret does not match a live app. Copy both again from the developer console (the secret is shown once; regenerate it if it was not saved), and remember that a rejected pair is deliberately not kept. If the message says the platform gave no clear answer instead, the host cannot reach `open.feishu.cn`.
-
-**The QR code appeared but scanning does not finish.**
-The link is valid for 10 minutes and can be used once. Click **Retry** for a fresh one. Your Feishu account must be able to create apps in its organization; on a personal account with no organization, create a free organization first and invite yourself.
-
-**The connection logs `ws client ready` but buttons do nothing.**
-Feishu's older "message card callback" is not available over the long connection — only the newer `card.action.trigger`. Make sure the app subscribes to `card.action.trigger`; the one-click flow does this for you.
-
-**A button answers with 该请求已处理或过期.**
-The click carried no live request: the desktop answered that request first, or it was cancelled — a decision rewrites the card, so its buttons should have gone with it. Releases before 0.1.0 read card actions from the wrong envelope field and produced this toast for every click; upgrade if that is the version in the profile.
-
-**Approvals never reach the phone.**
-Check what the card reports. **Bound** with **Connection: established** means delivery is live and the problem is elsewhere (`delaySeconds`, or an unbound recipient — send the bot a message). **Connection: dropped** means the long connection is reconnecting and only the desktop can answer meanwhile. **Failed** carries the platform's reason for the credentials.
-
-**Is it safe to run alongside another Feishu bot?**
-Only if it is a **different app**. Feishu delivers long-connection events to one client at random, so two tools sharing one app silently drop each other's callbacks. Create a new app.
-
-**Does it work with the Auto review preset?**
-Not for approvals. Under Auto review, `approval/policy` is `never` and tool approvals no longer pass through `approval/request`, so there is nothing to escalate. Question escalation still works.
+Found something? [SECURITY.md](SECURITY.md) says how to report it privately, what is in scope, and which invariants above are claims you can hold the code to.
 
 ## Writing another channel
 
@@ -285,33 +263,32 @@ See [`providers/README.md`](providers/README.md) for the full contract. Candidat
 - **Long connections are limited to 50 per app and are not broadcast** — do not run several DSH instances against one Feishu app.
 - **The browser half has no build step**, so it is hand-written in the client module system's factory format and renders with plain React elements rather than the shared UI component library.
 - **The published package is about 4 MB**, because it carries its Feishu transport — and that transport's own dependencies — inside the tarball. That is what keeps an install free of build permissions; nothing is compiled on the machine that installs it.
-- **Verified against a live Feishu tenant, but not yet at this release.** The one-scan app creation, the long connection, card delivery, and card actions arriving back all work against a real app. The card-action field path, the one-option-per-row layout, and typed answers shipped after that pass: the suite covers them, and a phone still has to confirm them. The credential check's rejection path was observed against the live platform (`code: 10014, msg: app id not exists`); its success path and the ready callback need a real app pair to confirm.
+- **Verified against a live Feishu tenant, but not yet at this release.** The one-scan app creation, the long connection, card delivery, and card actions arriving back all work against a real app. The credential check's both branches were observed there too — a pair the platform refuses (`code: 10014, msg: app id not exists`) and a real pair whose check is accepted, whose long connection becomes ready, and which reports `bound` with its stored recipient (see [ADR 0005](docs/decisions/0005-connected-means-connected.md)). The card-action field path, the one-option-per-row layout, and typed answers shipped after that pass: the suite covers them, and a phone still has to confirm them.
 
 ## Development
 
-Plain ESM JavaScript, **no build step** — nothing here compiles, and the tests need no install. Publishing is the one operation that touches dependencies: the transport and the QR encoder are bundled into the tarball (`bundleDependencies`), so `pnpm install` runs before `pnpm pack`/`pnpm publish`, and the consumer's profile then resolves nothing that needs a build permission. `prepack` refuses to build a tarball without the transport in it.
+Plain ESM JavaScript, **no build step**, and a suite that needs no install:
 
 ```sh
 npm test
 ```
 
-Nothing to install first: the suite replaces its five production dependencies through a Node module resolution hook (`test/hooks.mjs`), so it needs no credentials and no network. Cases live under `tests/`, one file per domain — `settings`, `binding`, `enrollment`, `escalation`, `questions`, `notices`, and `client` — over the shared harness in `tests/support/harness.mjs`.
+One command, no credentials, no network. The install, the tests, the
+real-composition check, and how to debug against a live deployment are in
+[docs/development.md](docs/development.md).
 
-`npm run e2e` is the other half, and it is what CI's `real composition` job runs: it packs the tree with `pnpm` — the tool a release publishes with, so the tarball it installs is the one a release builds — installs that tarball into a scratch `DSH_HOME`, then boots the real `dsh web` and exchanges its launch token for the browser cookie. That is the only check that proves the plugin **activates** inside the real Loader, and it is why a hand-built context is not enough. It needs `pnpm install` first (the tarball bundles its transport) and the `dsh` release named in CONTRIBUTING.
+## Learn more
 
-49 cases cover: settings namespace and route registration, no escalation before binding, the unbound → awaiting → bound state machine, the QR route, cross-origin refusal, unbind cleanup, the unbind race against a late scan, delayed delivery, card contents, button round-trip, desktop-first suppression, multi-question accumulation and card rewrite, multi-select forms with and without a typed answer, free text, forged-option refusal, re-binding by direct message, the pending report, a deployment without the optional services and their later arrival, runtime settings changes, cancellation, disposal, failure degradation, result-notice delivery and its single-use instruction round trip, result-notice suppression while off or busy or delegated, the notice cooldown, a notice refusing a reply once it is superseded or once the session has new input, a late reply still being accepted, a restart reconnecting from stored credentials without onboarding, the phone card following the interface language, a long detail and a long result clipped to the byte budget, a card the platform refuses for size retried smaller, mirror reports reaching the state route without the log, the panel transitions of one session beside another, and the browser half rendering every label with its own control and pointing its chevron up when open.
-
-The `enrollment` cases cover what the card can claim and when: a connection reported bound only after the ready callback, an adopted pair checked against the platform through the SDK's own client (with the SDK's numeric `Domain` enum in the stub, so a domain used as an origin fails the test instead of shipping), a rejected pair named in words whether the SDK threw or answered with a body, an unreachable platform keeping what was typed, a second app replacing the live connection instead of leaving it running, a stale verification link cleared the moment the user adopts, a store that refuses the pair while the typed one still connects, a terminal handshake failure carrying its reason, a direct message refreshing the recipient the card is showing, and the card rendering each of those states — the guidance for a first run, the reason on a failure, a missing route naming the restart, and the app, recipient, and connection state on a bound one.
-
-Debug with a local overlay by pointing `channel` at a relative path:
-
-```yaml
-- insert:
-    - id: pocket-console
-      name: ./index.js
-      config:
-        channel: ./providers/feishu.js
-```
+| Document | What is in it |
+|---|---|
+| [docs/configuration.md](docs/configuration.md) | Every setting, its default, and which ones the Settings card can change at runtime |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | Installing, binding, and cards that do not arrive |
+| [docs/development.md](docs/development.md) | The suite, the real-composition check, and debugging a live deployment |
+| [docs/decisions/](docs/decisions/) | Why the plugin is shaped the way it is, one record per decision |
+| [SECURITY.md](SECURITY.md) | The invariants this plugin claims, and how to report a hole in one |
+| [CHANGELOG.md](CHANGELOG.md) | What changed in each release |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | What a change needs before it lands |
+| [providers/README.md](providers/README.md) | The channel contract, for a transport that is not Feishu |
 
 ## License
 
