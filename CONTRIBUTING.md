@@ -41,11 +41,13 @@ dsh web
 wrong shape for activation: a hand-built context does not enforce Cordis's
 service rules, so a plugin that reads an undeclared service, misnames an export,
 or never activates still passes — and then fails on the machine that installed
-it. `npm run e2e` installs the packed tarball into a scratch `DSH_HOME`, boots
-the real `dsh web`, exchanges the printed launch token for the browser cookie,
-and reads `/__pocket/state` with it — and checks the same route refuses the same
-request without that cookie. It needs the `dsh` release the plugin is verified
-against (`npm install -g @deepseek-ai/dsh@0.1.6-alpha.1`) and a network for that
+it. `npm run e2e` packs the tree with `pnpm` (the tool a release publishes with,
+so the tarball it installs is the one a release builds), installs that tarball into
+a scratch `DSH_HOME`, boots the real `dsh web`, exchanges the printed launch token
+for the browser cookie, and reads `/__pocket/state` with it — and checks the same
+route refuses the same request without that cookie. It needs `pnpm install` first
+(the tarball bundles its transport), the `dsh` release the plugin is verified
+against (`npm install -g @deepseek-ai/dsh@0.1.6-alpha.1`), and a network for that
 install; everything else stays on the machine. CI runs it in the `composition`
 job.
 

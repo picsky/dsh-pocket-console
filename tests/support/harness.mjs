@@ -19,6 +19,37 @@ const HOST = '127.0.0.1:3080'
 const SAME_ORIGIN = { origin: `http://${HOST}` }
 
 /**
+ * The fake Feishu open platform the channel checks credentials against.
+ *
+ * The check is the one outbound HTTP call the plugin makes; every case answers
+ * here instead of reaching the network, and a case that never mentions it gets
+ * an accepted pair.
+ */
+export const platform = {
+  /** The tenant-token answer; `{ code: 0 }` accepts the pair. */
+  answer: { code: 0 },
+  /** Set to fail the request the way an unreachable platform does. */
+  failure: undefined,
+  /** Every check made: the endpoint, and the app id it carried. */
+  checks: [],
+  /** Restore the accepted answer between cases. */
+  reset() {
+    this.answer = { code: 0 }
+    this.failure = undefined
+    this.checks.length = 0
+  },
+}
+
+globalThis.fetch = async (url, options) => {
+  // The secret is deliberately not recorded: a case asserts that the channel
+  // keeps it out of the log, and the harness must not be the thing that leaks it.
+  const body = JSON.parse(String(options?.body ?? '{}'))
+  platform.checks.push({ url: String(url), appId: body.app_id })
+  if (platform.failure !== undefined) throw new Error(platform.failure)
+  return { ok: true, status: 200, json: async () => platform.answer }
+}
+
+/**
  * The recipient the fake deployment is bound to. A click is only honoured from
  * this identity, so the helper sends it; a case that tests the refusal passes
  * its own.
@@ -95,11 +126,17 @@ function makeResponse() {
  * Build a fake Host context with in-memory credentials, records, a captured
  * route table, and a captured settings section; apply the plugin.
  * @param configOverrides - plugin config overrides.
- * @param host - which optional services this deployment composes, and what the
- *   credential store already holds from an earlier run.
+ * @param host - which optional services this deployment composes, what the
+ *   credential store already holds from an earlier run, and whether that store
+ *   refuses writes (the environment layer shadows the reference).
  */
-async function scaffold(configOverrides = {}, { services = ['settings', 'webServer'], stored = {} } = {}) {
+async function scaffold(configOverrides = {}, {
+  services = ['settings', 'webServer'],
+  stored = {},
+  refuseWrites = false,
+} = {}) {
   resetObserved()
+  platform.reset()
   const config = Plugin.Config.resolve({
     channel: './providers/feishu.js',
     channelConfig: {},
@@ -179,7 +216,13 @@ async function scaffold(configOverrides = {}, { services = ['settings', 'webServ
     },
     credentials: {
       resolve: async (ref) => (values.has(ref) ? { value: values.get(ref), source: 'file' } : undefined),
-      set: async (ref, value) => { values.set(ref, value) },
+      set: async (ref, value) => {
+        // The real store refuses a write the process environment would shadow:
+        // it would take effect nowhere and report success. A case reproduces
+        // that refusal to prove the connection still uses what was typed.
+        if (refuseWrites) throw new Error(`an inherited environment value shadows "${ref}"`)
+        values.set(ref, value)
+      },
       unset: async (ref) => { values.delete(ref) },
       readRecord: async (key) => records.get(key),
       modifyRecord: async (key, mutate) => {

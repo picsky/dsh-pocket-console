@@ -19,8 +19,8 @@ jobs:
         # Matches the harness engine range: ^22.19 || >=24.
         node: [22, 24]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
       # One user-tunable setting lives in five places; this refuses to pass
@@ -35,8 +35,8 @@ jobs:
     name: real composition
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
       # Only the application that installs the plugin proves it activates: a
@@ -44,7 +44,7 @@ jobs:
       # an undeclared service read once reached a user. Pinned to the release the
       # plugin is verified against.
       - run: npm install -g @deepseek-ai/dsh@0.1.6-alpha.1
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11
       # The tarball carries its transport, so the pack step needs installed deps.
@@ -55,8 +55,8 @@ jobs:
     name: publish payload
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
       # Every path the manifest promises must exist, and every relative runtime
@@ -85,7 +85,7 @@ jobs:
       # The published tarball must carry every runtime library it resolves; a profile that
       # installs it then resolves nothing that needs a build permission, which
       # is the whole reason the dependency is bundled rather than installed.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11
       - name: Install what the tarball bundles

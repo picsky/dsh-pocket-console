@@ -52,6 +52,108 @@ const TEMPLATES = {
   muted: 'grey',
 }
 
+/** How long a credential check may take before it reads as an unreachable platform. */
+const CREDENTIAL_CHECK_TIMEOUT_MS = 10_000
+
+/**
+ * How long a handshake may stay unfinished before the card says so. The attempt
+ * keeps running; this only stops a connection that is still retrying from
+ * looking like one that is working.
+ */
+const CONNECTION_SLOW_MS = 30_000
+
+/**
+ * Feishu's own codes for a rejected pair, where the meaning is one the card has
+ * words for. Codes are listed only when the platform's answer for them was
+ * observed; anything else keeps the platform's message.
+ */
+const REJECTION_CODES = new Map([[10014, 'wrongAppId']])
+
+/** The platform's wording for each half of a rejected pair. */
+const REJECTION_WORDS = [
+  [/app[ _-]?id/i, 'wrongAppId'],
+  [/secret|密钥/i, 'wrongAppSecret'],
+]
+
+/**
+ * Race one request against a deadline.
+ * @param request - the pending request.
+ * @param milliseconds - how long it may take.
+ * @param message - what to fail with when it does not answer in time.
+ * @returns the request's value.
+ */
+async function withDeadline(request, milliseconds, message) {
+  let timer
+  try {
+    return await Promise.race([
+      request,
+      new Promise((_resolve, reject) => {
+        timer = setTimeout(() => { reject(new Error(message)) }, milliseconds)
+        // A pending check must not be the reason the process stays up.
+        timer.unref?.()
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * The card's words for a pair the platform rejected.
+ * @param copy - the deployment's copy table.
+ * @param body - the platform's answer, carrying `code` and `msg`.
+ * @returns the reason to show.
+ */
+function rejectionReason(copy, body) {
+  const named = REJECTION_CODES.get(body?.code)
+  if (named !== undefined) return copy[named]
+  const words = typeof body?.msg === 'string' ? body.msg : ''
+  for (const [pattern, key] of REJECTION_WORDS) {
+    if (pattern.test(words)) return copy[key]
+  }
+  return words === '' ? copy.credentialRejected : `${copy.credentialRejected}（${words}）`
+}
+
+/**
+ * Ask the platform whether an app id and secret are usable.
+ *
+ * The long connection cannot answer this. Its handshake retries a pair the
+ * platform rejects instead of failing, so a deployment bound to a wrong secret
+ * would sit at "connecting" forever with nothing to report. This endpoint takes
+ * the pair directly — the same pair the connection authenticates with — and
+ * answers with a code and a reason.
+ * @param credentials - the app id and secret to check.
+ * @param options - the region to ask, and the copy for a rejection.
+ * @returns whether the pair works, and why not when it does not.
+ */
+async function checkCredentials(credentials, { domain, copy }) {
+  let response
+  try {
+    response = await withDeadline(fetch(`${domain}/open-apis/auth/v3/tenant_access_token/internal`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ app_id: credentials.appId, app_secret: credentials.appSecret }),
+    }), CREDENTIAL_CHECK_TIMEOUT_MS, copy.platformUnreachable)
+  } catch (error) {
+    // A platform that cannot be reached and a request that never answered read
+    // the same way to the reader: this pair could not be checked.
+    return {
+      ok: false,
+      kind: 'unreachable',
+      message: error instanceof Error ? error.message : copy.platformUnreachable,
+    }
+  }
+  let body
+  try {
+    body = await response.json()
+  } catch {
+    // A body that is not JSON is a gateway or proxy answering, not the platform.
+    return { ok: false, kind: 'unreachable', message: copy.platformUnreachable }
+  }
+  if (body?.code === 0) return { ok: true }
+  return { ok: false, kind: 'rejected', message: rejectionReason(copy, body) }
+}
+
 /**
  * Apply documented defaults to the raw channel configuration.
  * @param raw - `channelConfig` from the plugin entry.
@@ -190,6 +292,9 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       if (typeof openId !== 'string' || openId === '') return
       if (await binding.read() === openId) return
       await binding.write(openId)
+      // The card is polling for exactly this: a message the user just sent is
+      // what re-binds them, and the card must stop asking for one.
+      if (enrollment.state === 'bound') enrollment = { ...enrollment, recipient: openId }
       log.info(`绑定接收人：${openId}`)
     },
   })
@@ -202,6 +307,64 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
 
   /** The one in-flight onboarding run, shared across callers. */
   let onboarding
+
+  /** Whether the long connection has completed a handshake. */
+  let connected = false
+
+  /** Pending notice that a handshake is taking unusually long. */
+  let slowTimer
+
+  /**
+   * What the current connection could not do, reported beside its state: a pair
+   * the user typed that the store refused to keep.
+   */
+  let persistNotice
+
+  /** Stop the pending slowness notice, if one is armed. */
+  const clearSlow = () => {
+    clearTimeout(slowTimer)
+    slowTimer = undefined
+  }
+
+  /** Drop the live pair. Whatever connects next opens its own. */
+  const closeTransport = () => {
+    clearSlow()
+    connected = false
+    try {
+      transport?.wsClient?.close?.()
+    } catch (error) {
+      log.warn('飞书长连接关闭失败', error)
+    }
+    transport = undefined
+  }
+
+  /**
+   * Publish the bound state, reading the recipient as it stands now.
+   * @param run - the generation that owns this connection.
+   * @param extra - what the attempt could not do, when it could not do it.
+   */
+  const publishBound = async (run, extra = {}) => {
+    const recipient = await binding.read().catch(() => undefined)
+    if (closed || run !== generation) return
+    enrollment = {
+      state: 'bound',
+      appId: credentials?.appId,
+      recipient: recipient ?? null,
+      connected,
+      ...persistNotice,
+      ...extra,
+    }
+  }
+
+  /**
+   * Publish the bound state for one connection, without letting a failure to
+   * read the recipient end the callback that reported readiness.
+   * @param run - the generation that owns this connection.
+   * @param extra - what the attempt could not do, when it could not do it.
+   */
+  const republish = (run, extra) => {
+    void publishBound(run, extra).catch((error) => { log.warn('飞书绑定状态发布失败', error) })
+  }
 
   /**
    * Bumped when the binding is cleared. An onboarding run captures it, so a scan
@@ -272,34 +435,104 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
   }
 
   /**
+   * The lifecycle callbacks one connection attempt publishes through.
+   *
+   * Readiness is published here rather than by `start()`. `start` launches a
+   * handshake and resolves on the spot, and a handshake the platform rejects for
+   * bad credentials is retried instead of surfaced — so the ready callback is
+   * the first moment this channel can actually receive, and the error callback
+   * is the only terminal failure it reports.
+   * @param run - the generation that owns this attempt.
+   * @returns the callbacks for the SDK's WebSocket client.
+   */
+  const lifecycle = (run) => ({
+    onReady: () => {
+      if (closed || run !== generation) return
+      clearSlow()
+      connected = true
+      republish(run)
+      log.info('飞书长连接已就绪。')
+    },
+    onReconnecting: () => {
+      if (closed || run !== generation) return
+      connected = false
+      republish(run)
+      log.warn('飞书长连接断开，正在重连。')
+    },
+    onReconnected: () => {
+      if (closed || run !== generation) return
+      connected = true
+      republish(run)
+      log.info('飞书长连接已恢复。')
+    },
+    onError: (error) => {
+      if (closed || run !== generation) return
+      clearSlow()
+      connected = false
+      const reason = error instanceof Error ? error.message : String(error)
+      enrollment = { state: 'failed', message: messages().connectionFailed(reason) }
+      log.warn('飞书长连接失败；审批将只保留在桌面', error)
+    },
+  })
+
+  /**
    * Connect the long connection.
    * @param run - the generation that owns this attempt.
-   * @param options - whether a run without stored credentials may create one.
-   * @returns whether a transport is connected.
+   * @param options - what this attempt may do and what it carries: whether a run
+   *   without stored credentials may create one, credentials to use instead of
+   *   the stored ones, and whether those came from the user typing them.
+   * @returns the enrollment state after the attempt.
    */
-  const connect = async (run, { allowCreate = true, createOnly } = {}) => {
-    const stored = await storedCredentials()
+  const connect = async (run, { allowCreate = true, createOnly, credentials: entered, fromUserInput } = {}) => {
+    const stored = entered ?? await storedCredentials()
     if (stored === undefined && !allowCreate) {
       // Nothing to resume from. Onboarding belongs to the user's click, not to
       // every boot, so this leaves the state alone instead of offering a scan.
       enrollment = { state: 'unbound' }
-      return false
+      return enrollment
     }
     enrollment = { state: 'starting' }
     credentials = stored ?? await createApplication(run, { createOnly })
-    if (closed || run !== generation) return false
+    if (closed || run !== generation) return enrollment
+
+    // Bad credentials are the one failure the connection cannot report: its
+    // handshake retries them instead of failing. Asking the platform directly is
+    // what turns that silence into a reason the card can show.
+    const check = await checkCredentials(credentials, { domain: config.domain, copy: messages() })
+    if (closed || run !== generation) return enrollment
+    if (!check.ok) {
+      enrollment = { state: 'failed', message: check.message }
+      log.warn(`飞书凭据未通过校验：${check.message}`)
+      // A pair the user just typed and the platform rejects is not worth
+      // keeping: a later boot would retry it and report the same failure with
+      // nobody having asked. An unreachable platform proves nothing, so it
+      // keeps whatever was entered.
+      if (fromUserInput === true && check.kind === 'rejected') {
+        await ctx.credentials.unset(appIdRef)
+        await ctx.credentials.unset(appSecretRef)
+      }
+      return enrollment
+    }
+
     const options = {
       appId: credentials.appId,
       appSecret: credentials.appSecret,
       domain: config.domain,
     }
     const client = new Lark.Client(options)
-    const wsClient = new Lark.WSClient(options)
+    const wsClient = new Lark.WSClient({ ...options, ...lifecycle(run) })
+    connected = false
+    // Armed before the handshake starts: a connection that reports itself ended
+    // must be able to clear a notice that has not fired yet.
+    slowTimer = setTimeout(() => {
+      if (closed || run !== generation || connected) return
+      enrollment = { state: 'starting', slow: true }
+    }, CONNECTION_SLOW_MS)
+    slowTimer.unref?.()
     wsClient.start({ eventDispatcher: dispatcher })
     transport = { client, wsClient }
-    enrollment = { state: 'bound', recipient: await binding.read() ?? null }
-    log.info('飞书长连接已启动。')
-    return true
+    log.info('飞书长连接正在建立；就绪后开始接收审批。')
+    return enrollment
   }
 
   /**
@@ -316,7 +549,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
     try {
       await connect(run, { allowCreate: false })
     } catch (error) {
-      if (run !== current) return enrollment
+      if (run !== generation) return enrollment
       enrollment = {
         state: 'failed',
         message: error instanceof Error ? error.message : String(error),
@@ -333,7 +566,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
    * exactly what the channel connects with, so nothing has to be authorized
    * through a page, and nothing polls. The pair is written to the credential
    * store — the same place the one-click flow writes it — and the connection is
-   * then resumed from it.
+   * then opened with it.
    * @param credentials - the app id and secret the user pasted from the console.
    * @returns the enrollment state after the attempt.
    */
@@ -346,10 +579,36 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
     // from, and its credentials would overwrite what was just entered.
     generation += 1
     onboarding = undefined
-    await ctx.credentials.set(appIdRef, appId.trim())
-    await ctx.credentials.set(appSecretRef, appSecret.trim())
-    log.info('已保存应用凭据，正在连接飞书。')
-    return await resume()
+    // Whatever the card was showing belongs to the attempt being replaced: a
+    // verification link must not keep offering a scan for an app the user has
+    // just moved on from.
+    enrollment = { state: 'starting' }
+    // A connection belongs to the credentials it was opened with. Keeping it
+    // would leave the previous app receiving while the card named the new one.
+    closeTransport()
+    const entered = { appId: appId.trim(), appSecret: appSecret.trim() }
+    // The store can refuse the pair: a deployment whose environment carries the
+    // same reference shadows it, and a read-only document cannot be written.
+    // What was typed still connects this session; only keeping it is lost, and
+    // the card says so.
+    let persistWarning
+    try {
+      await ctx.credentials.set(appIdRef, entered.appId)
+      await ctx.credentials.set(appSecretRef, entered.appSecret)
+    } catch (error) {
+      persistWarning = {
+        persisted: false,
+        persistError: error instanceof Error ? error.message : String(error),
+      }
+      log.warn('应用凭据未能保存；本次连接仍使用填写的值', error)
+    }
+    persistNotice = persistWarning
+    log.info('已收到应用凭据，正在校验并连接飞书。')
+    return await connect(generation, {
+      allowCreate: false,
+      credentials: entered,
+      fromUserInput: true,
+    })
   }
 
   /**
@@ -397,13 +656,9 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       // Retire the running onboarding first: everything it would still write
       // belongs to an enrollment the user has just cancelled.
       generation += 1
-      try {
-        transport?.wsClient?.close?.()
-      } catch (error) {
-        log.warn('飞书长连接关闭失败', error)
-      }
-      transport = undefined
+      closeTransport()
       credentials = undefined
+      persistNotice = undefined
       onboarding = undefined
       await ctx.credentials.unset(appIdRef)
       await ctx.credentials.unset(appSecretRef)
@@ -438,11 +693,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
     },
     close() {
       closed = true
-      try {
-        transport?.wsClient?.close?.()
-      } catch (error) {
-        log.warn('飞书长连接关闭失败', error)
-      }
+      closeTransport()
     },
   }
 }

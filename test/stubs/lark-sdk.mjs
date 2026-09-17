@@ -21,6 +21,16 @@ export const observed = {
   completeRegisterApp: undefined,
   /** Rejects the pending `registerApp()` promise. */
   failRegisterApp: undefined,
+  /**
+   * What a started long connection does: `ready` completes the handshake on the
+   * next tick, `held` leaves it unfinished, and `failed` reports through the
+   * error callback — which is what the platform does for a rejected pair.
+   */
+  handshake: 'ready',
+  /** The reason a `failed` handshake reports. */
+  handshakeError: 'handshake failed',
+  /** Every long connection built, so a case can see the callbacks it was given. */
+  wsClients: [],
 }
 
 /** Reset recorded calls between cases. */
@@ -35,6 +45,9 @@ export function resetObserved() {
   observed.deliveryFailures = 0
   observed.completeRegisterApp = undefined
   observed.failRegisterApp = undefined
+  observed.handshake = 'ready'
+  observed.handshakeError = 'handshake failed'
+  observed.wsClients.length = 0
 }
 
 /** Region selector accepted by `Client`/`WSClient`. */
@@ -70,16 +83,34 @@ export class Client {
   }
 }
 
-/** Captures the dispatcher handed to `start`, so a test can dispatch through it. */
+/**
+ * Captures the dispatcher handed to `start`, and answers on the lifecycle
+ * callbacks the real client takes in its constructor.
+ *
+ * The real `start` launches a handshake and resolves on the spot, so the only
+ * signal that a connection is usable is the ready callback; this stub keeps that
+ * ordering, and lets a case hold or fail the handshake.
+ */
 export class WSClient {
   constructor(config) {
     this.config = config
+    observed.wsClients.push(this)
   }
 
   start({ eventDispatcher }) {
     observed.started += 1
     observed.dispatcher = eventDispatcher
+    if (observed.handshake === 'held') return Promise.resolve()
+    if (observed.handshake === 'failed') {
+      this.config.onError?.(new Error(observed.handshakeError))
+      return Promise.resolve()
+    }
+    queueMicrotask(() => { this.config.onReady?.() })
     return Promise.resolve()
+  }
+
+  getConnectionStatus() {
+    return { state: 'connected', reconnectAttempts: 0 }
   }
 
   close() {

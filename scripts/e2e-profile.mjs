@@ -55,6 +55,45 @@ function run(command, args, options = {}) {
   return `${result.stdout ?? ''}${result.stderr ?? ''}`
 }
 
+/**
+ * Pack the working tree and return the tarball's name.
+ *
+ * `pnpm` packs it, because `pnpm` is what a release publishes with: the tarball
+ * this check installs is then the one a release builds. `npm` is the fallback for
+ * a checkout that installed with npm.
+ *
+ * npm 11 can end a successful pack with `Exit handler never called!` — a crash in
+ * npm's own shutdown on a CI runner, after the tarball is written. Packing is not
+ * what this check asserts; installing the tarball into a real profile and booting
+ * the application is, and a tarball that lost a file fails there.
+ * @param destination - the directory both packers write into.
+ * @returns the file name written there.
+ */
+function pack(destination) {
+  const missing = []
+  for (const command of ['pnpm', 'npm']) {
+    const args = ['pack', '--pack-destination', destination]
+    const result = spawnSync(command, args, {
+      cwd: root,
+      encoding: 'utf8',
+      shell: process.platform === 'win32',
+    })
+    const output = `${result.stdout ?? ''}${result.stderr ?? ''}`
+    const written = readdirSync(destination).find(name => name.endsWith('.tgz'))
+    if (result.error?.code === 'ENOENT') {
+      missing.push(command)
+      continue
+    }
+    if (result.status === 0 && written !== undefined) return written
+    if (written !== undefined && /Exit handler never called/.test(output)) {
+      console.log(`note: ${command} crashed in its own shutdown after writing the tarball; using it`)
+      return written
+    }
+    throw new Error(`${command} ${args.join(' ')} failed:\n${output}`)
+  }
+  throw new Error(`neither pnpm nor npm is installed, so the tree cannot be packed: ${missing.join(', ')}`)
+}
+
 /** Stop a server and everything it started. */
 function stop(child) {
   if (child === undefined || child.exitCode !== null) return
@@ -88,9 +127,9 @@ async function waitFor(url, options, attempts = 60) {
 let server
 try {
   console.log('packing the working tree…')
-  run('npm', ['pack', '--pack-destination', work])
-  const tarball = join(work, readdirSync(work).find(name => name.endsWith('.tgz')))
-  check('the tarball was built', tarball.endsWith('.tgz'))
+  const built = pack(work)
+  const tarball = join(work, built)
+  check('the tarball was built', tarball.endsWith('.tgz'), built)
 
   const home = join(work, 'home')
   const env = { ...process.env, DSH_HOME: home }

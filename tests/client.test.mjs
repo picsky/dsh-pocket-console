@@ -489,6 +489,51 @@ test('the browser half loads through the module loader and registers its card', 
         && String(call.body).includes('"appSecret":"secret_from_console"')),
       `connecting posts both halves: ${JSON.stringify(pressed)}`,
     )
+
+    // Which of the two ways to bind applies depends on whether the reader has
+    // scanned before, and only the copy can say so: an app created through the
+    // scan already carries the permissions the other path has to be trusted with.
+    FakeReact.cells[1] = { enrollment: { state: 'unbound' }, settings: {}, pending: [] }
+    const guidance = collect(renderCard())
+    assert.ok(guidance.texts.includes(pairFace.copy.guideFirst), 'a first-time reader is told to scan')
+    assert.ok(guidance.texts.includes(pairFace.copy.guideReturning), 'and a returning one to reuse that app')
+
+    // A pair the platform refused has to say so where the attempt was made.
+    const refusedReason = 'App Secret 不正确，请在开发者后台的「凭证与基础信息」里重新复制'
+    FakeReact.cells[1] = { enrollment: { state: 'failed', message: refusedReason }, settings: {}, pending: [] }
+    const refused = collect(renderCard())
+    assert.ok(refused.texts.includes(refusedReason), 'the reason is on the card')
+    assert.ok(refused.texts.includes(pairFace.copy.bind), 'and both ways to bind are still offered')
+
+    // Silence was the complaint: a connected deployment names the app, the
+    // recipient, and whether the connection is up.
+    FakeReact.cells[1] = {
+      enrollment: { state: 'bound', appId: 'cli_connected', recipient: null, connected: true },
+      settings: {},
+      pending: [],
+    }
+    const connected = collect(renderCard())
+    assert.ok(connected.texts.includes('cli_connected'), 'the card names the app it is bound to')
+    assert.ok(connected.texts.includes(pairFace.copy.recipientNone), 'says the recipient is still unbound')
+    assert.ok(connected.texts.includes(pairFace.copy.connected), 'and reports the connection as established')
+    assert.ok(!connected.texts.includes(pairFace.copy.bind), 'offering no scan for an app already connected')
+    assert.ok(!connected.texts.includes(pairFace.copy.bindExisting), 'and no second binding flow')
+    assert.ok(connected.dialogs.every(dialog => dialog.props.open !== true), 'nothing is modal')
+
+    // A pair the store could not keep is reported beside the working connection.
+    FakeReact.cells[1] = {
+      enrollment: { state: 'bound', appId: 'cli_connected', recipient: 'ou_x', connected: true, persisted: false },
+      settings: {},
+      pending: [],
+    }
+    assert.ok(collect(renderCard()).texts.includes(pairFace.copy.persistFailed), 'and an unkept pair says so')
+
+    // A connection still being established reads as such, and never as bound.
+    FakeReact.cells[1] = { enrollment: { state: 'starting' }, settings: {}, pending: [] }
+    const connecting = collect(renderCard())
+    assert.ok(connecting.texts.includes(pairFace.copy.starting), 'the card says it is connecting')
+    assert.ok(!connecting.texts.includes(pairFace.copy.connected), 'and claims nothing it does not have')
+    assert.ok(!connecting.texts.includes(pairFace.copy.bind), 'with no second attempt mid-flight')
   } finally {
     globalThis.fetch = previousUnbindFetch
   }

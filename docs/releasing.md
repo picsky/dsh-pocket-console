@@ -46,6 +46,32 @@ The tag starts the workflow, which:
 4. runs `npm publish --provenance`, whose `prepack` refuses a tarball that lost a
    bundled library or would import a module `files` does not publish.
 
+## When npm itself falls over
+
+npm 11 can end an otherwise successful operation with:
+
+```
+npm error Exit handler never called!
+npm error This is an error with npm itself.
+```
+
+It is a crash in npm's own shutdown, seen on CI runners in both `npm pack` and
+`npm publish`, and it says nothing about this package. Before retrying, find out
+what actually happened:
+
+- for a pack, the tarball is usually written anyway — CI's `npm run e2e` packs with
+  `pnpm` (the tool a release publishes with) and only falls back to npm, where it
+  accepts this one crash when the tarball exists, because installing and booting
+  that tarball is what the check asserts;
+- for a publish, check the registry first — `pnpm view dsh-pocket-console versions`
+  — because the version may have been published before npm fell over. Publishing it
+  again is refused as a duplicate, and re-running the job is the safe move when it
+  did not land.
+
+To publish by hand instead, use `pnpm publish` (see CONTRIBUTING) and not `npm
+publish`: the tarball's bundled transport is packed from the tree `pnpm install`
+created.
+
 ## After publishing
 
 ```sh

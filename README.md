@@ -64,14 +64,20 @@ dsh plugin --profile web add github:picsky/dsh-pocket-console
 
 Restart `dsh web`, then open **Settings → Plugins → Plugin configuration → "Pocket console"**:
 
-1. Click **Scan to create an app**, or **Bind an existing app**
+1. Click **Scan to create an app**, or **Use an existing app**
 2. A QR code appears in the card
 3. Scan it with Feishu (or open the same link on your phone)
-4. The card flips to **Bound** and shows your recipient
+4. The card reports **Bound**, naming the app, the recipient, and whether the connection is up
+
+**Which of the two?** The card says it beside the buttons: an app created through the scan has the permissions this plugin needs already configured on it, so a first run should scan. If you have scanned before — for this deployment or another one — use **Use an existing app** and enter the App ID and App Secret of the app that scan created; its permissions are already right, so nothing has to be authorized again.
 
 **Creating** walks the official one-click flow and registers everything the plugin needs on a brand-new app.
 
-**Binding an existing app** asks for that app's **App ID and App Secret** (developer console → *Credentials & Basic Info*) and connects with them. There is no scan, no launch page, and no device-authorization wait: those two values are exactly what the channel needs, and they are stored in the credential store the same way the one-click flow stores its own. Nothing about that app is modified.
+**Using an existing app** asks for that app's **App ID and App Secret** (developer console → *Credentials & Basic Info*) and connects with them. There is no scan, no launch page, and no device-authorization wait: those two values are exactly what the channel needs, and they are stored in the credential store the same way the one-click flow stores its own. Nothing about that app is modified.
+
+**The pair is checked before anything connects.** The channel asks `open.feishu.cn` for a tenant token with exactly the credentials it was given, and only opens the long connection when that succeeds. This is what makes a wrong App ID or App Secret visible: the platform's own reason comes back on the card ("App ID 不存在…", "App Secret 不正确…") instead of a connection that retries forever and looks like one that is merely slow. A pair the platform rejects is not kept — the next start does not retry it. If the platform cannot be reached at all, the card says that instead, and keeps what you entered.
+
+**Connected means connected.** The card reports **Bound** only once the long connection has completed its handshake, and it keeps reporting whether the connection is up, so a dropped or reconnecting tunnel is visible rather than implied. While an attempt is running the card polls faster and says so, including a note when a handshake is taking unusually long.
 
 The launch page's own "update an existing app" mode is deliberately not used: it needs the same secret anyway, and it adds a polling flow and a ten-minute window in exchange for nothing.
 
@@ -83,7 +89,7 @@ Once the credentials are in, the recipient is all that is left: set `receiveId`,
 
 The app's permissions, its long connection, and your recipient id come from the official one-click app creation flow ([OAuth 2.0 Device Authorization Grant](https://open.feishu.cn/document/mcp_open_tools/integrating-agents-with-feishu/overview)); the link is valid for 10 minutes and can be used once.
 
-**You scan once.** The app credentials and the bound recipient live in the credential store, so every later `dsh` start reconnects the long connection on its own — no card, no click. The scan is offered again only after **Unbind**, or from **Rebind**.
+**You scan once.** The app credentials and the bound recipient live in the credential store, so every later `dsh` start reconnects the long connection on its own — no card, no click. The scan is offered again only after **Unbind**, or by pointing the card at another app with **Use another app**.
 
 Releases are tag-driven and publish through npm trusted publishing; [docs/releasing.md](docs/releasing.md) covers the one-time npm setup and what a release verifies.
 
@@ -237,7 +243,7 @@ Feishu's older "message card callback" is not available over the long connection
 The click carried no live request: the desktop answered that request first, or it was cancelled — a decision rewrites the card, so its buttons should have gone with it. Releases before 0.1.0 read card actions from the wrong envelope field and produced this toast for every click; upgrade if that is the version in the profile.
 
 **Approvals never reach the phone.**
-Confirm the card says **Bound**. Then check `delaySeconds` — it is the desktop's exclusive window, and the card is only sent after it elapses.
+Check what the card reports. **Bound** with **Connection: established** means delivery is live and the problem is elsewhere (`delaySeconds`, or an unbound recipient — send the bot a message). **Connection: dropped** means the long connection is reconnecting and only the desktop can answer meanwhile. **Failed** carries the platform's reason for the credentials.
 
 **Is it safe to run alongside another Feishu bot?**
 Only if it is a **different app**. Feishu delivers long-connection events to one client at random, so two tools sharing one app silently drop each other's callbacks. Create a new app.
@@ -268,7 +274,7 @@ See [`providers/README.md`](providers/README.md) for the full contract. Candidat
 - **Long connections are limited to 50 per app and are not broadcast** — do not run several DSH instances against one Feishu app.
 - **The browser half has no build step**, so it is hand-written in the client module system's factory format and renders with plain React elements rather than the shared UI component library.
 - **The published package is about 4 MB**, because it carries its Feishu transport — and that transport's own dependencies — inside the tarball. That is what keeps an install free of build permissions; nothing is compiled on the machine that installs it.
-- **Verified against a live Feishu tenant, but not yet at this release.** The one-scan app creation, the long connection, card delivery, and card actions arriving back all work against a real app. The card-action field path, the one-option-per-row layout, and typed answers shipped after that pass: the suite covers them, and a phone still has to confirm them.
+- **Verified against a live Feishu tenant, but not yet at this release.** The one-scan app creation, the long connection, card delivery, and card actions arriving back all work against a real app. The card-action field path, the one-option-per-row layout, and typed answers shipped after that pass: the suite covers them, and a phone still has to confirm them. The credential check's rejection path was observed against the live platform (`code: 10014, msg: app id not exists`); its success path and the ready callback need a real app pair to confirm.
 
 ## Development
 
@@ -278,9 +284,13 @@ Plain ESM JavaScript, **no build step** — nothing here compiles, and the tests
 npm test
 ```
 
-Nothing to install first: the suite replaces its five production dependencies through a Node module resolution hook (`test/hooks.mjs`), so it needs no credentials and no network. The same command also runs `npm run e2e`, which installs the packed tarball into a scratch profile and boots the real `dsh web` to prove the plugin activates — that one needs the `dsh` release named in CONTRIBUTING. Cases live under `tests/`, one file per domain — `settings`, `binding`, `escalation`, `questions`, `notices`, and `client` — over the shared harness in `tests/support/harness.mjs`.
+Nothing to install first: the suite replaces its five production dependencies through a Node module resolution hook (`test/hooks.mjs`), so it needs no credentials and no network. Cases live under `tests/`, one file per domain — `settings`, `binding`, `enrollment`, `escalation`, `questions`, `notices`, and `client` — over the shared harness in `tests/support/harness.mjs`.
 
-39 cases cover: settings namespace and route registration, no escalation before binding, the unbound → awaiting → bound state machine, the QR route, cross-origin refusal, unbind cleanup, the unbind race against a late scan, delayed delivery, card contents, button round-trip, desktop-first suppression, multi-question accumulation and card rewrite, multi-select forms with and without a typed answer, free text, forged-option refusal, re-binding by direct message, the pending report, a deployment without the optional services and their later arrival, runtime settings changes, cancellation, disposal, failure degradation, result-notice delivery and its single-use instruction round trip, result-notice suppression while off or busy or delegated, the notice cooldown, a notice refusing a reply once it is superseded or once the session has new input, a late reply still being accepted, a restart reconnecting from stored credentials without onboarding, the phone card following the interface language, a long detail and a long result clipped to the byte budget, a card the platform refuses for size retried smaller, mirror reports reaching the state route without the log, the panel transitions of one session beside another, and the browser half rendering every label with its own control and pointing its chevron up when open.
+`npm run e2e` is the other half, and it is what CI's `real composition` job runs: it packs the tree with `pnpm` — the tool a release publishes with, so the tarball it installs is the one a release builds — installs that tarball into a scratch `DSH_HOME`, then boots the real `dsh web` and exchanges its launch token for the browser cookie. That is the only check that proves the plugin **activates** inside the real Loader, and it is why a hand-built context is not enough. It needs `pnpm install` first (the tarball bundles its transport) and the `dsh` release named in CONTRIBUTING.
+
+48 cases cover: settings namespace and route registration, no escalation before binding, the unbound → awaiting → bound state machine, the QR route, cross-origin refusal, unbind cleanup, the unbind race against a late scan, delayed delivery, card contents, button round-trip, desktop-first suppression, multi-question accumulation and card rewrite, multi-select forms with and without a typed answer, free text, forged-option refusal, re-binding by direct message, the pending report, a deployment without the optional services and their later arrival, runtime settings changes, cancellation, disposal, failure degradation, result-notice delivery and its single-use instruction round trip, result-notice suppression while off or busy or delegated, the notice cooldown, a notice refusing a reply once it is superseded or once the session has new input, a late reply still being accepted, a restart reconnecting from stored credentials without onboarding, the phone card following the interface language, a long detail and a long result clipped to the byte budget, a card the platform refuses for size retried smaller, mirror reports reaching the state route without the log, the panel transitions of one session beside another, and the browser half rendering every label with its own control and pointing its chevron up when open.
+
+The `enrollment` cases cover what the card can claim and when: a connection reported bound only after the ready callback, an adopted pair checked against the platform before anything connects, a rejected pair named in words and not kept, an unreachable platform keeping what was typed, a second app replacing the live connection instead of leaving it running, a stale verification link cleared the moment the user adopts, a store that refuses the pair while the typed one still connects, a terminal handshake failure carrying its reason, a direct message refreshing the recipient the card is showing, and the card rendering each of those states — the guidance for a first run, the reason on a failure, and the app, recipient, and connection state on a bound one.
 
 Debug with a local overlay by pointing `channel` at a relative path:
 

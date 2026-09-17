@@ -40,6 +40,28 @@ window.__ModuleLoader__.load({
       { field: 'resultNotify', kind: 'select', options: ['off', 'idle'], labels: { off: 'resultNotifyOff', idle: 'resultNotifyIdle' } },
     ]
 
+    /** The colour each enrollment state reports itself in. */
+    const STATUS_COLORS = {
+      success: 'var(--dsw-alias-state-success-primary)',
+      danger: 'var(--dsw-alias-state-error-primary)',
+      warn: 'var(--dsw-alias-state-warn-primary)',
+      info: 'var(--dsw-alias-brand-primary)',
+      muted: 'var(--dsw-alias-label-tertiary)',
+    }
+
+    /**
+     * The tone each enrollment state is shown in. `bound` is green only once
+     * the connection reports itself ready; until then the card is still trying.
+     */
+    const STATUS_TONE = {
+      unbound: 'muted',
+      awaiting: 'info',
+      starting: 'warn',
+      bound: 'success',
+      failed: 'danger',
+      unsupported: 'muted',
+    }
+
     const COPY = {
       zh: {
         title: '口袋控制台',
@@ -47,19 +69,30 @@ window.__ModuleLoader__.load({
         bound: '已绑定',
         unbound: '未绑定',
         awaiting: '等待扫码确认',
-        starting: '正在创建应用…',
-        failed: '绑定失败',
+        starting: '正在连接飞书…',
+        startingSlow: '仍在连接飞书…（网络可能不通，会继续重试）',
+        failed: '连接失败',
         unsupported: '当前通道不支持绑定',
+        appId: '应用',
+        unknown: '未知',
         recipient: '接收人',
+        recipientNone: '未绑定 —— 在飞书里给这个机器人发一条消息即可绑定',
+        connection: '长连接',
+        connected: '已建立',
+        reconnecting: '已断开，正在重连…',
+        persistFailed: '已连接，但这组凭据没能保存（重启后需要重新填写）。',
+        guideFirst: '· 第一次用：点「扫码创建应用」，权限由这个流程自动配好。',
+        guideReturning: '· 之前创建过：点「使用已有的应用」，填那个应用的 App ID 与 App Secret；权限已经配好，不用再授权。',
         pending: '待审批',
         pendingApproval: '工具审批',
         pendingQuestion: '提问',
         pendingDelivered: '已送达手机',
         pendingWaiting: '等待桌面',
         scan: '用飞书扫描下面的二维码完成绑定。链接 10 分钟内有效，仅可使用一次。',
-        bind: '扫码新建应用',
-        bindExisting: '绑定已有应用',
-        bindExistingHint: '填入该应用的 App ID 与 App Secret（在飞书开发者后台的「凭证与基础信息」里）。插件会直接用它连接，不再扫码；只有这两项，别的什么都不会改。',
+        bind: '扫码创建应用',
+        bindExisting: '使用已有的应用',
+        bindExistingHint: '填之前创建过的那个应用的 App ID 与 App Secret（在飞书开发者后台的「凭证与基础信息」里）。插件直接用它连接：不扫码，也不改动这个应用的任何设置。',
+        changeApp: '使用其他应用',
         appIdLabel: 'App ID',
         appIdPlaceholder: 'cli_xxxxxxxx',
         appSecretLabel: 'App Secret',
@@ -100,10 +133,20 @@ window.__ModuleLoader__.load({
         bound: 'Bound',
         unbound: 'Not bound',
         awaiting: 'Waiting for confirmation',
-        starting: 'Creating the app…',
-        failed: 'Binding failed',
+        starting: 'Connecting to Feishu…',
+        startingSlow: 'Still connecting to Feishu… (the network may be blocked; retrying)',
+        failed: 'Connection failed',
         unsupported: 'This channel does not support binding',
+        appId: 'App',
+        unknown: 'unknown',
         recipient: 'Recipient',
+        recipientNone: 'not bound yet — send this bot a message in Feishu to bind',
+        connection: 'Connection',
+        connected: 'established',
+        reconnecting: 'dropped; reconnecting…',
+        persistFailed: 'Connected, but these credentials could not be saved (they must be entered again after a restart).',
+        guideFirst: '· First time: use "Scan to create an app" — that flow configures the permissions for you.',
+        guideReturning: '· Created one before: use "Use an existing app" and enter its App ID and App Secret; the permissions are already set, so nothing has to be authorized again.',
         pending: 'Pending',
         pendingApproval: 'Tool approval',
         pendingQuestion: 'Question',
@@ -111,8 +154,9 @@ window.__ModuleLoader__.load({
         pendingWaiting: 'waiting on the desktop',
         scan: 'Scan this code with Feishu to finish binding. The link is valid for 10 minutes and can be used once.',
         bind: 'Scan to create an app',
-        bindExisting: 'Bind an existing app',
-        bindExistingHint: "Enter that app's App ID and App Secret, from the developer console under Credentials & Basic Info. The plugin connects with them directly — no scan, and nothing else about that app is changed.",
+        bindExisting: 'Use an existing app',
+        bindExistingHint: 'Enter the App ID and App Secret of the app you created before, from the developer console under Credentials & Basic Info. The plugin connects with them directly: no scan, and nothing about that app is changed.',
+        changeApp: 'Use another app',
         appIdLabel: 'App ID',
         appIdPlaceholder: 'cli_xxxxxxxx',
         appSecretLabel: 'App Secret',
@@ -195,6 +239,15 @@ window.__ModuleLoader__.load({
         padding: '12px 0', borderTop: '1px solid var(--dsw-alias-border-l2)',
       },
       scanBlock: { display: 'flex', flexDirection: 'column', gap: '8px' },
+      status: (tone) => ({ display: 'inline-flex', alignItems: 'center', gap: '6px', color: STATUS_COLORS[tone] }),
+      dot: (tone) => ({
+        width: '7px', height: '7px', borderRadius: '50%', flex: 'none', background: STATUS_COLORS[tone],
+      }),
+      guide: {
+        display: 'flex', flexDirection: 'column', gap: '4px',
+        fontSize: '12px', lineHeight: 1.6, color: 'var(--dsw-alias-label-secondary)',
+      },
+      warn: { fontSize: '12px', lineHeight: 1.5, color: 'var(--dsw-alias-state-warn-primary)' },
       notice: { margin: '12px 0 0', fontSize: '12px', lineHeight: 1.5, color: 'var(--dsw-alias-label-tertiary)' },
       row: { display: 'flex', gap: '8px', alignItems: 'baseline' },
       rowLabel: { color: 'var(--dsw-alias-label-tertiary)', minWidth: '8rem' },
@@ -449,20 +502,6 @@ window.__ModuleLoader__.load({
         }
       }, [])
 
-      useEffect(() => {
-        const controller = new AbortController()
-        void refresh(controller.signal)
-        // Binding completes out of band, so the card polls while it is mounted.
-        const timer = setInterval(() => { void refresh(controller.signal) }, 3000)
-        return () => {
-          controller.abort()
-          clearInterval(timer)
-        }
-      }, [refresh])
-
-      // A deployment that never composed the Host half shows no trace of the card.
-      if (!shell.available) return null
-
       /** Run one binding operation, then adopt the enrollment it reports. */
       const run = async (path, body) => {
         setBusy(true)
@@ -487,7 +526,34 @@ window.__ModuleLoader__.load({
       const settings = runtime?.settings ?? {}
       const pending = Array.isArray(runtime?.pending) ? runtime.pending : []
       const verifyUrl = enrollment.verifyUrl
-      const status = copy[enrollment.state] ?? copy.unbound
+      const tone = STATUS_TONE[enrollment.state] ?? 'muted'
+      const status = enrollment.state === 'starting' && enrollment.slow === true
+        ? copy.startingSlow
+        : copy[enrollment.state] ?? copy.unbound
+      const recipientValue = enrollment.recipient === null || enrollment.recipient === undefined
+        ? h('span', null, copy.recipientNone)
+        : h('code', null, enrollment.recipient)
+
+      useEffect(() => {
+        const controller = new AbortController()
+        void refresh(controller.signal)
+        // Binding and connecting both settle out of band, so the card polls. An
+        // attempt that is still running is asked more often than an idle card, so
+        // a verdict arrives in about a second instead of at the next idle tick.
+        const settling = enrollment.state === 'starting' || enrollment.state === 'awaiting'
+        const timer = setInterval(() => { void refresh(controller.signal) }, settling ? 700 : 3000)
+        return () => {
+          controller.abort()
+          clearInterval(timer)
+        }
+      }, [refresh, enrollment.state])
+
+      // A deployment that never composed the Host half shows no trace of the card.
+      if (!shell.available) return null
+
+      /** One labelled row of the status block. */
+      const row = (key, label, value) => h('div', { key, style: S.row },
+        h('span', { style: S.rowLabel }, label), value)
 
       const field = (fieldSpec, label, hint) => {
         const control = state[fieldSpec.field]
@@ -526,10 +592,19 @@ window.__ModuleLoader__.load({
         : [
             h('div', { key: 'status', style: S.row },
               h('span', { style: S.rowLabel }, copy.title),
-              h('span', null, status)),
-            enrollment.state === 'bound' && enrollment.recipient !== null && enrollment.recipient !== undefined
-              ? h('div', { key: 'recipient', style: S.row },
-                  h('span', { style: S.rowLabel }, copy.recipient), h('code', null, enrollment.recipient))
+              h('span', { style: S.status(tone) },
+                h('span', { style: S.dot(tone), 'aria-hidden': 'true' }),
+                status)),
+            // Which app this deployment is actually connected as, and whether it
+            // is up: the two facts a reader needs to tell success from silence.
+            enrollment.state === 'bound' ? row('app', copy.appId, h('code', null, enrollment.appId ?? copy.unknown)) : null,
+            enrollment.state === 'bound' ? row('recipient', copy.recipient, recipientValue) : null,
+            enrollment.state === 'bound'
+              ? row('connection', copy.connection,
+                  h('span', null, enrollment.connected === true ? copy.connected : copy.reconnecting))
+              : null,
+            enrollment.state === 'bound' && enrollment.persisted === false
+              ? h('div', { key: 'persist-warning', style: S.warn }, copy.persistFailed)
               : null,
             h('div', { key: 'pending', style: S.row },
               h('span', { style: S.rowLabel }, copy.pending),
@@ -554,6 +629,13 @@ window.__ModuleLoader__.load({
             enrollment.state === 'failed' && enrollment.message !== undefined
               ? h('div', { key: 'enrollment-failure', style: S.error }, enrollment.message)
               : null,
+            // Which of the two ways to bind is the right one depends on whether
+            // the reader has scanned before, and only the copy can say so.
+            enrollment.state === 'unbound' || enrollment.state === 'failed'
+              ? h('div', { key: 'guide', style: S.guide },
+                  h('div', null, copy.guideFirst),
+                  h('div', null, copy.guideReturning))
+              : null,
             failure !== null ? h('div', { key: 'failure', style: S.error }, failure) : null,
             h('div', { key: 'binding-actions', style: S.actions },
               // Binding is one decision with two answers: create an app, or point
@@ -561,11 +643,20 @@ window.__ModuleLoader__.load({
               // button that did exactly what the first one does — the channel
               // reconnects from stored credentials on its own at every load.
               enrollment.state === 'bound'
-                ? button(copy.unbind, () => { setConfirmingUnbind(true) }, { disabled: busy })
-                : [
-                    button(copy.bind, () => { void run('/bind', { mode: 'create' }) }, { disabled: busy, primary: true }),
-                    button(copy.bindExisting, () => { setAskingAppId(true) }, { disabled: busy }),
-                  ]),
+                ? [
+                    button(copy.changeApp, () => { setAskingAppId(true) }, { disabled: busy }),
+                    button(copy.unbind, () => { setConfirmingUnbind(true) }, { disabled: busy }),
+                  ]
+                // A connection that is being established is the only state with
+                // nothing to press: a second attempt would abandon the one that
+                // is running. A scan that is waiting still offers the other way
+                // round, and every failed attempt can be retried.
+                : enrollment.state === 'starting'
+                  ? null
+                  : [
+                      button(copy.bind, () => { void run('/bind', { mode: 'create' }) }, { disabled: busy, primary: true }),
+                      button(copy.bindExisting, () => { setAskingAppId(true) }, { disabled: busy }),
+                    ]),
             // The GUI's own dialog, not the browser's: same chrome, same keyboard
             // handling, and it belongs to the page the reader is already in.
             // Binding an existing app asks which one first: the launch page only
@@ -581,7 +672,11 @@ window.__ModuleLoader__.load({
                 button(copy.cancel, () => { setAskingAppId(false) }, { disabled: busy }),
                 button(copy.connect, () => {
                   setAskingAppId(false)
+                  // The secret lives in the form only until it has been handed
+                  // over; a failure is reported by the channel, which is where
+                  // the reason comes from.
                   void run('/adopt', { appId: existing.appId.trim(), appSecret: existing.appSecret.trim() })
+                    .then(() => { setExisting({ appId: '', appSecret: '' }) })
                 }, {
                   disabled: busy || existing.appId.trim() === '' || existing.appSecret.trim() === '',
                   primary: true,

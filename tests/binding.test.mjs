@@ -40,7 +40,7 @@ test('reports unbound state and does not escalate before binding', async () => {
 })
 
 test('an existing app is adopted by its credentials, with no scan at all', async () => {
-  const { route, json, values, infos } = await scaffold()
+  const { route, json, values, infos, state } = await scaffold()
 
   // Binding a bot the user already has is exactly this: the credentials it is
   // named by. No device authorization, no launch page, no polling — and the
@@ -49,9 +49,13 @@ test('an existing app is adopted by its credentials, with no scan at all', async
     appId: 'cli_existing',
     appSecret: 'secret_from_console',
   }))
-  assert.equal(adopted.state, 'bound', 'the channel connects with what was entered')
   assert.equal(observed.registerAppCalls.length, 0, 'and never runs the create flow')
-  assert.equal(observed.started, 1, 'the long connection is up')
+  assert.equal(observed.started, 1, 'the long connection is launched')
+  // The connection reports itself ready out of band, so the answer to the click
+  // says the attempt is running and the card reads the verdict from its poll.
+  assert.equal(adopted.state, 'starting')
+  await sleep(10)
+  assert.equal((await state()).enrollment.state, 'bound', 'the channel connects with what was entered')
   assert.equal(values.get('DSH_FEISHU_APP_ID'), 'cli_existing', 'the id is stored where the channel reads it')
   assert.equal(values.get('DSH_FEISHU_APP_SECRET'), 'secret_from_console')
   assert.ok(
@@ -76,7 +80,12 @@ test('a restart reconnects from stored credentials without onboarding', async ()
   assert.ok(!infos.some(line => line.includes('请在手机上打开')), 'and must not print a link')
 
   const snapshot = await state()
-  assert.deepEqual(snapshot.enrollment, { state: 'bound', recipient: 'ou_stored' })
+  assert.deepEqual(snapshot.enrollment, {
+    state: 'bound',
+    appId: 'cli_stored',
+    recipient: 'ou_stored',
+    connected: true,
+  })
 
   // The restored recipient is where an escalation goes, with no further action.
   const approval = listenerOf('approval/request')
