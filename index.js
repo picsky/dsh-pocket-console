@@ -253,9 +253,17 @@ export async function apply(ctx, config) {
     titlePrefix: config.titlePrefix,
   })
   let settings = entry
-  ctx.get('settings')?.installSection(ctx, NAME, SectionSchema, entry, {
-    setSource: (source) => { settings = source() },
-    onChange: () => {},
+  // The provider owns the section, so none can be installed before one exists.
+  // `inject` waits for the service instead of reading it once, which takes the
+  // card off the load order; a deployment composing no provider keeps resolving
+  // the composition entry alone. The owner stays this plugin's context: the
+  // provider asks it whether the consumer is unloading before it restores that
+  // entry as the source.
+  ctx.inject(['settings'], (settingsCtx) => {
+    settingsCtx.settings.installSection(ctx, NAME, SectionSchema, entry, {
+      setSource: (source) => { settings = source() },
+      onChange: () => {},
+    })
   })
 
   /** Live escalations keyed by the opaque id embedded in their action payloads. */
@@ -545,6 +553,37 @@ export async function apply(ctx, config) {
     return { toast: '已提交全部回答' }
   }
 
+  /** The card's status snapshot: what the section serves and what is open. */
+  const snapshot = async () => ({
+    namespace: NAME,
+    settings: { ...settings },
+    /** Open escalations, each with what it is waiting on. */
+    pending: [...open.values()].map((record) => {
+      const question = record.request.questions?.[0]
+      return {
+        kind: record.kind,
+        summary: clip(record.kind === 'approval'
+          ? record.request.toolName
+          : question?.header ?? question?.question ?? ''),
+        delivered: record.delivered,
+      }
+    }),
+    enrollment: await channel.enrollmentState?.() ?? { state: 'unsupported' },
+  })
+
+  /** The two mutations the card asks for. */
+  const actions = {
+    begin: async () => await channel.beginEnrollment?.() ?? { state: 'unsupported' },
+    clear: async () => await channel.clearEnrollment?.() ?? { state: 'unsupported' },
+  }
+
+  // The routes live on the web app's server, which a headless deployment never
+  // composes. Registering them through `inject` follows the service instead of
+  // the load order, and they leave with it.
+  ctx.inject(['webServer'], (webCtx) => {
+    webCtx.effect(() => registerRoutes(webCtx.webServer, snapshot, actions), 'pocket-console: routes')
+  })
+
   ctx.effect(() => {
     const offApproval = ctx.on(
       'approval/request',
@@ -567,33 +606,9 @@ export async function apply(ctx, config) {
       return { toast: outcome.toast, accepted: true }
     })
 
-    const webServer = ctx.get('webServer')
-    const offRoutes = webServer === undefined ? undefined : registerRoutes(
-      webServer,
-      async () => ({
-        namespace: NAME,
-        settings: { ...settings },
-        /** Open escalations, each with what it is waiting on. */
-        pending: [...open.values()].map((record) => {
-          const question = record.request.questions?.[0]
-          return {
-            kind: record.kind,
-            summary: clip(record.kind === 'approval'
-              ? record.request.toolName
-              : question?.header ?? question?.question ?? ''),
-            delivered: record.delivered,
-          }
-        }),
-        enrollment: await channel.enrollmentState?.() ?? { state: 'unsupported' },
-      }),
-      {
-        begin: async () => await channel.beginEnrollment?.() ?? { state: 'unsupported' },
-        clear: async () => await channel.clearEnrollment?.() ?? { state: 'unsupported' },
-      },
-    )
-    if (offRoutes === undefined) {
-      // Without a webserver there is no card to ask for a binding, so the
-      // deployment's only surface is the log: start onboarding immediately.
+    // Without a server there is no card to ask for a binding, so the
+    // deployment's only surface is the log: start onboarding immediately.
+    if (ctx.get('webServer') === undefined) {
       log.info('webServer is absent; starting enrollment and printing the link instead.')
       channel.beginEnrollment?.()
     }
@@ -602,7 +617,6 @@ export async function apply(ctx, config) {
       offApproval()
       offQuestion()
       offAction()
-      offRoutes?.()
       closed = true
       // Abandon rather than settle: the desktop branch of each in-flight race
       // stays authoritative, so a still-open GUI can answer normally.

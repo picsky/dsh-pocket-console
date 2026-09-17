@@ -77,8 +77,10 @@ function makeResponse() {
 /**
  * Build a fake Host context with in-memory credentials, records, a captured
  * route table, and a captured settings section; apply the plugin.
+ * @param configOverrides - plugin config overrides.
+ * @param host - which optional services this deployment composes.
  */
-async function scaffold(configOverrides = {}) {
+async function scaffold(configOverrides = {}, { services = ['settings', 'webServer'] } = {}) {
   resetObserved()
   const config = Plugin.Config.resolve({
     channel: './providers/feishu.js',
@@ -111,6 +113,30 @@ async function scaffold(configOverrides = {}) {
       hooks.onChange()
     },
   }
+  const composed = new Set(services)
+  const deferred = []
+
+  /** The context one `inject` callback receives: its services, and effects. */
+  const serviceCtx = (deps) => {
+    const child = {
+      effect(factory) {
+        const disposer = factory()
+        if (typeof disposer === 'function') disposers.push(disposer)
+        return disposer
+      },
+    }
+    for (const dep of deps) child[dep] = dep === 'webServer' ? webServer : settings
+    return child
+  }
+
+  /** Run every waiting callback whose services are all composed now. */
+  const flushInjects = () => {
+    for (const [index, waiting] of [...deferred.entries()].reverse()) {
+      if (!waiting.deps.every(dep => composed.has(dep))) continue
+      deferred.splice(index, 1)
+      waiting.callback(serviceCtx(waiting.deps))
+    }
+  }
   const ctx = {
     logger: {
       warn: (error) => { warnings.push(error) },
@@ -129,9 +155,14 @@ async function scaffold(configOverrides = {}) {
       deleteRecord: async (key) => { records.delete(key) },
     },
     get(name) {
+      if (!composed.has(name)) return undefined
       if (name === 'webServer') return webServer
       if (name === 'settings') return settings
       return undefined
+    },
+    inject(deps, callback) {
+      deferred.push({ deps, callback })
+      flushInjects()
     },
     on(event, handler, options) {
       const entry = { handler, options }
@@ -167,9 +198,14 @@ async function scaffold(configOverrides = {}) {
     assert.ok(list?.length, `expected a listener for ${event}`)
     return list[0]
   }
+  /** Compose one more optional service, the way a later bundle layer would. */
+  const compose = (name) => {
+    composed.add(name)
+    flushInjects()
+  }
   return {
     config, ctx, listeners, disposers, warnings, infos, values, records,
-    routes, sections, route, json, state, listenerOf,
+    routes, sections, route, json, state, listenerOf, compose,
   }
 }
 
@@ -236,6 +272,38 @@ test('registers a settings namespace and the same-origin route', async () => {
     { kind: routes[0].kind, path: routes[0].path },
     { kind: 'prefix', path: '/__pocket' },
   )
+})
+
+test('a deployment with neither a webserver nor a settings provider still loads', async () => {
+  const { infos, routes, sections, listenerOf } = await scaffold({}, { services: [] })
+
+  assert.equal(routes.length, 0, 'there is no server to answer the card from')
+  assert.equal(sections.size, 0, 'there is no provider to hold the section')
+  assert.ok(
+    infos.some(line => line.includes('webServer is absent')),
+    'the log is the only surface such a deployment has',
+  )
+  assert.equal(observed.registerAppCalls.length, 1, 'onboarding starts without waiting for a card')
+
+  const desktop = Promise.withResolvers()
+  const result = listenerOf('approval/request').handler(
+    { toolName: 'pwsh', signal: new AbortController().signal },
+    () => desktop.promise,
+  )
+  desktop.resolve('rejected')
+  assert.equal(await result, 'rejected', 'the answerers still run')
+})
+
+test('a service composed after load still receives the section and the routes', async () => {
+  const { sections, routes, compose } = await scaffold({}, { services: [] })
+  assert.equal(sections.size, 0)
+  assert.equal(routes.length, 0)
+
+  compose('settings')
+  compose('webServer')
+
+  assert.ok(sections.has('pocket-console'), 'the section follows the provider, not the load order')
+  assert.equal(routes.length, 1, 'the routes follow the server')
 })
 
 test('reports unbound state and does not escalate before binding', async () => {
