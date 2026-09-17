@@ -71,7 +71,9 @@ Restart `dsh web`, then open **Settings → Plugins → Plugin configuration →
 
 **Creating** walks the official one-click flow and registers everything the plugin needs on a brand-new app.
 
-**Binding an existing app** opens the same flow with its own "select an existing app" entry left visible: pick the bot you already run, and the confirmation page lists the scopes, the one event (`im.message.receive_v1`), and the one callback (`card.action.trigger`) the plugin will add to it before you agree. That entry is hidden by default (`createOnly: true`) so nobody binds an existing app by accident; **Bind an existing app** is the deliberate way to do it.
+**Binding an existing app** asks for that app's **App ID** (`cli_…`, from the developer console under *Credentials & Basic Info*) and hands it to the same flow. The App ID is what names an existing app on the launch page — it travels as `clientID` — and the confirmation page then lists the scopes, the one event (`im.message.receive_v1`), and the one callback (`card.action.trigger`) the plugin will add, so nothing changes on that app until you agree.
+
+Passing `createOnly: false` on its own does **not** turn the flow into "bind existing": the SDK only ever writes that parameter as `true`, so omitting it just leaves the page to its default, which creates. The App ID is the switch.
 
 **Without any scan**, put the app's credentials in the credential store under the names `DSH_FEISHU_APP_ID` and `DSH_FEISHU_APP_SECRET` (that is what `appIdRef` and `appSecretRef` point at), and the plugin connects on its own at every start. The recipient then comes from `receiveId`, or from you sending the bot any message — a direct message binds its sender.
 
@@ -194,7 +196,7 @@ Transport settings (`channelConfig`):
 | `receiveId` | — | Name a recipient to skip the scan |
 | `receiveIdType` | `open_id` | `open_id` / `chat_id` / `user_id` / `email` |
 | `appName` / `appDesc` | see source | Prefilled app identity on the confirmation page |
-| `createOnly` | `true` | Hide the launch page's existing-app entry; **Bind an existing app** in the card turns it off for that run |
+| `createOnly` | `true` | Refuse to adopt an existing app on the launch page; only a card request naming an App ID overrides it |
 
 ## Security
 

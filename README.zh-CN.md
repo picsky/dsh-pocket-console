@@ -73,9 +73,13 @@ dsh plugin --profile web add github:picsky/dsh-pocket-console
 
 **扫码新建**走官方的一键流程，在一个全新应用上把插件需要的东西全部注册好。
 
-**绑定已有应用**打开同一条流程，但保留页面自带的"选择已有应用"入口：选中你已经在用的那个 bot，
-确认页会逐条列出插件将要加给它的权限、一个事件（`im.message.receive_v1`）和一个回调（`card.action.trigger`），
-你同意后才会生效。该入口默认被隐藏（`createOnly: true`），以免误绑已有应用；**绑定已有应用**就是那条明路。
+**绑定已有应用**会先向你要那个应用的 **App ID**（`cli_…`，在飞书开发者后台的「凭证与基础信息」里），
+再把它交给同一条流程——**启动页正是靠 App ID（参数名 `clientID`）认出一个已有应用的**。
+随后确认页会逐条列出插件将要加给它的权限、一个事件（`im.message.receive_v1`）和一个回调（`card.action.trigger`），
+你同意后才生效。
+
+只传 `createOnly: false` **并不会**把流程变成"绑定已有"：SDK 只在它为 `true` 时才写入该参数，
+省略它只会让页面走默认流程，也就是新建。**真正的开关是 App ID。**
 
 **完全不扫码**也可以：把应用的凭据放进凭据库，键名就是 `DSH_FEISHU_APP_ID` 与 `DSH_FEISHU_APP_SECRET`
 （即 `appIdRef` / `appSecretRef` 指向的名字），插件每次启动都会自己连上。接收人则来自 `receiveId`，
@@ -228,7 +232,7 @@ dsh 自己的远端客户端（编辑器里的 prompt）就是这么做的（`pa
 | `receiveId` | — | 指定接收人则跳过扫码 |
 | `receiveIdType` | `open_id` | `open_id` / `chat_id` / `user_id` / `email` |
 | `appName` / `appDesc` | 见源码 | 扫码确认页上预填的应用信息 |
-| `createOnly` | `true` | 隐藏启动页的"选择已有应用"入口；卡片里的「绑定已有应用」会在那一次关闭它 |
+| `createOnly` | `true` | 拒绝在启动页上采用已有应用；只有卡片里指名 App ID 的那次请求会覆盖它 |
 
 ## 安全
 

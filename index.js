@@ -238,7 +238,7 @@ export async function apply(ctx, config) {
 
   /** The two mutations the card asks for. */
   const actions = {
-    begin: async (mode) => await channel.beginEnrollment?.(mode) ?? { state: 'unsupported' },
+    begin: async (mode, appId) => await channel.beginEnrollment?.(mode, appId) ?? { state: 'unsupported' },
     clear: async () => await channel.clearEnrollment?.() ?? { state: 'unsupported' },
     /**
      * Record one browser-half mirror attempt.

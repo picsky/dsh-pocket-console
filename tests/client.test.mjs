@@ -442,6 +442,44 @@ test('the browser half loads through the module loader and registers its card', 
       pressed.some(call => call.url.endsWith('/__pocket/unbind')),
       `confirming posts the unbind: ${JSON.stringify(pressed)}`,
     )
+
+    // Binding an existing app asks which one: the launch page only learns the app
+    // from the id it is carried with, so the card collects it first.
+    FakeReact.cells[1] = { enrollment: { state: 'unbound' }, settings: {}, pending: [] }
+    pressed.length = 0
+    const bindExisting = (function find(node) {
+      if (node === null || typeof node !== 'object') return undefined
+      if (Array.isArray(node)) return node.map(find).find(Boolean)
+      if (node.type === 'button' && node.props.children?.[0] === pairFace.copy.bindExisting) return node
+      return find(node.props?.children)
+    })(renderCard())
+    assert.ok(bindExisting !== undefined, 'the card offers binding an existing app')
+    bindExisting.props.onClick()
+
+    const askForAppId = () => collect(renderCard()).dialogs
+      .find(dialog => dialog.props.open === true && dialog.props.title === pairFace.copy.bindExisting)
+    const appIdDialog = askForAppId()
+    assert.ok(appIdDialog !== undefined, 'which opens a dialog for the app id')
+    const appIdInput = (function find(node) {
+      if (node === null || typeof node !== 'object') return undefined
+      if (Array.isArray(node)) return node.map(find).find(Boolean)
+      if (node.type === 'input' && node.props.id === 'pocket-console-app-id') return node
+      return find(node.props?.children)
+    })(appIdDialog)
+    assert.ok(appIdInput !== undefined, 'the dialog carries the field')
+    appIdInput.props.onChange({ target: { value: 'cli_from_console' } })
+
+    const start = askForAppId().props.footer
+      .find(node => node.props.children?.[0] === pairFace.copy.authorize)
+    assert.equal(start.props.disabled, false, 'naming an app enables the authorization')
+    start.props.onClick()
+    await sleep(20)
+    assert.ok(
+      pressed.some(call => call.url.endsWith('/__pocket/bind')
+        && String(call.body).includes('"appId":"cli_from_console"')
+        && String(call.body).includes('"mode":"existing"')),
+      `authorizing posts the app it will bind: ${JSON.stringify(pressed)}`,
+    )
   } finally {
     globalThis.fetch = previousUnbindFetch
   }

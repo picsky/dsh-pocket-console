@@ -39,22 +39,31 @@ test('reports unbound state and does not escalate before binding', async () => {
   assert.equal(await result, 'rejected')
 })
 
-test('the launch page can be aimed at an existing app', async () => {
+test('the launch page is aimed at an existing app by naming it', async () => {
   const { route, state } = await scaffold()
 
-  // Without a mode the deployment's default decides; `existing` deliberately
-  // turns off createOnly, which is what hides the page's own existing-app entry.
+  // The landing page learns which app to update from `clientID`, which only
+  // `appId` sets: `createOnly: false` alone is dropped by the SDK, so an
+  // app-less request still lands on the create flow.
   await route('POST', '/__pocket/bind', SAME_ORIGIN, {})
   assert.equal(observed.registerAppCalls.at(-1).createOnly, true, 'the default creates')
+  assert.equal(observed.registerAppCalls.at(-1).appId, undefined, 'and names no app')
   await scan({ openId: 'ou_scanner' })
 
   await route('POST', '/__pocket/unbind', SAME_ORIGIN)
   await route('POST', '/__pocket/bind', SAME_ORIGIN, { mode: 'existing' })
   assert.equal(
-    observed.registerAppCalls.at(-1).createOnly,
-    false,
-    'binding an existing app keeps the page that lists them',
+    observed.registerAppCalls.at(-1).appId,
+    undefined,
+    'binding an existing app without naming one has nothing to bind',
   )
+
+  // A request that differs from the run already in flight starts its own, or the
+  // promise in hand would keep polling for a scan nobody is going to do.
+  await route('POST', '/__pocket/bind', SAME_ORIGIN, { mode: 'existing', appId: 'cli_existing' })
+  assert.equal(observed.registerAppCalls.at(-1).appId, 'cli_existing')
+  assert.equal(observed.registerAppCalls.at(-1).createOnly, false, 'which keeps clientID in play')
+
   await scan({ openId: 'ou_scanner' })
   assert.equal((await state()).enrollment.state, 'bound')
 })

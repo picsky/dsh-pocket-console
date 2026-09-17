@@ -121,7 +121,7 @@ export function registerRoutes(webServer, snapshot, actions, trust = () => undef
         }
         if (path === '/bind') {
           const body = await readBody(req)
-          json(res, 200, await actions.begin(body?.mode))
+          json(res, 200, await actions.begin(body?.mode, body?.appId))
           return
         }
         if (path === '/unbind') {

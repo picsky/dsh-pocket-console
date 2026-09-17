@@ -202,6 +202,8 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
 
   /** The one in-flight onboarding run, shared across callers. */
   let onboarding
+  /** Which request that run belongs to, so a different one starts its own. */
+  let onboardingFor
 
   /**
    * Bumped when the binding is cleared. An onboarding run captures it, so a scan
@@ -241,10 +243,10 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
    * @param run - the generation that started this run.
    * @returns the created credentials, whether or not they were persisted.
    */
-  const createApplication = async (run, createOnly = config.createOnly) => {
-    log.info(createOnly === false
-      ? '开始飞书授权流程；请用飞书扫描或打开下面的链接，并在页面上选择已有应用。'
-      : '未找到飞书凭据，开始一键创建应用；请用飞书扫描或打开下面的链接。')
+  const createApplication = async (run, { createOnly = config.createOnly, appId } = {}) => {
+    log.info(appId === undefined
+      ? '未找到飞书凭据，开始一键创建应用；请用飞书扫描或打开下面的链接。'
+      : `开始为已有应用 ${appId} 授权；请用飞书扫描或打开下面的链接，确认页会列出将要新增的权限。`)
     const result = await Lark.registerApp({
       appPreset: { name: config.appName, desc: config.appDesc },
       addons: {
@@ -255,7 +257,10 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
         events: { items: { tenant: TENANT_EVENTS } },
         callbacks: { items: CALLBACKS },
       },
-      createOnly,
+      // The launch page reads the app to update from `clientID`, and would
+      // ignore it if `createOnly` were true. Both are only sent when asked for:
+      // the SDK writes `createOnly` solely as the literal `true`.
+      ...(appId === undefined ? { createOnly } : { createOnly: false, appId }),
       onQRCodeReady: announce,
       onStatusChange: (info) => { log.info(`绑定状态：${info.status}`) },
     })
@@ -279,7 +284,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
    * @param options - whether a run without stored credentials may create one.
    * @returns whether a transport is connected.
    */
-  const connect = async (run, { allowCreate = true, createOnly } = {}) => {
+  const connect = async (run, { allowCreate = true, createOnly, appId } = {}) => {
     const stored = await storedCredentials()
     if (stored === undefined && !allowCreate) {
       // Nothing to resume from. Onboarding belongs to the user's click, not to
@@ -288,7 +293,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       return false
     }
     enrollment = { state: 'starting' }
-    credentials = stored ?? await createApplication(run, createOnly)
+    credentials = stored ?? await createApplication(run, { createOnly, appId })
     if (closed || run !== generation) return false
     const options = {
       appId: credentials.appId,
@@ -318,7 +323,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
     try {
       await connect(run, { allowCreate: false })
     } catch (error) {
-      if (run !== generation) return enrollment
+      if (run !== current) return enrollment
       enrollment = {
         state: 'failed',
         message: error instanceof Error ? error.message : String(error),
@@ -335,12 +340,23 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
    * slot so the user can retry from the card.
    * @returns the current enrollment state.
    */
-  const beginEnrollment = (mode) => {
+  const beginEnrollment = (mode, appId) => {
+    // Binding an existing app means naming it: the launch page only learns which
+    // app to update from the id it is carried with. Without one, there is nothing
+    // to bind, and the request falls back to creating.
+    const target = mode === 'existing' && typeof appId === 'string' && appId.trim() !== ''
+      ? appId.trim()
+      : undefined
+    // A run already in flight was started for a different request, so a new one
+    // replaces it: the previous promise keeps polling for a scan nobody will do.
+    const wanted = `${target ?? 'create'}`
+    if (onboarding !== undefined && onboardingFor !== wanted) {
+      onboarding = undefined
+      generation += 1
+    }
+    onboardingFor = wanted
     const run = generation
-    // `existing` keeps the launch page's own "select an existing app" entry,
-    // which `createOnly` hides. Everything else follows the deployment default.
-    const createOnly = mode === 'existing' ? false : config.createOnly
-    onboarding ??= connect(run, { createOnly }).catch((error) => {
+    onboarding ??= connect(run, { createOnly: config.createOnly, appId: target }).catch((error) => {
       // A cancelled run must not publish its failure over the enrollment that
       // replaced it, nor clear a retry the user already started.
       if (run !== generation) return
@@ -383,6 +399,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       transport = undefined
       credentials = undefined
       onboarding = undefined
+      onboardingFor = undefined
       await ctx.credentials.unset(appIdRef)
       await ctx.credentials.unset(appSecretRef)
       await binding.clear()
