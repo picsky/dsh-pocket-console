@@ -1,0 +1,15 @@
+packages:
+  - .
+
+# The published tarball embeds `@larksuiteoapi/node-sdk` (see package.json's
+# bundleDependencies), and packing a bundle needs a real node_modules tree
+# rather than the default symlinked virtual store.
+nodeLinker: hoisted
+autoInstallPeers: false
+
+# The transport the tarball bundles brings in `protobufjs`, whose `postinstall`
+# is a no-op that pnpm ≥11 nonetheless refuses to run unapproved. Declining it
+# keeps this repository's own install — the one that builds the tarball — clean;
+# it is the same decision a consumer would otherwise have to make by hand.
+allowBuilds:
+  protobufjs: false

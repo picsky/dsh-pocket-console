@@ -37,18 +37,28 @@ Close the browser and walk away, and the agent is stuck until you come back. `ds
 
 ## Quick start
 
-Install straight from GitHub — no registry publish required:
+Install from npm. The published tarball carries its Feishu transport inside it, so the install resolves nothing that needs a build permission:
 
 ```sh
-dsh plugin --profile web add github:picsky/dsh-pocket-console
+dsh plugin --profile web add dsh-pocket-console
 ```
 
-The first run stops on `ERR_PNPM_IGNORED_BUILDS`: pnpm ≥11 refuses to finish while any dependency declares a build script it has not been allowed to run, and the Feishu SDK brings in `protobufjs`, whose `postinstall` only warns about version schemes and never writes a file. pnpm appends a stub for it to the profile's `pnpm-workspace.yaml`, and that stub is not a decision — set it to `false` and re-run the same command:
+A tarball from `pnpm pack` installs the same way:
+
+```sh
+dsh plugin --profile web add ./dsh-pocket-console-0.1.0.tgz
+```
+
+Installing straight from GitHub works too, but a git dependency resolves its own dependencies from the registry, so the transport's `protobufjs` postinstall makes pnpm ≥11 stop that first install. pnpm appends a stub to the profile's `pnpm-workspace.yaml`, and the stub is not a decision — set it to `false` and re-run:
 
 ```yaml
 # $DSH_HOME/profiles/web/pnpm-workspace.yaml
 allowBuilds:
   protobufjs: false
+```
+
+```sh
+dsh plugin --profile web add github:picsky/dsh-pocket-console
 ```
 
 Restart `dsh web`, then open **Settings → Plugins → Plugin configuration → "Pocket console"**:
@@ -205,7 +215,7 @@ See [`providers/README.md`](providers/README.md) for the full contract. Candidat
 
 ## Development
 
-Plain ESM JavaScript, **no build step** — the package itself never needs a build permission. Its dependency graph still does: `protobufjs`, through the Feishu SDK, is the one pnpm ≥11 gates, declined once in the [Quick start](#quick-start).
+Plain ESM JavaScript, **no build step** — nothing here compiles, and the tests need no install. Publishing is the one operation that touches dependencies: the transport is bundled into the tarball (`bundleDependencies`), so `pnpm install` runs before `pnpm pack`/`pnpm publish`, and the consumer's profile then resolves nothing that needs a build permission. `prepack` refuses to build a tarball without the transport in it.
 
 ```sh
 npm test

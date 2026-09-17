@@ -37,21 +37,30 @@
 
 ## 快速开始
 
-直接从 GitHub 安装，不需要先发 npm：
+从 npm 安装。发布的 tarball 已经把飞书通道内置其中，所以安装过程不会解析出任何需要构建许可的依赖：
 
 ```sh
-dsh plugin --profile web add github:picsky/dsh-pocket-console
+dsh plugin --profile web add dsh-pocket-console
 ```
 
-首次运行会停在 `ERR_PNPM_IGNORED_BUILDS`：只要有依赖声明了未获许可的构建脚本，
-pnpm ≥11 就拒绝完成安装；飞书 SDK 带进了 `protobufjs`，而它的 `postinstall`
-只在版本方案不匹配时打印一行警告，从不写文件。pnpm 会把一条占位项追加进
-profile 的 `pnpm-workspace.yaml`，那不是决定——把它设为 `false`，再重新执行同一条命令：
+`pnpm pack` 产出的 tarball 装法相同：
+
+```sh
+dsh plugin --profile web add ./dsh-pocket-console-0.1.0.tgz
+```
+
+直接从 GitHub 安装也可以，但 git 依赖会从 registry 解析它自己的依赖，于是通道带进来的
+`protobufjs` 的 postinstall 会让 pnpm ≥11 中止首次安装。pnpm 会往 profile 的
+`pnpm-workspace.yaml` 追加一条占位项，那不是决定——把它设为 `false`，再重新执行：
 
 ```yaml
 # $DSH_HOME/profiles/web/pnpm-workspace.yaml
 allowBuilds:
   protobufjs: false
+```
+
+```sh
+dsh plugin --profile web add github:picsky/dsh-pocket-console
 ```
 
 重启 `dsh web`，打开 **设置 → 插件 → 插件配置 →「Pocket console」**：
@@ -239,9 +248,10 @@ revision 为栅栏，只有点「保存」才真正落盘。绑定与状态则�
 
 ## 开发
 
-纯 ESM JavaScript，**无构建步骤**——包本身从不需要构建许可。依赖图仍然需要：
-飞书 SDK 引入的 `protobufjs` 就是 pnpm ≥11 会拦下的那一个，在
-[快速开始](#快速开始) 里一次性拒绝即可。
+纯 ESM JavaScript，**无构建步骤**——这里没有任何东西需要编译，测试也不需要先安装。
+唯一会碰到依赖的操作是发布：通道被打进 tarball（`bundleDependencies`），
+所以要在 `pnpm pack` / `pnpm publish` 之前先 `pnpm install`，这样消费方的 profile
+不会解析出任何被闸门拦下的包；缺少它时 `prepack` 会直接拒绝打包。
 
 ```sh
 npm test

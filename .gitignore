@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+# Pack output
+*.tgz
+
 # Local experiments
 *.local.*
 .DS_Store

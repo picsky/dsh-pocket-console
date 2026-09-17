@@ -33,6 +33,24 @@ dsh plugin --profile web add .
 dsh web
 ```
 
+## Publishing
+
+The published tarball must carry the Feishu transport inside it. `package.json`'s
+`bundleDependencies` embeds `@larksuiteoapi/node-sdk` — and through it
+`protobufjs`, `axios`, and `ws` — so a consumer's profile resolves nothing that
+needs a build permission. Packing without an install produces a tarball with
+none of it and no warning, so `scripts/verify-pack.mjs` refuses from `prepack`.
+
+```sh
+pnpm install     # the one step that needs the network, and what fills the bundle payload
+pnpm test
+pnpm publish     # or: pnpm pack, then dsh plugin add ./dsh-pocket-console-<version>.tgz
+```
+
+`pnpm-workspace.yaml` pins the hoisted linker the bundle needs and declines
+`protobufjs`'s no-op postinstall for this repository's own install — the same
+decision a consumer installing from git has to make for themselves.
+
 ## What a change needs
 
 **Tests.** `npm test` must stay green, and new behavior needs a case. The suite

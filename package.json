@@ -34,7 +34,8 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "scripts": {
-    "test": "node --import ./test/hooks.mjs verify.mjs"
+    "test": "node --import ./test/hooks.mjs verify.mjs",
+    "prepack": "node scripts/verify-pack.mjs"
   },
   "keywords": [
     "dsh",
@@ -71,6 +72,9 @@
     "@larksuiteoapi/node-sdk": "^1.74.0",
     "qrcode": "^1.5.4"
   },
+  "bundleDependencies": [
+    "@larksuiteoapi/node-sdk"
+  ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
     "@deepseek-ai/dsh-credentials": "*",
