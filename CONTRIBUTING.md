@@ -110,6 +110,11 @@ contract in [`providers/README.md`](providers/README.md), and document it. Do
 not add transport concepts to `index.js` — if a change needs the core to know
 what Feishu is, the contract is missing something and that is the real fix.
 
+**A non-obvious choice gets a record.** `docs/decisions/` holds short records of
+why the plugin is shaped the way it is — the no-build-step constraint, the
+browser-side mirror, the human attribution of a phone instruction, the single-file
+browser half. Change one and the record changes with it.
+
 **Docs in both languages.** `README.md` is English and the primary document;
 `README.zh-CN.md` is its counterpart. Update both.
 
