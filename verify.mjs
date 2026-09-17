@@ -855,12 +855,17 @@ test('the browser half loads through the module loader and registers its card', 
    * @returns what the card registered and bound.
    */
   const applyTo = (module) => {
-    const seen = { inject: [], register: [], bind: undefined }
+    const seen = { inject: [], register: [], bind: undefined, effects: [] }
     module.apply({
       settingsScope: { bind(spec) { seen.bind = spec; return scope } },
       // The Session UI is reached through `get` because the browser half stays
       // loadable without it; the mirror reads the pending interaction there.
       get: (name) => name === 'uiSession' ? uiSession : undefined,
+      effect(factory) {
+        const disposer = factory()
+        seen.effects.push(disposer)
+        return disposer
+      },
       slots: {
         inject(name, contribute) {
           seen.inject.push(name)
@@ -874,15 +879,31 @@ test('the browser half loads through the module loader and registers its card', 
     return {
       ...seen,
       registered: seen.register.find(entry => entry.options.name === 'settings.plugin.item'),
-      docked: seen.register.find(entry => entry.options.name === 'conversation.input.dock'),
     }
   }
 
+  // The desktop mirror runs from the plugin body against the Host's state route,
+  // so the page's fetch and the Session UI are stubbed before the plugin applies.
+  const answered = []
+  const pending = {
+    questions: [{ id: 'a' }, { id: 'b' }],
+    answer: async (answer) => { answered.push(answer) },
+  }
+  const phoneAnswer = { answers: [{ id: 'a', selected: ['a1'] }] }
+  const reports = []
+  let served = { id: 'm1', sessionId: 's_agent', questions: ['a', 'b'], answer: phoneAnswer }
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async (url, options) => {
+    if (String(url).endsWith('/mirror')) {
+      reports.push(JSON.parse(options.body))
+      return { ok: true, json: async () => ({}) }
+    }
+    return { ok: true, json: async () => ({ sync: served }) }
+  }
+  uiSession.pendingInteractions.getSnapshot = () => new Map([['s_agent', pending]])
+
   const first = applyTo(loaded.exports)
-  assert.deepEqual(first.inject, [
-    'settings.plugin.item', 'conversation.input.dock', 'conversation.input.overlay',
-  ], 'the mirror mounts in both conversation outlets')
-  assert.equal(first.docked.options.name, 'conversation.input.dock')
+  assert.deepEqual(first.inject, ['settings.plugin.item'])
   assert.deepEqual(first.bind, { namespace: 'pocket-console' }, 'the card binds its own settings namespace')
   assert.equal(first.registered.options.key, 'pocket-console', 'the card is keyed by the settings namespace')
   assert.equal(typeof first.registered.Component, 'function')
@@ -920,54 +941,47 @@ test('the browser half loads through the module loader and registers its card', 
   assert.equal(section.delaySeconds, 120, 'a reset re-inherits the composition layer')
   assert.equal(card.getSnapshot().delaySeconds.overridden, false)
 
-  // The desktop mirror applies a phone decision through the same client call a
-  // click makes, so a composer the phone answered stops waiting.
-  assert.equal(typeof first.docked.Component, 'function', 'the mirror mounts as a dock entry')
-  const mirror = first.docked.options.inject('s_agent')
-  assert.equal(mirror.sessionId, 's_agent')
-  const answered = []
-  const pending = {
-    questions: [{ id: 'a' }, { id: 'b' }],
-    answer: async (answer) => { answered.push(answer) },
-  }
-  uiSession.pendingInteractions.getSnapshot = () => new Map([['s_agent', pending]])
-  const phoneAnswer = { answers: [{ id: 'a', selected: ['a1'] }] }
-  assert.equal(
-    mirror.applySync({ id: 'm1', sessionId: 's_agent', questions: ['a', 'b'], answer: phoneAnswer }),
-    null,
-    'an applied decision reports nothing to explain',
-  )
-  await sleep(10)
-  assert.deepEqual(answered, [phoneAnswer], 'the phone answer is what the desktop composer settles with')
-  assert.equal(
-    mirror.applySync({ id: 'm2', sessionId: 's_agent', questions: ['x'], answer: phoneAnswer }),
-    'no waiting composer',
-    'a different request in the same session is left alone',
-  )
-  // A decision whose session the Host could not name still lands by the question
-  // ids both sides read from the same request.
-  assert.equal(
-    mirror.applySync({ id: 'm3', questions: ['a', 'b'], answer: phoneAnswer }),
-    null,
-  )
-  uiSession.pendingInteractions.getSnapshot = () => new Map()
-  assert.equal(
-    mirror.applySync({ id: 'm4', sessionId: 's_agent', questions: ['a', 'b'], answer: phoneAnswer }),
-    'no waiting composer',
-    'no pending composer means nothing to mirror',
-  )
+  // The mirror applies a phone decision through the same client call a click
+  // makes, and reports each attempt to the Host, so a mirror that is not landing
+  // says which step it reached.
+  await sleep(50)
+  assert.deepEqual(answered, [phoneAnswer], 'the phone decision reaches the waiting composer')
+  assert.deepEqual(reports[0], { status: 'loaded' }, 'the bundle says it reached the page')
+  assert.ok(reports.some(entry => entry.status === 'watching'))
+  assert.ok(reports.some(entry => entry.status === 'applied' && entry.syncId === 'm1'))
+
+  // A decision for a request this page is not showing is reported, not guessed at.
+  served = { id: 'm2', sessionId: 's_agent', questions: ['x'], answer: phoneAnswer }
+  await sleep(1100)
+  assert.equal(answered.length, 1, 'a different request is left alone')
+  assert.ok(reports.some(entry => entry.status === 'skipped' && entry.reason === 'no waiting composer'))
+
+  // A page whose Session UI is absent says so instead of failing silently.
   uiSession.pendingInteractions.getSnapshot = () => undefined
+  served = { id: 'm3', sessionId: 's_agent', questions: ['a', 'b'], answer: phoneAnswer }
+  await sleep(1100)
+  assert.ok(reports.some(entry => entry.status === 'skipped' && entry.reason === 'no pending-interaction source'))
+
+  // Disposal stops the mirror: the plugin's effect owns the poll.
+  assert.equal(first.effects.length, 1)
+  first.effects[0]()
+  served = { id: 'm4', sessionId: 's_agent', questions: ['a', 'b'], answer: phoneAnswer }
+  await sleep(1100)
   assert.equal(
-    mirror.applySync({ id: 'm5', sessionId: 's_agent', questions: ['a', 'b'], answer: phoneAnswer }),
-    'no pending-interaction source',
-    'a page without the Session UI says so instead of failing silently',
+    reports.filter(entry => entry.syncId === 'm4').length,
+    0,
+    `a disposed mirror stops looking: ${JSON.stringify(reports)}`,
   )
+  globalThis.fetch = previousFetch
 
   // The shell publishes the active language on <html>; the card follows it.
   globalThis.document = { documentElement: { lang: 'zh-CN' } }
   try {
     const chinese = await load('./client.js?verify-zh')
-    assert.equal(applyTo(chinese.exports).registered.options.inject().copy.title, '口袋控制台')
+    const localized = applyTo(chinese.exports)
+    assert.equal(localized.registered.options.inject().copy.title, '口袋控制台')
+    // This apply exists for its copy alone; its own mirror must not outlive it.
+    localized.effects[0]()
   } finally {
     delete globalThis.document
   }

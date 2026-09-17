@@ -659,51 +659,47 @@ window.__ModuleLoader__.load({
       }
 
       /**
-       * Poll the Host for a phone answer and mirror it. Renders nothing: it
-       * exists so this page's composer stays in step with a decision taken
-       * somewhere else.
-       * @param props - the slot's session identity and the mirror verb.
-       * @returns null.
+       * Poll the Host for a phone decision and mirror it.
+       *
+       * This runs from the plugin body rather than from a component: the composer
+       * it has to close can be showing while no conversation outlet of ours
+       * renders, and a mirror that only works when a slot happens to be mounted is
+       * not a mirror.
        */
-      function DesktopMirror(props) {
-        const sessionId = props.sessionId
-        React.useEffect(() => {
-          // One line per mount and one per decision, so a page that is not
-          // mirroring says which of the two it is doing.
-          console.info(`pocket-console: desktop mirror watching session ${String(sessionId)}`)
-          report('mounted')
-          let stopped = false
-          let applied = null
-          let reported = null
-          const poll = async () => {
-            try {
-              const sync = await readSync()
-              if (stopped || sync === null || sync.id === applied) return
-              const reason = props.applySync(sync)
-              if (reason === null) {
-                applied = sync.id
-                console.info(`pocket-console: mirrored the phone's ${String(sync.kind)} decision`)
-                report('applied', undefined, sync.id)
-                return
-              }
-              if (reported !== sync.id) {
-                reported = sync.id
-                console.info(`pocket-console: mirror skipped — ${reason}`)
-                report('skipped', reason, sync.id)
-              }
-            } catch (error) {
-              // A failed poll mirrors nothing and retries on the next tick: the
-              // phone's answer is already recorded either way.
-              const message = String(error?.message ?? error)
-              console.info(`pocket-console: mirror poll failed — ${message}`)
-              report('error', message)
+      const startMirror = () => {
+        let stopped = false
+        let applied = null
+        let reported = null
+        const poll = async () => {
+          try {
+            const sync = await readSync()
+            if (stopped || sync === null || sync.id === applied) return
+            const reason = applySync(sync)
+            if (reason === null) {
+              applied = sync.id
+              console.info(`pocket-console: mirrored the phone's ${String(sync.kind)} decision`)
+              report('applied', undefined, sync.id)
+              return
             }
+            if (reported !== sync.id) {
+              reported = sync.id
+              console.info(`pocket-console: mirror skipped — ${reason}`)
+              report('skipped', reason, sync.id)
+            }
+          } catch (error) {
+            // A failed poll mirrors nothing and retries on the next tick: the
+            // phone's answer is already recorded either way.
+            const message = String(error?.message ?? error)
+            console.info(`pocket-console: mirror poll failed — ${message}`)
+            report('error', message)
           }
-          void poll()
-          const timer = setInterval(() => { void poll() }, 1000)
-          return () => { stopped = true; clearInterval(timer) }
-        }, [sessionId])
-        return null
+        }
+        void poll()
+        const timer = setInterval(() => { void poll() }, 1000)
+        // A browser timer has no unref; the suite runs this bundle under Node,
+        // where keeping the process alive for a poll would hang it.
+        timer.unref?.()
+        return () => { stopped = true; clearInterval(timer) }
       }
 
       ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
@@ -719,15 +715,15 @@ window.__ModuleLoader__.load({
         }),
       }, PocketConsoleCard))
 
-      // The mirror mounts wherever the conversation shows a session, including
-      // while its composer waits. Both outlets belong to the same conversation,
-      // so each instance retries and whichever reaches the composer applies it.
-      for (const slot of ['conversation.input.dock', 'conversation.input.overlay']) {
-        ctx.slots.inject(slot, () => ctx.slots.register({
-          name: slot,
-          inject: (sessionId) => ({ sessionId, applySync }),
-        }, DesktopMirror))
-      }
+      // Load, then watch. The first report says whether this bundle reached the
+      // page at all, which separates a mirror that is not landing from client
+      // code the browser never ran.
+      report('loaded')
+      ctx.effect(() => {
+        console.info('pocket-console: desktop mirror watching the conversation')
+        report('watching')
+        return startMirror()
+      }, 'pocket-console: desktop mirror')
     }
 
     module.exports = { apply, inject: ['slots', 'settingsScope'] }
