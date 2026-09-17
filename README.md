@@ -218,7 +218,7 @@ See [`providers/README.md`](providers/README.md) for the full contract. Candidat
 
 ## Limitations
 
-- **A desktop panel does not disappear the instant the phone answers.** It clears when the tool call's cancellation signal arrives, usually right after the tool settles. The outcome is correct either way; a stale panel is the only artifact.
+- **A phone answer leaves the desktop's question composer on screen.** The GUI's composer is a listener on the forwarded `user-questions/request` waterfall; answering from the phone settles that waterfall ahead of it, and the forwarded request is never withdrawn, so the composer keeps waiting. The answer itself reaches the model — the transcript shows it and the turn completes — and the composer clears when the request is cancelled or `dsh web` restarts. It is a Host-side gap, not a lost answer: forwarding has no cancellation path for a listener the chain left behind.
 - **Card text is truncated** at `maxDetailChars`; a `plan-review` plan can be long.
 - **Long connections are limited to 50 per app and are not broadcast** — do not run several DSH instances against one Feishu app.
 - **The browser half has no build step**, so it is hand-written in the client module system's factory format and renders with plain React elements rather than the shared UI component library.
