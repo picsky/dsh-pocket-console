@@ -254,12 +254,12 @@ See [`providers/README.md`](providers/README.md) for the full contract. Candidat
 - **A result notice does not revive a reclaimed session.** If the host has already let the agent go, the notice is skipped and logged instead of resuming the session.
 - **Long connections are limited to 50 per app and are not broadcast** — do not run several DSH instances against one Feishu app.
 - **The browser half has no build step**, so it is hand-written in the client module system's factory format and renders with plain React elements rather than the shared UI component library.
-- **The published package is about 3.7 MB**, because it carries its Feishu transport — and that transport's own dependencies — inside the tarball. That is what keeps an install free of build permissions; nothing is compiled on the machine that installs it.
+- **The published package is about 4 MB**, because it carries its Feishu transport — and that transport's own dependencies — inside the tarball. That is what keeps an install free of build permissions; nothing is compiled on the machine that installs it.
 - **Verified against a live Feishu tenant, but not yet at this release.** The one-scan app creation, the long connection, card delivery, and card actions arriving back all work against a real app. The card-action field path, the one-option-per-row layout, and typed answers shipped after that pass: the suite covers them, and a phone still has to confirm them.
 
 ## Development
 
-Plain ESM JavaScript, **no build step** — nothing here compiles, and the tests need no install. Publishing is the one operation that touches dependencies: the transport is bundled into the tarball (`bundleDependencies`), so `pnpm install` runs before `pnpm pack`/`pnpm publish`, and the consumer's profile then resolves nothing that needs a build permission. `prepack` refuses to build a tarball without the transport in it.
+Plain ESM JavaScript, **no build step** — nothing here compiles, and the tests need no install. Publishing is the one operation that touches dependencies: the transport and the QR encoder are bundled into the tarball (`bundleDependencies`), so `pnpm install` runs before `pnpm pack`/`pnpm publish`, and the consumer's profile then resolves nothing that needs a build permission. `prepack` refuses to build a tarball without the transport in it.
 
 ```sh
 npm test

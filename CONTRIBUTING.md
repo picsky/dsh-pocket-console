@@ -37,9 +37,9 @@ dsh web
 
 ## Publishing
 
-The published tarball must carry the Feishu transport inside it. `package.json`'s
+The published tarball must carry every runtime library inside it. `package.json`'s
 `bundleDependencies` embeds `@larksuiteoapi/node-sdk` — and through it
-`protobufjs`, `axios`, and `ws` — so a consumer's profile resolves nothing that
+`protobufjs`, `axios`, and `ws` — and `qrcode` as well, so a consumer's profile resolves nothing that
 needs a build permission. Packing without an install produces a tarball with
 none of it and no warning, so `scripts/verify-pack.mjs` refuses from `prepack`.
 

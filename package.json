@@ -78,7 +78,8 @@
     "qrcode": "^1.5.4"
   },
   "bundleDependencies": [
-    "@larksuiteoapi/node-sdk"
+    "@larksuiteoapi/node-sdk",
+    "qrcode"
   ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",

@@ -62,7 +62,7 @@ jobs:
           if (failed) process.exit(1);
           console.log('manifest verified');
           "
-      # The published tarball must carry the bundled transport; a profile that
+      # The published tarball must carry every runtime library it resolves; a profile that
       # installs it then resolves nothing that needs a build permission, which
       # is the whole reason the dependency is bundled rather than installed.
       - uses: pnpm/action-setup@v4
@@ -75,4 +75,5 @@ jobs:
           pnpm pack
           tar -tzf dsh-pocket-console-*.tgz | grep -qx 'package/node_modules/@larksuiteoapi/node-sdk/package.json'
           tar -tzf dsh-pocket-console-*.tgz | grep -qx 'package/node_modules/protobufjs/package.json'
+          tar -tzf dsh-pocket-console-*.tgz | grep -qx 'package/node_modules/qrcode/package.json'
           echo "bundled transport present"
