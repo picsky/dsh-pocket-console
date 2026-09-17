@@ -133,7 +133,7 @@ What suppresses or delays a notice:
 - Delegated sessions are not reported separately; the session that asked for the subagent is.
 - A session whose agent the host has already reclaimed is not resumed, and says so in the log.
 
-The instruction is injected as a **plugin-sourced** message, never as human input. Ordinary continuation works; harness features that require human authority reject it, by design.
+The instruction enters the session as **your message**, attributed the way the harness attributes human input: the surface a person is speaking through mints it, which is what dsh's own remote client does with an editor prompt (`packages/acp/acp/src/session.ts`). That attribution is also what keeps the instruction visible in the Web flow: anything else is rendered as injected context, folded into the turn's process. It therefore carries human authority too — a feature that requires human input accepts it — and the log does not distinguish it from a message typed at the desk.
 
 ## Configuration
 

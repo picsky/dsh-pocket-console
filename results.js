@@ -9,9 +9,9 @@
  *
  * A notice is not a decision on a live request. The desktop is not asked
  * anything, so nothing races it: the notifier waits until the session is
- * genuinely quiet, then offers the answer. An instruction that comes back is a
- * new plugin-sourced message, never a human attestation — the harness reserves
- * `{ kind: 'user' }` for callers that are the human surface.
+ * genuinely quiet, then offers the answer. An instruction that comes back is
+ * the reader's own message on a remote surface, and is recorded as human input
+ * for that reason — see `send()`.
  *
  * @module pocket-console/results
  */
@@ -196,8 +196,13 @@ export function createResultNotifier({ ctx, log, channel, settings, now = () => 
       const { createUserMessage } = await import('@deepseek-ai/dsh-llm')
       agent.followup(createUserMessage({
         content: [{ type: 'text', text }],
-        // Never `{ kind: 'user' }`: a plugin must not claim human authority.
-        source: { kind: 'plugin', plugin: 'pocket-console' },
+        // Human input, minted by the surface the human is speaking through —
+        // the same attribution the harness's own remote client gives a prompt
+        // (`packages/acp/acp/src/session.ts`). A `{ kind: 'user' }` message is
+        // what renders as the reader's own message in the Web flow and what
+        // carries human authority; a plugin-sourced one renders as folded
+        // injected context instead.
+        source: { kind: 'user' },
       }))
       log.info('已把手机上的指令排入会话。')
       if (notice.handle !== undefined) {

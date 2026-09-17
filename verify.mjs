@@ -955,8 +955,8 @@ test('sends a stopped answer to the phone and takes the next instruction back', 
   await sleep(10)
   assert.equal(followed.length, 1)
   assert.equal(followed[0].content[0].text, '接着把文档补上')
-  assert.deepEqual(followed[0].source, { kind: 'plugin', plugin: 'pocket-console' },
-    'an instruction from the phone is plugin-sourced, never human-attested')
+  assert.deepEqual(followed[0].source, { kind: 'user' },
+    'the reader speaking through a remote surface, as the harness ACP client records it')
 
   const replayed = await clickCard(submit, { value: '再来一次' })
   assert.equal(replayed.toast.type, 'warning', 'a notice id is single-use')
