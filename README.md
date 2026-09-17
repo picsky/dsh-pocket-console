@@ -47,7 +47,7 @@ dsh plugin --profile web add dsh-pocket-console
 A tarball from `pnpm pack` installs the same way:
 
 ```sh
-dsh plugin --profile web add ./dsh-pocket-console-0.1.0.tgz
+dsh plugin --profile web add ./dsh-pocket-console-<version>.tgz
 ```
 
 Installing straight from GitHub works too, but a git dependency resolves its own dependencies from the registry, so the transport's `protobufjs` postinstall makes pnpm ≥11 stop that first install. pnpm appends a stub to the profile's `pnpm-workspace.yaml`, and the stub is not a decision — set it to `false` and re-run:

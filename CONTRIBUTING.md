@@ -83,7 +83,11 @@ git push --follow-tags
 runs a fake Host context, a stubbed Feishu SDK, and a stubbed QR encoder, so
 most behavior is testable without credentials or network. If you touch the
 browser half, the load-and-register case executes `client.js` against a
-stand-in shell.
+stand-in shell that seeds only what the real shell seeds — React and the UI
+primitives. That is the whole module table: a request for anything else fails
+the page's boot rather than this card's, and which package owns a shared engine
+has moved between DSH releases (the store engine lived in the client runtime,
+then in a client store package). Carry what the card needs in the bundle.
 
 **A channel that is not Feishu.** Add one file under `providers/`, implement the
 contract in [`providers/README.md`](providers/README.md), and document it. Do

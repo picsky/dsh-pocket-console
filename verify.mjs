@@ -731,38 +731,25 @@ test('the browser half loads through the module loader and registers its card', 
     useEffect: () => {},
     useState: (initial) => [initial, () => {}],
   }
-  /** Bare observable snapshot store, the shape the hooks compartment carries. */
-  const createStore = (initial) => {
-    let current = initial
-    const listeners = new Set()
-    return {
-      getSnapshot: () => current,
-      subscribe(listener) {
-        listeners.add(listener)
-        return () => { listeners.delete(listener) }
-      },
-      set(next) {
-        current = next
-        for (const listener of listeners) listener()
-      },
-      update(mutator) {
-        mutator(current)
-        for (const listener of listeners) listener()
-      },
-    }
-  }
+  /**
+   * The shell seeds a fixed module table and nothing else resolves in the page.
+   * This mirrors what the installed shell seeds — React and the UI primitives —
+   * so a request for any other package fails here the way it fails in a browser,
+   * instead of being papered over by a stub the real page never provides. Which
+   * package owns the store engine, for instance, has moved between releases.
+   */
   const baseline = {
     react: FakeReact,
     '@deepseek-ai/dsh-client-ui-primitives': { IconChevronDownOutline14: () => null },
-    '@deepseek-ai/dsh-client-runtime/client': { createSnapshotStore: createStore },
   }
   /**
    * Load the bundle behind one stand-in shell.
    * @param url - module URL to load, query included.
-   * @returns the id and exports the loader captured.
+   * @returns the id, exports, and requested specifiers the loader captured.
    */
   const load = async (url) => {
     let loaded
+    const requested = []
     const previous = globalThis.window
     globalThis.window = {
       __ModuleLoader__: {
@@ -770,7 +757,8 @@ test('the browser half loads through the module loader and registers its card', 
           loaded = {
             id,
             exports: factory((specifier) => {
-              assert.ok(Object.hasOwn(baseline, specifier), `the card may only request baseline modules, asked for ${specifier}`)
+              requested.push(specifier)
+              assert.ok(Object.hasOwn(baseline, specifier), `the card may only request shell-seeded modules, asked for ${specifier}`)
               return baseline[specifier]
             }),
           }
@@ -782,13 +770,18 @@ test('the browser half loads through the module loader and registers its card', 
     } finally {
       globalThis.window = previous
     }
-    return loaded
+    return { ...loaded, requested }
   }
 
   const loaded = await load('./client.js?verify')
   assert.equal(loaded.id, 'dsh-pocket-console', 'the module-table row id is the package name')
   assert.deepEqual(loaded.exports.inject, ['slots', 'settingsScope'])
   assert.equal(typeof loaded.exports.apply, 'function')
+  assert.deepEqual(
+    [...new Set(loaded.requested)].sort(),
+    ['@deepseek-ai/dsh-client-ui-primitives', 'react'],
+    'the bundle requests only modules the shell seeds',
+  )
 
   const base = { delaySeconds: 120, maxDetailChars: 1200, titlePrefix: 'DSH' }
   let section = { ...base }

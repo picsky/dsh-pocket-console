@@ -26,7 +26,6 @@ window.__ModuleLoader__.load({
     const { useCallback, useEffect, useState } = React
     const h = React.createElement
     const { IconChevronDownOutline14 } = require('@deepseek-ai/dsh-client-ui-primitives')
-    const { createSnapshotStore } = require('@deepseek-ai/dsh-client-runtime/client')
 
     /** Settings namespace; also the `settings.plugin.item` slot key. */
     const NS = 'pocket-console'
@@ -368,6 +367,35 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * A bare observable snapshot: what the slot system's reserved `hooks`
+     * compartment carries, and what the renderer binds as `use<Name>`.
+     *
+     * Written here rather than imported. The shell seeds a fixed module table,
+     * and which package owns a store engine is not part of that contract: one
+     * release keeps it in the client runtime, the next moves it to a client
+     * store package. Requesting the wrong one fails the whole bundle import and
+     * takes the page's boot with it. React never sees this object — the
+     * renderer subscribes to it.
+     * @param initial - the first snapshot.
+     * @returns the source, plus the mutation its registrant owns.
+     */
+    function createSnapshot(initial) {
+      let current = initial
+      const listeners = new Set()
+      return {
+        getSnapshot: () => current,
+        subscribe(listener) {
+          listeners.add(listener)
+          return () => { listeners.delete(listener) }
+        },
+        set(next) {
+          current = next
+          for (const listener of listeners) listener()
+        },
+      }
+    }
+
+    /**
      * Render one plugin card.
      * @param props - copy, the form snapshot bound from the hooks compartment, and the form actions.
      * @returns the card, or nothing when the Host does not serve its namespace.
@@ -540,7 +568,7 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       const scope = ctx.settingsScope.bind({ namespace: NS })
       const form = createSettingsForm(scope)
-      const store = createSnapshotStore(form.projection())
+      const store = createSnapshot(form.projection())
       form.subscribe(() => { store.set(form.projection()) })
       const copy = copyForDocument()
 

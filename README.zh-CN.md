@@ -47,7 +47,7 @@ dsh plugin --profile web add dsh-pocket-console
 `pnpm pack` 产出的 tarball 装法相同：
 
 ```sh
-dsh plugin --profile web add ./dsh-pocket-console-0.1.0.tgz
+dsh plugin --profile web add ./dsh-pocket-console-<version>.tgz
 ```
 
 直接从 GitHub 安装也可以，但 git 依赖会从 registry 解析它自己的依赖，于是通道带进来的
