@@ -6,8 +6,10 @@ channel-neutral core, one transport, and a browser card.
 ## Getting set up
 
 There is no build step and nothing to install for development — the suite
-replaces its four production dependencies with in-repo stubs through a Node
-module resolution hook.
+replaces its five production dependencies with in-repo stubs through a Node
+module resolution hook. Cases live under `tests/`, one file per domain, over a
+shared harness (`tests/support/harness.mjs`); `node --test` runs them in
+parallel.
 
 ```sh
 git clone https://github.com/picsky/dsh-pocket-console

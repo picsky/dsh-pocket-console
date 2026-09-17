@@ -259,7 +259,7 @@ Plain ESM JavaScript, **no build step** — nothing here compiles, and the tests
 npm test
 ```
 
-Nothing to install first: the suite replaces its five production dependencies through a Node module resolution hook (`test/hooks.mjs`), so it needs no credentials and no network.
+Nothing to install first: the suite replaces its five production dependencies through a Node module resolution hook (`test/hooks.mjs`), so it needs no credentials and no network. Cases live under `tests/`, one file per domain — `settings`, `binding`, `escalation`, `questions`, `notices`, and `client` — over the shared harness in `tests/support/harness.mjs`.
 
 26 cases cover: settings namespace and route registration, no escalation before binding, the unbound → awaiting → bound state machine, the QR route, cross-origin refusal, unbind cleanup, the unbind race against a late scan, delayed delivery, card contents, button round-trip, desktop-first suppression, multi-question accumulation and card rewrite, multi-select forms with and without a typed answer, free text, forged-option refusal, re-binding by direct message, the pending report, a deployment without the optional services and their later arrival, runtime settings changes, cancellation, disposal, failure degradation, result-notice delivery and its single-use instruction round trip, result-notice suppression while off or busy or delegated, the notice cooldown, and the browser half's load-and-register shape.
 
