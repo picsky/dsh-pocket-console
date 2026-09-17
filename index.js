@@ -663,7 +663,7 @@ export async function apply(ctx, config) {
         ...(typeof body?.syncId === 'string' ? { syncId: body.syncId } : {}),
       }
       mirrorReports.push(report)
-      if (mirrorReports.length > 10) mirrorReports.shift()
+      if (mirrorReports.length > 20) mirrorReports.shift()
       log.info(`桌面镜像：${report.status}${report.reason === undefined ? '' : `（${report.reason}）`}`)
       return report
     },

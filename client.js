@@ -702,6 +702,35 @@ window.__ModuleLoader__.load({
         return () => { stopped = true; clearInterval(timer) }
       }
 
+      /**
+       * Report whether a composer is on screen.
+       *
+       * The panel renders from the Session UI's pending-interaction snapshot, so
+       * that snapshot's transitions are the only direct observation of the panel
+       * itself: nothing on the Host can see whether a browser is showing one.
+       * @returns a disposer removing the subscription.
+       */
+      const watchPanel = () => {
+        const source = ctx.get?.('uiSession')?.pendingInteractions
+        if (typeof source?.subscribe !== 'function') {
+          report('panel-unknown', 'no pending-interaction source')
+          return () => {}
+        }
+        let last = null
+        const announce = () => {
+          const pending = source.getSnapshot?.()
+          const entry = pending === undefined ? undefined : [...pending.values()][0]
+          const kind = entry === undefined ? null : String(entry.kind ?? 'unknown')
+          const state = kind === null ? 'closed' : `open:${kind}`
+          if (state === last) return
+          last = state
+          report(kind === null ? 'panel-closed' : 'panel-open', kind ?? undefined)
+        }
+        announce()
+        const off = source.subscribe(announce)
+        return typeof off === 'function' ? off : () => {}
+      }
+
       ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
         name: 'settings.plugin.item',
         key: NS,
@@ -722,7 +751,9 @@ window.__ModuleLoader__.load({
       ctx.effect(() => {
         console.info('pocket-console: desktop mirror watching the conversation')
         report('watching')
-        return startMirror()
+        const stopMirror = startMirror()
+        const stopPanel = watchPanel()
+        return () => { stopMirror(); stopPanel() }
       }, 'pocket-console: desktop mirror')
     }
 

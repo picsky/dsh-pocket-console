@@ -847,7 +847,16 @@ test('the browser half loads through the module loader and registers its card', 
     },
   }
   /** Stand-in for the Session UI service the desktop mirror reads. */
-  const uiSession = { pendingInteractions: { getSnapshot: () => new Map() } }
+  const panelListeners = new Set()
+  const uiSession = {
+    pendingInteractions: {
+      getSnapshot: () => new Map(),
+      subscribe(listener) {
+        panelListeners.add(listener)
+        return () => { panelListeners.delete(listener) }
+      },
+    },
+  }
 
   /**
    * Apply one loaded browser half against a stand-in host context.
@@ -962,9 +971,25 @@ test('the browser half loads through the module loader and registers its card', 
   await sleep(1100)
   assert.ok(reports.some(entry => entry.status === 'skipped' && entry.reason === 'no pending-interaction source'))
 
+  // Whether a composer is on screen is only observable in the page, so the
+  // browser half reports the panel's own transitions: one shows, then it closes.
+  assert.ok(
+    reports.some(entry => entry.status === 'panel-open'),
+    `a showing panel is reported: ${JSON.stringify(reports)}`,
+  )
+  assert.ok(panelListeners.size >= 1, 'the panel source is subscribed')
+  uiSession.pendingInteractions.getSnapshot = () => new Map()
+  for (const listener of panelListeners) listener()
+  await sleep(20)
+  assert.ok(
+    reports.some(entry => entry.status === 'panel-closed'),
+    `a closing panel is reported: ${JSON.stringify(reports)}`,
+  )
+
   // Disposal stops the mirror: the plugin's effect owns the poll.
   assert.equal(first.effects.length, 1)
   first.effects[0]()
+  assert.equal(panelListeners.size, 0, 'disposal also releases the panel source')
   served = { id: 'm4', sessionId: 's_agent', questions: ['a', 'b'], answer: phoneAnswer }
   await sleep(1100)
   assert.equal(
