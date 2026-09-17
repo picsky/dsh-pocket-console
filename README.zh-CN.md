@@ -75,6 +75,9 @@ dsh plugin --profile web add github:picsky/dsh-pocket-console
 （[OAuth 2.0 Device Authorization Grant](https://open.feishu.cn/document/mcp_open_tools/integrating-agents-with-feishu/overview)），
 链接 **10 分钟内有效、仅可使用一次**。
 
+**只扫这一次。** 应用凭据与接收人都存在凭据库里，之后每次启动 `dsh` 都会自己把长连接接回来——
+不用进设置、不用点按钮。只有在你点过「解绑」，或者主动点「重新绑定」时，才会再出现扫码。
+
 卸载：
 
 ```sh

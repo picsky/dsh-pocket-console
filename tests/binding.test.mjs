@@ -39,6 +39,34 @@ test('reports unbound state and does not escalate before binding', async () => {
   assert.equal(await result, 'rejected')
 })
 
+test('a restart reconnects from stored credentials without onboarding', async () => {
+  const { state, listenerOf, infos } = await scaffold({}, {
+    stored: { appId: 'cli_stored', appSecret: 'secret_stored', recipient: 'ou_stored' },
+  })
+
+  // Loading the plugin is the whole restart: the long connection comes back
+  // from what an earlier run persisted, and nothing offers a scan.
+  assert.equal(observed.started, 1, 'the long connection is back')
+  assert.equal(observed.registerAppCalls.length, 0, 'a restart must not start onboarding')
+  assert.ok(!infos.some(line => line.includes('请在手机上打开')), 'and must not print a link')
+
+  const snapshot = await state()
+  assert.deepEqual(snapshot.enrollment, { state: 'bound', recipient: 'ou_stored' })
+
+  // The restored recipient is where an escalation goes, with no further action.
+  const approval = listenerOf('approval/request')
+  const desktop = Promise.withResolvers()
+  const result = approval.handler(
+    { toolName: 'pwsh', signal: new AbortController().signal },
+    () => desktop.promise,
+  )
+  await sleep(1200)
+  assert.equal(observed.created.length, 1, 'the card reaches the phone after a restart')
+  assert.equal(observed.created[0].data.receive_id, 'ou_stored')
+  desktop.resolve('rejected')
+  assert.equal(await result, 'rejected')
+})
+
 
 test('binding walks unbound to awaiting to bound and exposes a QR', async () => {
   const { route, state } = await scaffold()

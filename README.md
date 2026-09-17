@@ -71,6 +71,8 @@ Restart `dsh web`, then open **Settings → Plugins → Plugin configuration →
 
 That is the whole setup. The Feishu app, its permissions, its long connection, and your recipient id come from the official one-click app creation flow ([OAuth 2.0 Device Authorization Grant](https://open.feishu.cn/document/mcp_open_tools/integrating-agents-with-feishu/overview)); the link is valid for 10 minutes and can be used once.
 
+**You scan once.** The app credentials and the bound recipient live in the credential store, so every later `dsh` start reconnects the long connection on its own — no card, no click. The scan is offered again only after **Unbind**, or from **Rebind**.
+
 To remove it:
 
 ```sh

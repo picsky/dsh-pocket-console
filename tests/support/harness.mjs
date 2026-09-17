@@ -10,6 +10,7 @@
 
 import assert from 'node:assert/strict'
 import { observed, resetObserved } from '@larksuiteoapi/node-sdk'
+import { credentialKey, credentialRef } from '@deepseek-ai/dsh-credentials'
 import * as Plugin from '../../index.js'
 
 const sleep = (milliseconds) => new Promise((resolve) => { setTimeout(resolve, milliseconds) })
@@ -78,9 +79,10 @@ function makeResponse() {
  * Build a fake Host context with in-memory credentials, records, a captured
  * route table, and a captured settings section; apply the plugin.
  * @param configOverrides - plugin config overrides.
- * @param host - which optional services this deployment composes.
+ * @param host - which optional services this deployment composes, and what the
+ *   credential store already holds from an earlier run.
  */
-async function scaffold(configOverrides = {}, { services = ['settings', 'webServer'] } = {}) {
+async function scaffold(configOverrides = {}, { services = ['settings', 'webServer'], stored = {} } = {}) {
   resetObserved()
   const config = Plugin.Config.resolve({
     channel: './providers/feishu.js',
@@ -97,6 +99,17 @@ async function scaffold(configOverrides = {}, { services = ['settings', 'webServ
   const routes = []
   const sections = new Map()
   const agents = new Map()
+
+  // A deployment that has already onboarded: the app credentials and the bound
+  // recipient are what an earlier run persisted.
+  if (stored.appId !== undefined) values.set(credentialRef('DSH_FEISHU_APP_ID'), stored.appId)
+  if (stored.appSecret !== undefined) values.set(credentialRef('DSH_FEISHU_APP_SECRET'), stored.appSecret)
+  if (stored.recipient !== undefined) {
+    records.set(credentialKey('pocket-console', 'recipient'), {
+      kind: 'grant',
+      payload: { id: stored.recipient },
+    })
+  }
 
   const webServer = {
     register(route) {

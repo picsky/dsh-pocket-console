@@ -212,18 +212,25 @@ export async function create({ ctx, config: rawConfig, binding, log }) {
   }
 
   /**
-   * Resolve stored credentials, or run the one-click creation flow.
-   * @returns the credentials to connect with.
+   * The credentials the store already holds, or undefined for a first run.
+   * @returns the stored app id and secret.
    */
-  const ensureCredentials = async (run) => {
+  const storedCredentials = async () => {
     const [storedId, storedSecret] = await Promise.all([
       ctx.credentials.resolve(appIdRef),
       ctx.credentials.resolve(appSecretRef),
     ])
-    if (storedId?.value !== undefined && storedSecret?.value !== undefined) {
-      return { appId: storedId.value, appSecret: storedSecret.value }
-    }
+    return storedId?.value !== undefined && storedSecret?.value !== undefined
+      ? { appId: storedId.value, appSecret: storedSecret.value }
+      : undefined
+  }
 
+  /**
+   * Create the application through the one-click flow and persist it.
+   * @param run - the generation that started this run.
+   * @returns the created credentials, whether or not they were persisted.
+   */
+  const createApplication = async (run) => {
     log.info('未找到飞书凭据，开始一键创建应用；请用飞书扫描或打开下面的链接。')
     const result = await Lark.registerApp({
       appPreset: { name: config.appName, desc: config.appDesc },
@@ -253,11 +260,23 @@ export async function create({ ctx, config: rawConfig, binding, log }) {
     return { appId: result.client_id, appSecret: result.client_secret }
   }
 
-  /** Connect the long connection once credentials are known. */
-  const connect = async (run) => {
+  /**
+   * Connect the long connection.
+   * @param run - the generation that owns this attempt.
+   * @param options - whether a run without stored credentials may create one.
+   * @returns whether a transport is connected.
+   */
+  const connect = async (run, { allowCreate = true } = {}) => {
+    const stored = await storedCredentials()
+    if (stored === undefined && !allowCreate) {
+      // Nothing to resume from. Onboarding belongs to the user's click, not to
+      // every boot, so this leaves the state alone instead of offering a scan.
+      enrollment = { state: 'unbound' }
+      return false
+    }
     enrollment = { state: 'starting' }
-    credentials = await ensureCredentials(run)
-    if (closed || run !== generation) return
+    credentials = stored ?? await createApplication(run)
+    if (closed || run !== generation) return false
     const options = {
       appId: credentials.appId,
       appSecret: credentials.appSecret,
@@ -269,6 +288,31 @@ export async function create({ ctx, config: rawConfig, binding, log }) {
     transport = { client, wsClient }
     enrollment = { state: 'bound', recipient: await binding.read() ?? null }
     log.info('飞书长连接已启动。')
+    return true
+  }
+
+  /**
+   * Reconnect from stored credentials without onboarding.
+   *
+   * Credentials and recipient are persisted, so a restart must not need the
+   * Settings card to deliver anything. A deployment with nothing stored stays
+   * unbound and is left to the card.
+   * @returns the enrollment state after the attempt.
+   */
+  const resume = async () => {
+    if (transport !== undefined || onboarding !== undefined) return enrollment
+    const run = generation
+    try {
+      await connect(run, { allowCreate: false })
+    } catch (error) {
+      if (run !== generation) return enrollment
+      enrollment = {
+        state: 'failed',
+        message: error instanceof Error ? error.message : String(error),
+      }
+      log.warn('飞书通道恢复失败；审批将只保留在桌面', error)
+    }
+    return enrollment
   }
 
   /**
@@ -310,6 +354,7 @@ export async function create({ ctx, config: rawConfig, binding, log }) {
     available: () => transport !== undefined,
     enrollmentState: () => enrollment,
     beginEnrollment,
+    resume,
     async clearEnrollment() {
       // Retire the running onboarding first: everything it would still write
       // belongs to an enrollment the user has just cancelled.

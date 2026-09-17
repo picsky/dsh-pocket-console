@@ -43,10 +43,15 @@ export async function create({ ctx, config, binding, log }) {
 | `enrollmentState()` | 同步返回当前状态：`{ state: 'unbound' \| 'starting' \| 'awaiting' \| 'bound' \| 'failed', recipient?, verifyUrl?, expiresIn?, message? }`。**不得包含任何密钥。** |
 | `beginEnrollment()` | 启动上手流程。必须**幂等**：设备授权轮询会比触发它的 HTTP 请求活得更久，进行中的那一轮要共享而不是每次重启。同步返回当前状态。 |
 | `clearEnrollment()` | 撤销绑定与凭据，回到 `unbound`。 |
+| `resume()` | **只用已存凭据重连**，不启动任何上手流程；没有凭据时保持 `unbound` 并返回当前状态。核心在插件加载时调用它，因为"重启后还要点一次绑定"不是用户该承担的事。 |
 
 核心不会自动启动上手，除非 `webServer` 缺席——那时没有卡片可以询问，
 核心会直接调用 `beginEnrollment()` 并把链接打进日志。
 **有界面时由用户在设置卡片里点按钮触发。**
+
+加载顺序是 `resume()` → 有界面则等待用户点按钮 → 无界面且仍未连接才 `beginEnrollment()`。
+所以一个已经绑定过的部署重启后应当**不打印任何链接、不需要点击**；`resume()` 里
+唯一允许的日志是失败时的警告。
 
 ## 视图（核心 → 通道）
 

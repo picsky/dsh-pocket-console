@@ -263,6 +263,15 @@ export async function apply(ctx, config) {
     log,
   })
 
+  // A restart must not need the Settings card. Credentials and recipient are
+  // persisted, so the channel reconnects from what it already holds; a channel
+  // without a resume path, or a deployment with nothing stored, is unaffected.
+  try {
+    await channel.resume?.()
+  } catch (error) {
+    log.warn('channel resume failed', error)
+  }
+
   /**
    * Effective user-tunable configuration. The composition entry is the base
    * layer; a mounted settings provider lets the Settings card override it at
