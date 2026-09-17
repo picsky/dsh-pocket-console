@@ -13,6 +13,10 @@ export const observed = {
   started: 0,
   closed: 0,
   registerAppCalls: [],
+  /** Set to make the next delivery fail with that message. */
+  failNextDelivery: undefined,
+  /** How many deliveries the platform refused. */
+  deliveryFailures: 0,
   /** Completes the pending `registerApp()` promise; set while it is pending. */
   completeRegisterApp: undefined,
   /** Rejects the pending `registerApp()` promise. */
@@ -27,6 +31,8 @@ export function resetObserved() {
   observed.started = 0
   observed.closed = 0
   observed.registerAppCalls.length = 0
+  observed.failNextDelivery = undefined
+  observed.deliveryFailures = 0
   observed.completeRegisterApp = undefined
   observed.failRegisterApp = undefined
 }
@@ -44,6 +50,14 @@ export class Client {
     this.im = {
       message: {
         create: async (request) => {
+          // A case can make the next delivery fail the way the platform refuses
+          // an oversized card, which is the only way to exercise the retry.
+          if (observed.failNextDelivery !== undefined) {
+            const message = observed.failNextDelivery
+            observed.failNextDelivery = undefined
+            observed.deliveryFailures += 1
+            throw new Error(message)
+          }
           observed.created.push(request)
           return { data: { message_id: `om_stub_${observed.created.length}` } }
         },

@@ -19,7 +19,6 @@
 #       channelConfig:
 #         domain: feishu
 #       delaySeconds: 600
-#       maxDetailChars: 1200
 #       titlePrefix: DSH
 #       resultNotify: idle
 #       resultNotifyCooldownSeconds: 600

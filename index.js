@@ -47,8 +47,6 @@ export const Config = z.object({
   channelConfig: z.any().default({}),
   /** Seconds the desktop GUI may answer before the channel is used. @default 120 */
   delaySeconds: z.natural().default(120),
-  /** Longest rendered reason or question detail, in characters. @default 1200 */
-  maxDetailChars: z.natural().default(1200),
   /** Title prefix identifying the deployment. @default 'DSH' */
   titlePrefix: z.string().default('DSH'),
   /**
@@ -97,8 +95,6 @@ const NAME = 'pocket-console'
 const SectionSchema = z.object({
   /** Seconds the desktop GUI may answer before the channel is used. */
   delaySeconds: z.natural().default(120),
-  /** Longest rendered reason or question detail, in characters. */
-  maxDetailChars: z.natural().default(1200),
   /** Title prefix identifying the deployment. */
   titlePrefix: z.string().default('DSH'),
   /** Whether a stopped session's answer is offered to the channel. */
@@ -171,7 +167,6 @@ export async function apply(ctx, config) {
    */
   const entry = Object.freeze({
     delaySeconds: config.delaySeconds,
-    maxDetailChars: config.maxDetailChars,
     titlePrefix: config.titlePrefix,
     resultNotify: config.resultNotify,
     resultNotifyCooldownSeconds: config.resultNotifyCooldownSeconds,

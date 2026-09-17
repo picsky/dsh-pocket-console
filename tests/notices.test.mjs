@@ -209,6 +209,29 @@ test('a notice you come back to later is still an offer', async () => {
   assert.equal(followed.length, 1, 'a late reply still reaches the session')
 })
 
+test('a long result is clipped so the notice still arrives', async () => {
+  const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle' })
+  await bind(route, { openId: 'ou_scanner' })
+  agents.set('s_big', { status: 'idle', followup: () => {} })
+  const emit = listenerOf('session/event').handler
+
+  runTurn(emit, 's_big', '结'.repeat(20000))
+  await sleep(1100)
+
+  // A result too large for a card would be refused, and the reader would get no
+  // notice at all — worse than a clipped one that says it clipped.
+  const content = observed.created[0].data.content
+  assert.ok(
+    Buffer.byteLength(content, 'utf8') < 12 * 1024,
+    `the notice stays well inside the platform limit: ${Buffer.byteLength(content, 'utf8')} bytes`,
+  )
+  assert.match(content, /内容过长已截断/)
+  assert.ok(
+    callbackValues(JSON.parse(content)).some(value => value.submit === true),
+    'and it still takes the next instruction',
+  )
+})
+
 test('the notice copy follows the deployment language', async () => {
   const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle', locale: 'en' })
   await bind(route, { openId: 'ou_scanner' })

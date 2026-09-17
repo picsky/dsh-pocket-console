@@ -163,14 +163,13 @@ Every value has a default, so the plugin works with no configuration. To tune it
     resultNotifyCooldownSeconds: 600
 ```
 
-Four settings are the **settings namespace**, changeable at runtime from the Settings card without a restart: `delaySeconds`, `maxDetailChars`, `titlePrefix`, and `resultNotify`. The rest of the table is deployment-level: they exist so a deployment can retune the transport, and a person never has to read about them. The phone card follows the interface language through `messages.js`; `locale` is the fallback for a deployment that never opens the Web UI.
+Three settings are the **settings namespace**, changeable at runtime from the Settings card without a restart: `delaySeconds`, `titlePrefix`, and `resultNotify`. The rest of the table is deployment-level: they exist so a deployment can retune the transport, and a person never has to read about them. The phone card follows the interface language through `messages.js`; `locale` is the fallback for a deployment that never opens the Web UI.
 
 | Field | Default | Meaning |
 |---|---|---|
 | `channel` | `dsh-pocket-console/providers/feishu.js` | Transport module |
 | `channelConfig` | `{}` | Transport-owned settings |
 | `delaySeconds` | `120` | How long the desktop GUI answers alone |
-| `maxDetailChars` | `1200` | Truncation bound for reasons and question detail |
 | `titlePrefix` | `DSH` | Card title prefix |
 | `resultNotify` | `off` | `idle` sends each stopped session's result to the phone |
 | `resultNotifyCooldownSeconds` | `600` | Shortest gap between two result notices for one session |
@@ -252,7 +251,7 @@ See [`providers/README.md`](providers/README.md) for the full contract. Candidat
 ## Limitations
 
 - **A phone answer needs an open desktop page to be mirrored there.** The browser half reads the pending interaction the page already has and applies the phone's answer to it, so the composer settles exactly as a click would. With no page open there is nothing to mirror — the answer still reaches the model, and the transcript shows it — but a page reloaded later never replays it, because a mirror is only honoured for a minute.
-- **Card text is truncated** at `maxDetailChars`; a `plan-review` plan can be long.
+- **Card text is bounded in bytes**, not characters: a card message may not exceed Feishu's 30 KB body limit, and a Chinese character costs three bytes, so the plugin keeps text under 9 KB (about 3000 characters) and says when it clipped. A `plan-review` plan longer than that arrives as its head, with the decision buttons still usable.
 - **A result notice does not revive a reclaimed session.** If the host has already let the agent go, the notice is skipped and logged instead of resuming the session.
 - **Long connections are limited to 50 per app and are not broadcast** — do not run several DSH instances against one Feishu app.
 - **The browser half has no build step**, so it is hand-written in the client module system's factory format and renders with plain React elements rather than the shared UI component library.

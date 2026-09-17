@@ -18,6 +18,7 @@
     "mirror.js",
     "escalation.js",
     "messages.js",
+    "budget.js",
     "providers/feishu.js",
     "providers/README.md",
     "cordis.patch.yml",

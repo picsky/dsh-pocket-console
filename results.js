@@ -16,6 +16,8 @@
  * @module pocket-console/results
  */
 
+import { CARD_TEXT_BUDGET, clipToBytes, looksLikeSizeRefusal } from './budget.js'
+
 /** Form field carrying the instruction typed on the phone. */
 const INSTRUCTION_FIELD = 'value'
 
@@ -98,7 +100,9 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
     }
 
     const id = noticeId()
-    const answer = track.message.text
+    // A long result would otherwise be refused by the platform and the notice
+    // would never arrive, which is worse than a clipped one that says so.
+    let answer = clipToBytes(track.message.text, messages().truncated)
     // One live notice per session: the newest result is the one worth replying
     // to, and an older card that still accepted a reply would inject an
     // instruction the reader wrote against a superseded answer.
@@ -114,7 +118,12 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
     track.ended = undefined
     track.sentAt = now()
     try {
-      const handle = await channel.deliver(view)
+      const handle = await channel.deliver(view).catch(async (error) => {
+        if (!looksLikeSizeRefusal(error)) throw error
+        log.debug('通知被判定为超出体积上限，按一半长度重投一次。')
+        answer = clipToBytes(track.message.text, messages().truncated, Math.floor(CARD_TEXT_BUDGET / 2))
+        return await channel.deliver({ ...view, body: [answer, messages().replyHint] })
+      })
       const notice = notices.get(id)
       if (notice !== undefined) notice.handle = handle
       log.info('结果已发送到手机。')

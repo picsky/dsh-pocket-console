@@ -160,6 +160,71 @@ test('a multi-select submission without typed text carries no custom answer', as
 })
 
 
+test('a card the platform refuses for size is retried smaller', async () => {
+  const { route, listenerOf } = await scaffold({ delaySeconds: 0 })
+  await bind(route, { openId: 'ou_scanner' })
+  const questions = listenerOf('user-questions/request')
+
+  // The budget keeps cards far inside the documented limit, but the real ceiling
+  // is documented outside this repository: a refusal costs one smaller retry.
+  observed.failNextDelivery = 'invalid request: card content is too large'
+
+  const desktop = Promise.withResolvers()
+  questions.handler({
+    questions: [{
+      id: 'plan',
+      question: '这份计划可以吗？',
+      detail: '细'.repeat(3000),
+      options: [{ label: '批准' }],
+    }],
+    signal: new AbortController().signal,
+  }, () => desktop.promise)
+  await sleep(120)
+
+  assert.equal(observed.deliveryFailures, 1, 'the first delivery was refused')
+  assert.equal(observed.created.length, 1, 'and the retry arrived')
+  const retried = observed.created[0].data.content
+  assert.match(retried, /内容过长已截断/, 'the retry carries the clipped text')
+  assert.ok(
+    callbackValues(JSON.parse(retried)).length > 0,
+    'and keeps the decision available',
+  )
+
+  desktop.resolve({ answers: [] })
+  await sleep(10)
+})
+
+test('a long detail is clipped to the card budget instead of being refused', async () => {
+  const { route, listenerOf } = await scaffold({ delaySeconds: 0 })
+  await bind(route, { openId: 'ou_scanner' })
+  const questions = listenerOf('user-questions/request')
+
+  const desktop = Promise.withResolvers()
+  questions.handler({
+    questions: [{
+      id: 'big',
+      question: '很长的一份计划，需要你决定？',
+      detail: '细'.repeat(20000),
+      options: [{ label: '批准' }],
+    }],
+    signal: new AbortController().signal,
+  }, () => desktop.promise)
+  await sleep(120)
+
+  // Feishu refuses a card body over 30 KB, so an unbounded plan would arrive as
+  // no card at all. The clip keeps the message deliverable and says it clipped.
+  const content = observed.created[0].data.content
+  assert.ok(
+    Buffer.byteLength(content, 'utf8') < 12 * 1024,
+    `the card stays well inside the platform limit: ${Buffer.byteLength(content, 'utf8')} bytes`,
+  )
+  assert.match(content, /内容过长已截断/, 'and it says so')
+  assert.ok(callbackValues(JSON.parse(content)).length > 0, 'while the decision stays available')
+
+  desktop.resolve({ answers: [] })
+  await sleep(10)
+})
+
 test('accepts a free-text form submission when the question offers no options', async () => {
   const { route, listenerOf } = await scaffold()
   await bind(route)

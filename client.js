@@ -36,7 +36,6 @@ window.__ModuleLoader__.load({
     /** Section fields this card edits, in render order. */
     const FIELDS = [
       { field: 'delaySeconds', kind: 'number' },
-      { field: 'maxDetailChars', kind: 'number' },
       { field: 'titlePrefix', kind: 'text' },
       { field: 'resultNotify', kind: 'select', options: ['off', 'idle'], labels: { off: 'resultNotifyOff', idle: 'resultNotifyIdle' } },
     ]
@@ -69,8 +68,6 @@ window.__ModuleLoader__.load({
         loading: '读取中…',
         delaySeconds: '桌面专享时间',
         delaySecondsHint: '桌面在这段时间内可以先答；超时后同一条请求才会发到手机。0 表示同时可答。',
-        maxDetailChars: '详情截断长度',
-        maxDetailCharsHint: '单条原因、问题细节或选项说明渲染到手机上的最大字符数。',
         titlePrefix: '标题前缀',
         titlePrefixHint: '手机消息标题的前缀，用来区分不同部署。',
         resultNotify: '结果通知',
@@ -116,8 +113,6 @@ window.__ModuleLoader__.load({
         loading: 'Loading…',
         delaySeconds: 'Desktop head start',
         delaySecondsHint: 'Seconds the desktop may answer before the same request is sent to the phone. 0 makes both answerable at once.',
-        maxDetailChars: 'Detail limit',
-        maxDetailCharsHint: 'Longest reason, question detail, or option description rendered on the phone.',
         titlePrefix: 'Title prefix',
         titlePrefixHint: 'Prefix on every phone message title, for telling deployments apart.',
         resultNotify: 'Result notices',
@@ -343,7 +338,6 @@ window.__ModuleLoader__.load({
         projection: () => ({
           shell: shell(),
           delaySeconds: fieldState('delaySeconds'),
-          maxDetailChars: fieldState('maxDetailChars'),
           titlePrefix: fieldState('titlePrefix'),
           resultNotify: fieldState('resultNotify'),
         }),

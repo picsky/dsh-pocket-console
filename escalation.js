@@ -13,6 +13,8 @@
  * @module pocket-console/escalation
  */
 
+import { CARD_TEXT_BUDGET, clipToBytes, looksLikeSizeRefusal } from './budget.js'
+
 import { randomUUID } from 'node:crypto'
 
 /** Approval outcome meaning "this one call may proceed". */
@@ -42,12 +44,12 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
    * @param value - untrusted text from the request.
    * @returns the text, truncated with a marker when it exceeded the bound.
    */
-  const clip = (value) => {
-    const flat = String(value ?? '')
-    return flat.length <= settings().maxDetailChars
-      ? flat
-      : `${flat.slice(0, settings().maxDetailChars)}\n${messages().truncated}`
-  }
+  /**
+   * Bound text to what one card may carry.
+   * @param value - untrusted text from the request.
+   * @returns the text, clipped with a marker when it did not fit.
+   */
+  const clip = (value, budget = CARD_TEXT_BUDGET) => clipToBytes(value, messages().truncated, budget)
 
   /** Whether this request can be fully answered from a channel message. */
   const escalatable = (kind, request) => {
@@ -64,13 +66,13 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
    * @param record - the live escalation.
    * @returns the view handed to the channel.
    */
-  const buildView = (record) => {
+  const buildView = (record, budget = CARD_TEXT_BUDGET) => {
     const copy = messages()
     if (record.kind === 'approval') {
       const { toolName, callId, reason } = record.request
       const body = [copy.toolLabel(toolName)]
       if (callId !== undefined) body.push(copy.callIdLabel(callId))
-      if (reason !== undefined && reason !== '') body.push(copy.reasonLabel(clip(reason)))
+      if (reason !== undefined && reason !== '') body.push(copy.reasonLabel(clip(reason, budget)))
       body.push(settings().delaySeconds === 0
         ? copy.approvalLive
         : copy.approvalUpgraded(settings().delaySeconds))
@@ -111,7 +113,7 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
       body.push([
         heading,
         question.question,
-        question.detail === undefined ? '' : clip(question.detail),
+        question.detail === undefined ? '' : clip(question.detail, budget),
       ].filter(Boolean).join('\n\n'))
 
       const options = question.options ?? []
@@ -121,7 +123,7 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
         body.push([copy.optionsLegend, ...options.map((option, index) => {
           const description = option.description === undefined || option.description === ''
             ? ''
-            : ` — ${clip(option.description)}`
+            : ` — ${clip(option.description, budget)}`
           return `${index + 1}. **${option.label}**${description}`
         })].join('\n'))
       }
@@ -240,7 +242,7 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
 
     record.timer = setTimeout(() => {
       record.timer = undefined
-      void Promise.resolve(channel.deliver(record.view)).then((handle) => {
+      void deliverCard(record).then((handle) => {
         record.handle = handle
         record.delivered = true
       }).catch((error) => {
@@ -259,6 +261,26 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
       }),
       record.settle.promise,
     ])
+  }
+
+  /**
+   * Deliver one request's card, retrying once with half the text when the platform
+   * refuses it for size.
+   *
+   * The budget is chosen to stay far inside the platform's limit, but that limit
+   * is documented outside this repository; the retry is what keeps a card arriving
+   * even if the real ceiling is lower than the documentation says.
+   * @param record - the escalation whose card is being delivered.
+   * @returns the delivered message handle.
+   */
+  async function deliverCard(record) {
+    try {
+      return await channel.deliver(record.view)
+    } catch (error) {
+      if (!looksLikeSizeRefusal(error)) throw error
+      log.debug('卡片被判定为超出体积上限，按一半长度重投一次。')
+      return await channel.deliver(buildView(record, Math.floor(CARD_TEXT_BUDGET / 2)))
+    }
   }
 
   /** Answer one approval from an action payload. */
