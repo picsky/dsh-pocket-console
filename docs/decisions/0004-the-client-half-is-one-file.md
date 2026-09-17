@@ -22,5 +22,10 @@ it is a build step, which [0001](0001-no-build-step.md) rules out.
   different sides of the wire (the Host's `escalation.js` and `mirror.js` have no
   browser counterpart in the bundle).
 - The card's copy is bilingual through a dictionary in this file; the phone card's
-  copy is still Chinese-only, which a `messages.js` dictionary on the Host side
-  would fix.
+  copy comes from the Host's `messages.js`, chosen by the `locale` setting.
+- The card's state store is fifteen hand-written lines rather than
+  `createSnapshotStore` from the shell-seeded `@deepseek-ai/dsh-client-store`. The
+  shell does seed that module, but the export surface of the *installed* release
+  cannot be checked from this repository, and the browser half has no test that
+  would catch a wrong name — so the swap waits until the GUI itself is exercised,
+  rather than trading fifteen lines for an unverifiable regression.

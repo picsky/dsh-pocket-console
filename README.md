@@ -73,6 +73,8 @@ That is the whole setup. The Feishu app, its permissions, its long connection, a
 
 **You scan once.** The app credentials and the bound recipient live in the credential store, so every later `dsh` start reconnects the long connection on its own — no card, no click. The scan is offered again only after **Unbind**, or from **Rebind**.
 
+Releases are tag-driven and publish through npm trusted publishing; [docs/releasing.md](docs/releasing.md) covers the one-time npm setup and what a release verifies.
+
 To remove it:
 
 ```sh

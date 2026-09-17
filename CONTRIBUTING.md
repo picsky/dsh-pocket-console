@@ -51,6 +51,11 @@ job.
 
 ## Publishing
 
+See [docs/releasing.md](docs/releasing.md) for the tag-driven release, the one-time
+trusted-publisher setup on npm, and what the workflow checks before it publishes.
+
+The short version:
+
 The published tarball must carry every runtime library inside it. `package.json`'s
 `bundleDependencies` embeds `@larksuiteoapi/node-sdk` — and through it
 `protobufjs`, `axios`, and `ws` — and `qrcode` as well, so a consumer's profile resolves nothing that

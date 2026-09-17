@@ -36,11 +36,27 @@ jobs:
       - name: npm must be new enough for a trusted publisher
         run: |
           node -e "const v = require('node:child_process').execSync('npm -v').toString().trim(); const [major, minor] = v.split('.').map(Number); console.log('npm', v); if (major < 11 || (major === 11 && minor < 5)) { console.error('npm ' + v + ' cannot publish through a trusted publisher (needs >= 11.5.1)'); process.exit(1) }"
-      - name: The tag must name the version being published
-        if: github.ref_type == 'tag'
+      # A manual run exists to retry a tag, not to publish whatever a branch
+      # happens to hold, so both entries land on the same requirement.
+      - name: The run must be the tag it publishes
         run: |
-          node -e "const version = require('./package.json').version; const tag = process.env.GITHUB_REF_NAME.replace(/^v/, ''); if (version !== tag) { console.error('tag ' + process.env.GITHUB_REF_NAME + ' does not name version ' + version); process.exit(1) } console.log('tag names version', version)"
-      - run: pnpm test
-      # `prepack` refuses a tarball that lost its bundled transport, so what
-      # npm publishes carries it and a consumer's profile needs no build permission.
-      - run: npm publish
+          node -e "
+          const version = require('./package.json').version;
+          if (process.env.GITHUB_REF_TYPE !== 'tag') {
+            console.error('run this from a tag (v' + version + '), not from a branch');
+            process.exit(1);
+          }
+          const tag = process.env.GITHUB_REF_NAME;
+          if ('v' + version !== tag) {
+            console.error('tag ' + tag + ' does not name version ' + version);
+            process.exit(1);
+          }
+          console.log('tag names version', version);
+          "
+      # One setting lives in five places; publishing a disagreeing tree would ship
+      # the disagreement to every deployment.
+      - run: npm run check:parity
+      - run: npm test
+      # `prepack` refuses a tarball that lost a bundled library or would close
+      # over a module `files` does not publish, so what npm receives can start.
+      - run: npm publish --provenance
