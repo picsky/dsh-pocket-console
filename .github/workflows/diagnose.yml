@@ -1,0 +1,69 @@
+name: Diagnose publish
+
+# Temporary: finds out where `npm publish --provenance` dies on this tree. It never
+# publishes anything — every npm command is a dry run or a local pack — and it prints
+# npm's own debug log, which is the one artefact a failed publish leaves behind and
+# which is destroyed with the runner.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: where does npm die
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - run: pnpm install
+      - name: versions
+        run: |
+          node -v
+          npm -v
+          pnpm -v
+          echo "registry: $(npm config get registry)"
+      - name: every npm command, and what it exited with
+        run: |
+          set +e
+          for probe in \
+            "npm pack --dry-run" \
+            "npm pack" \
+            "npm publish --dry-run" \
+            "npm publish --dry-run --provenance"
+          do
+            echo "=================== $probe"
+            $probe > /tmp/probe.log 2>&1
+            echo "exit: $?"
+            tail -n 25 /tmp/probe.log
+          done
+          echo "=================== pnpm pack"
+          pnpm pack > /tmp/pnpm.log 2>&1
+          echo "exit: $?"
+          tail -n 5 /tmp/pnpm.log
+      - name: what the two tarballs actually contain
+        run: |
+          for tgz in *.tgz; do
+            [ -e "$tgz" ] || continue
+            echo "=== $tgz"
+            echo "files: $(tar -tzf "$tgz" | wc -l)"
+            echo "hard-link entries: $(tar -tvf "$tgz" | grep -c '^h' || true)"
+          done
+      - name: npm's own debug log
+        if: always()
+        run: |
+          for log in /home/runner/.npm/_logs/*.log; do
+            [ -e "$log" ] || continue
+            echo "=================== $log"
+            tail -n 60 "$log"
+          done
