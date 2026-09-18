@@ -109,6 +109,11 @@ const zh = {
   logNoticeSendFailed: '结果发送失败',
   logNoticeCardFailed: '结果卡片改写失败',
   logNoticeRetired: headline => `结果通知失效：${headline}`,
+  logNoticeStoreUnavailable: '结果通知的持久存储不可用，重启后这些通知将不再有效。',
+  logNoticeStoreWriteFailed: '结果通知的持久记录读写失败',
+  logNoticeStoreReadFailed: '读取会话日志以核对结果通知失败',
+  logNoticeRestoreFailed: '恢复上次运行的结果通知失败',
+  logNoticeRestored: count => `已恢复 ${count} 条上次运行的结果通知，仍可回复。`,
   logInstructionQueued: '已把手机上的指令排入会话。',
   logInstructionFailed: '指令注入失败',
 }
@@ -197,6 +202,11 @@ const en = {
   logNoticeSendFailed: 'sending the result failed',
   logNoticeCardFailed: 'rewriting the result card failed',
   logNoticeRetired: headline => `result notice retired: ${headline}`,
+  logNoticeStoreUnavailable: 'durable storage for result notices is unavailable; after a restart these notices will no longer be valid.',
+  logNoticeStoreWriteFailed: 'reading or writing a notice record failed',
+  logNoticeStoreReadFailed: 'reading the session log to check a result notice failed',
+  logNoticeRestoreFailed: 'restoring the result notices from the last run failed',
+  logNoticeRestored: count => `restored ${count} result notice(s) from the last run; they still take a reply.`,
   logInstructionQueued: 'the instruction from the phone was queued for the session.',
   logInstructionFailed: 'injecting the instruction failed',
 }

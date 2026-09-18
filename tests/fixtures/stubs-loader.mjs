@@ -2,7 +2,7 @@
  * Module resolution hook for the test suite.
  *
  * The plugin imports its production dependencies by bare specifier. The suite
- * replaces five of them with in-repo stubs so it can run with nothing
+ * replaces seven of them with in-repo stubs so it can run with nothing
  * installed, no credentials, and no network — and so the plugin itself needs no
  * test-only seam.
  *
@@ -17,7 +17,9 @@ const STUBS = new Map([
   ['@deepseek-ai/dsh-credentials', './stubs/credentials.mjs'],
   ['@deepseek-ai/dsh-llm', './stubs/llm.mjs'],
   ['@deepseek-ai/schemastery', './stubs/schemastery.mjs'],
+  ['@deepseek-ai/dsh-storage-domain', './stubs/storage-domain.mjs'],
   ['qrcode', './stubs/qrcode.mjs'],
+  ['zod', './stubs/zod.mjs'],
 ])
 
 /**

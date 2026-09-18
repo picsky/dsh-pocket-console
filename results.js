@@ -17,6 +17,7 @@
  */
 
 import { CARD_TEXT_BUDGET, clipToBytes, looksLikeSizeRefusal } from './budget.js'
+import { RESTORE_LIMIT, createNoticeStore } from './notice-store.js'
 
 import { randomUUID } from 'node:crypto'
 
@@ -46,7 +47,10 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
   const tracks = new Map()
   /** Notices whose rid is still live, keyed by that rid. */
   const notices = new Map()
-  let installed = false
+  /** Where those notices are remembered between runs. */
+  const store = createNoticeStore({ ctx, log, messages })
+  /** Set while the notifier is unloaded: a restore in flight must not outlive it. */
+  let disposed = false
 
   /**
    * One session's observation state.
@@ -89,7 +93,7 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
    * of turns collapses into one notice after the last one stops.
    */
   const arm = (session) => {
-    if (!installed) return
+    if (disposed) return
     const track = trackOf(session)
     if (track.timer !== undefined) clearTimeout(track.timer)
     track.timer = setTimeout(() => {
@@ -155,13 +159,137 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
       const notice = notices.get(id)
       if (notice !== undefined) notice.handle = handle
       log.info(messages().logNoticeSent)
+      // Remembered only now: a card that never arrived has nothing to put back, and the
+      // session's last seq is what a later run compares against to see whether the
+      // session moved on while this process was not there to notice.
+      void store.put({
+        rid: id,
+        session,
+        handle,
+        seq: await sessionSeq(session),
+        sentAt: track.sentAt,
+      })
     } catch (error) {
       notices.delete(id)
       log.warn(messages().logNoticeSendFailed, error)
     }
   }
 
-  /** Record one notice; the map is the rid's whole validity window. */
+  /**
+   * One session's last event seq, or undefined when it cannot be read.
+   *
+   * Recorded with a notice so that a later process can ask whether a person has spoken
+   * since — the one rule that cannot be re-applied from memory after a restart, because
+   * what happened while the process was down left no trace in it.
+   * @param session - the session the notice reports on.
+   * @returns the highest captured seq, or undefined.
+   */
+  async function sessionSeq(session) {
+    const query = ctx.get?.('sessionQuery')
+    if (query === undefined || typeof query.readSurface !== 'function') return undefined
+    try {
+      const surface = await query.readSurface(session)
+      const seq = surface?.capturedThroughSeq
+      return typeof seq === 'number' ? seq : undefined
+    } catch (error) {
+      log.warn(messages().logNoticeStoreReadFailed, error)
+      return undefined
+    }
+  }
+
+  /**
+   * Whether a person has spoken in one session since the notice went out.
+   *
+   * The live path learns this from the event stream; a process that starts later cannot,
+   * so it asks the session's own log. Only `user/message` counts, because a session
+   * writes other events of its own accord — a generated title, for one — and retiring a
+   * notice over those would take away a card nothing had actually superseded.
+   * @param session - the session the notice reports on.
+   * @param seq - the session's last event when the notice went out.
+   * @returns true, false, or undefined when there is no way to tell.
+   */
+  async function spokeSince(session, seq) {
+    const query = ctx.get?.('sessionQuery')
+    if (query === undefined || typeof query.filterEvents !== 'function') return undefined
+    try {
+      const found = await query.filterEvents(session, [
+        { kind: 'seq', from: seq + 1 },
+        { kind: 'type', values: ['user/message'] },
+      ])
+      return Array.isArray(found) && found.length > 0
+    } catch (error) {
+      log.warn(messages().logNoticeStoreReadFailed, error)
+      return undefined
+    }
+  }
+
+  /**
+   * Whether one session still exists at all, live or only persisted.
+   *
+   * A session is not gone because it has no live agent: a restart leaves every session
+   * dormant, and the Web client resumes one when it is opened. So the question is asked
+   * of the durable corpus, not of the live registry — asking the registry would retire a
+   * notice for an ordinary restart, which is the bug this whole path exists to fix.
+   * @param session - the session the notice reports on.
+   * @returns true, false, or undefined when there is no way to tell.
+   */
+  async function sessionExists(session) {
+    const query = ctx.get?.('sessionQuery')
+    if (query === undefined || typeof query.filterSessions !== 'function') return undefined
+    try {
+      const found = await query.filterSessions([{ kind: 'id', values: [session] }])
+      return Array.isArray(found) && found.length > 0
+    } catch (error) {
+      log.warn(messages().logNoticeStoreReadFailed, error)
+      return undefined
+    }
+  }
+
+  /**
+   * Put back the notices that were live before this process started.
+   *
+   * A notice is an offer with no time limit, so a restart must not quietly withdraw it —
+   * that is what it did while the registry was memory only, and the card blamed an
+   * expiry that never happened. Each restored notice is re-checked against the same
+   * rules instead: the session may have been deleted, or it may have moved on while this
+   * process was not running to see it. With no way to tell, the notice stands, which is
+   * what the documented promise says it does.
+   *
+   * A restored notice whose session is merely dormant stays replyable: the reply needs a
+   * live agent, and the live path already refuses one honestly until the session is
+   * resumed — by the desk, which is where the session belongs.
+   */
+  async function restore() {
+    const stored = await store.open()
+    if (stored.length === 0) return
+    let kept = 0
+    for (const record of stored) {
+      if (disposed) return
+      if (await sessionExists(record.session) === false) {
+        // The session itself is gone, so there is nothing left to instruct.
+        retract(record.handle, messages().noticeGone)
+        void store.remove(record.rid)
+        continue
+      }
+      if (kept >= RESTORE_LIMIT) {
+        // More outstanding notices than a reader could act on: the oldest are retired
+        // rather than left as a growing pile of cards that all claim to be live.
+        retract(record.handle, messages().superseded)
+        void store.remove(record.rid)
+        continue
+      }
+      if (record.seq !== undefined && await spokeSince(record.session, record.seq) === true) {
+        retract(record.handle, messages().readerSpoke)
+        void store.remove(record.rid)
+        continue
+      }
+      noticeSet(record.rid, { session: record.session, handle: record.handle })
+      kept += 1
+    }
+    if (kept > 0) log.info(messages().logNoticeRestored(kept))
+  }
+
+  /** Record one notice; the map is the rid's validity window for this run. */
   function noticeSet(id, notice) {
     notices.set(id, notice)
   }
@@ -182,6 +310,9 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
     for (const [id, notice] of [...notices]) {
       if (String(notice.session) !== String(session)) continue
       notices.delete(id)
+      // Forgotten durably as well: a retired notice must not come back to life when the
+      // next run reads the store, and its rid must never be replyable again.
+      void store.remove(id)
       retired += 1
       if (notice.handle === undefined) continue
       retract(notice.handle, headline)
@@ -286,8 +417,10 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
     if (agent === undefined) {
       return { toast: messages().noAgent, accepted: false }
     }
-    // Claim before sending: the first submission wins and the rid dies here.
+    // Claim before sending: the first submission wins and the rid dies here — durably
+    // too, so that no later run can put the card back and take the reply twice.
     notices.delete(id)
+    void store.remove(id)
     void send(agent, text, notice)
     return { toast: messages().sent, accepted: true }
   }
@@ -329,18 +462,29 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
      * @returns the disposer removing the listener.
      */
     install() {
-      installed = true
+      disposed = false
       const off = ctx.on('session/event', onEvent)
       return () => {
-        installed = false
+        disposed = true
         off()
         for (const track of tracks.values()) {
           if (track.timer !== undefined) clearTimeout(track.timer)
         }
         tracks.clear()
+        // Only the in-memory half: what the store holds is what the *next* run reads,
+        // and unloading a plugin is not the reader withdrawing their result.
         notices.clear()
+        void store.close()
       }
     },
+    /**
+     * Bring back the notices from the previous run.
+     *
+     * Called by the plugin once the storage service is up rather than from `install()`:
+     * a restore that ran first would find nothing and quietly leave the promise broken.
+     * @returns resolution once every stored notice has been restored or retired.
+     */
+    restore,
     /**
      * Route one phone action to a live notice.
      * @param payload - the echoed payload.

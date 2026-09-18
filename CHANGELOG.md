@@ -21,6 +21,15 @@ out when it does.
 
 ### Fixed
 
+- **A result notice died with the process that sent it.** Live notices were held in memory, so
+  restarting dsh withdrew every outstanding one and the card blamed an expiry that never
+  happened — a notice is documented as having no time limit, and coming back to it later is the
+  feature. They are kept in the durable storage hub now, and a restart re-applies the rules that
+  actually retire one: the session may have been deleted, or somebody may have spoken in it while
+  dsh was down, which is settled against the session's own log rather than assumed. A notice
+  answered before the restart is not offered again — the record is deleted the moment the rid is
+  used (`notice-store.js`, `results.js`). See
+  [0013](docs/decisions/0013-a-notice-is-remembered.md).
 - **A card whose request no longer existed stayed answerable.** Live requests are held in
   memory, so after a restart — or a crash — the card on the phone had nothing behind it:
   pressing a button produced a toast saying the request was gone and the card went on offering

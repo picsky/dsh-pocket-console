@@ -14,6 +14,7 @@
     "index.js",
     "client.js",
     "results.js",
+    "notice-store.js",
     "routes.js",
     "mirror.js",
     "escalation.js",
@@ -98,7 +99,9 @@
     "@deepseek-ai/cordis": "*",
     "@deepseek-ai/dsh-credentials": "*",
     "@deepseek-ai/dsh-llm": "*",
-    "@deepseek-ai/schemastery": "*"
+    "@deepseek-ai/dsh-storage-domain": "*",
+    "@deepseek-ai/schemastery": "*",
+    "zod": "*"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {
@@ -110,7 +113,13 @@
     "@deepseek-ai/dsh-llm": {
       "optional": true
     },
+    "@deepseek-ai/dsh-storage-domain": {
+      "optional": true
+    },
     "@deepseek-ai/schemastery": {
+      "optional": true
+    },
+    "zod": {
       "optional": true
     }
   },

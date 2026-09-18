@@ -17,3 +17,4 @@ code. A change that contradicts a record here needs a new record, not a quiet ed
 | [0010](0010-the-channel-names-its-own-controls.md) | The channel names its own card controls and reports the mapping, because a card may not repeat a name |
 | [0011](0011-one-question-per-card.md) | One question per card, and the card steps to the next as each is answered |
 | [0012](0012-the-desktop-composer-steps-without-the-phone.md) | The desktop composer cannot be advanced per question, and the phone does not try |
+| [0013](0013-a-notice-is-remembered.md) | A live notice is kept in durable storage, so a restart re-applies the rules instead of ending them |

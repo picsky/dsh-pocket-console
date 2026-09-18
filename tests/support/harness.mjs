@@ -11,6 +11,7 @@
 import assert from 'node:assert/strict'
 import { observed, resetObserved } from '@larksuiteoapi/node-sdk'
 import { credentialKey, credentialRef } from '@deepseek-ai/dsh-credentials'
+import { createStorageDomain, resetDurable } from '@deepseek-ai/dsh-storage-domain'
 import * as Plugin from '../../index.js'
 
 const sleep = (milliseconds) => new Promise((resolve) => { setTimeout(resolve, milliseconds) })
@@ -109,21 +110,34 @@ function makeResponse() {
 }
 
 /**
+ * The fake session log as it outlives a process: which sessions exist, and where a
+ * person has spoken in each. Durable like the storage medium, and reset with it.
+ */
+const corpus = new Map()
+
+/**
  * Build a fake Host context with in-memory credentials, records, a captured
  * route table, and a captured settings section; apply the plugin.
  * @param configOverrides - plugin config overrides.
  * @param host - which optional services this deployment composes, what the
  *   credential store already holds from an earlier run, whether that store refuses
- *   writes (the environment layer shadows the reference), and what the platform
- *   answers when the stored pair is checked at load.
- */
-async function scaffold(configOverrides = {}, {
-  services = ['settings', 'webServer'],
+ *   writes (the environment layer shadows the reference), what the platform
+ *   answers when the stored pair is checked at load, and whether the durable
+ *   medium survives from the previous scaffold (a restart).
+ */async function scaffold(configOverrides = {}, {
+  services = ['settings', 'webServer', 'storageDomain', 'sessionQuery'],
   stored = {},
   refuseWrites = false,
   tenantToken,
+  keepDurable = false,
 } = {}) {
   resetObserved()
+  // The durable medium — the storage hub and the session logs — is what a restart does
+  // not take with it, so a case modelling one keeps it and every other case starts clean.
+  if (!keepDurable) {
+    resetDurable()
+    corpus.clear()
+  }
   if (tenantToken !== undefined) observed.tenantToken = tenantToken
   const config = Plugin.Config.resolve({
     channel: './providers/feishu.js',
@@ -141,6 +155,62 @@ async function scaffold(configOverrides = {}, {
   const routes = []
   const sections = new Map()
   const agents = new Map()
+  const storageDomain = createStorageDomain()
+  /** The session log as the query service reports it; durable, so declared above. */
+  const sessionQuery = {
+    /**
+     * Note that a session exists, with the highest seq its log has reached.
+     * @param session - the session id.
+     * @param lastSeq - the highest event seq, defaulting to 1 for a session with a log.
+     */
+    exists(session, lastSeq = 1) {
+      const entry = corpus.get(session) ?? { lastSeq: 0, spokeAt: [] }
+      entry.lastSeq = Math.max(entry.lastSeq, lastSeq)
+      corpus.set(session, entry)
+      return entry
+    },
+    /**
+     * Note that a person spoke in one session, which is what retires a notice.
+     * @param session - the session id.
+     * @param seq - the seq the person's message landed at.
+     */
+    personSpoke(session, seq) {
+      const entry = this.exists(session, seq)
+      entry.spokeAt.push(seq)
+      return entry
+    },
+    /** Every session's highest seq, for a notice to record when it goes out. */
+    async readSurface(session) {
+      const entry = corpus.get(session)
+      return { capturedThroughSeq: entry === undefined ? null : entry.lastSeq }
+    },
+    /**
+     * The events matching every filter, with only the two filters this plugin uses
+     * implemented: a seq floor and an event type.
+     * @param session - the session to scan.
+     * @param filters - the ANDed filters.
+     * @returns the matching records, in seq order.
+     */
+    async filterEvents(session, filters) {
+      const from = filters.find(filter => filter.kind === 'seq')?.from ?? 0
+      const types = filters.find(filter => filter.kind === 'type')?.values ?? []
+      const wanted = types.includes('user/message')
+      const entry = corpus.get(session)
+      if (entry === undefined || !wanted) return []
+      return entry.spokeAt
+        .filter(seq => seq >= from)
+        .map(seq => ({ sessionId: session, seq, type: 'user/message', time: 0, surface: 'current' }))
+    },
+    /**
+     * The sessions matching every filter, with the id filter this plugin uses.
+     * @param filters - the ANDed filters.
+     * @returns one record per matching session.
+     */
+    async filterSessions(filters) {
+      const ids = new Set(filters.flatMap(filter => (filter.kind === 'id' ? [...filter.values] : [])))
+      return [...ids].filter(id => corpus.has(id)).map(id => ({ session: { id }, live: false, persisted: true }))
+    },
+  }
 
   // A deployment that has already onboarded: the app credentials and the bound
   // recipient are what an earlier run persisted.
@@ -245,6 +315,8 @@ async function scaffold(configOverrides = {}, {
       if (!composed.has(name)) return undefined
       if (name === 'webServer') return webServer
       if (name === 'settings') return settings
+      if (name === 'storageDomain') return storageDomain
+      if (name === 'sessionQuery') return sessionQuery
       // The browser surface's trust fence: present in a GUI deployment, and the
       // routes must ask it before answering anything.
       if (name === 'connection') return { requestRejection: () => rejection }
@@ -307,6 +379,7 @@ async function scaffold(configOverrides = {}, {
     bound, setRejection: (status) => { rejection = status },
     config, ctx, listeners, disposers, warnings, infos, debugs, values, records,
     routes, sections, route, json, state, listenerOf, compose, agents,
+    sessionQuery, storageDomain,
   }
 }
 

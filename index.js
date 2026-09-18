@@ -286,6 +286,13 @@ export async function apply(ctx, config) {
     )
   })
 
+  // The notices from the previous run come back when the durable storage that holds them
+  // is up. Waiting for the service is the point: a restore that ran before it existed
+  // would find nothing and leave the card blaming an expiry that never happened.
+  ctx.inject(['storageDomain'], () => {
+    void results.restore().catch(error => { log.warn(messages().logNoticeRestoreFailed, error) })
+  })
+
   ctx.effect(() => {
     const offApproval = ctx.on(
       'approval/request',

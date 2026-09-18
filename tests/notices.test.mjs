@@ -288,12 +288,13 @@ test('the deployment log follows the deployment language too', async () => {
 })
 
 
-test('a notice card whose process is gone stops taking a reply', async () => {
-  // Notices live in memory too, so after a restart the card still invited an instruction
-  // and answering it produced a toast and nothing else. The press names its message, so
-  // the card is rewritten to stop offering the reply.
+test('without durable storage a notice is still refused after a restart', async () => {
+  // The medium is what carries a notice across a restart, so a deployment that composes
+  // no storage hub keeps the old behaviour — and a press still retires the card rather
+  // than answering with a toast alone.
   const stored = { appId: 'cli_stored', appSecret: 'secret_stored', recipient: 'ou_stored' }
-  const first = await scaffold({ resultNotify: 'idle' }, { stored })
+  const services = ['settings', 'webServer']
+  const first = await scaffold({ resultNotify: 'idle' }, { stored, services })
   first.agents.set('s_1', { status: 'idle', followup: () => {} })
   runTurn(first.listenerOf('session/event').handler, 's_1')
   await sleep(1100)
@@ -303,7 +304,7 @@ test('a notice card whose process is gone stops taking a reply', async () => {
   const [answer] = controlNames(card)
 
   // The restart: the same deployment loads again with no notice behind it.
-  await scaffold({ resultNotify: 'idle' }, { stored })
+  await scaffold({ resultNotify: 'idle' }, { stored, services })
 
   const refused = await clickCard(submit, { [answer]: '接着做' })
   assert.equal(refused.toast.type, 'warning', 'the reply is refused')
@@ -313,6 +314,115 @@ test('a notice card whose process is gone stops taking a reply', async () => {
   const dead = JSON.parse(observed.patched.at(-1).data.content)
   assert.match(JSON.stringify(dead), /该结果已过期/, 'the card says the notice is over')
   assert.deepEqual(callbackValues(dead), [], 'and offers nothing left to reply with')
+})
+
+
+test('a notice survives a restart and still takes a reply', async () => {
+  // A notice keeps taking replies until the session it reports on moves on, with no time
+  // limit. The registry that decided that lived only in memory, so an ordinary restart
+  // withdrew every outstanding notice and the card blamed an expiry that never happened.
+  const stored = { appId: 'cli_stored', appSecret: 'secret_stored', recipient: 'ou_stored' }
+  const first = await scaffold({ resultNotify: 'idle' }, { stored })
+  first.sessionQuery.exists('s_1', 5)
+  first.agents.set('s_1', { status: 'idle', followup: () => {} })
+  runTurn(first.listenerOf('session/event').handler, 's_1')
+  await sleep(1100)
+
+  const card = sentCard()
+  const submit = callbackValues(card).find(value => value.submit === true)
+  const [answer] = controlNames(card)
+
+  // The restart: same deployment and same durable medium. A session comes back dormant —
+  // a restart leaves no agent running — which is a state the live path already answers
+  // honestly, so it must not be mistaken for the session being gone.
+  const second = await scaffold({ resultNotify: 'idle' }, { stored, keepDurable: true })
+  assert.equal(second.agents.size, 0, 'a restart leaves no agent running')
+  const dormant = await clickCard(submit, { [answer]: '先试一下' })
+  assert.match(dormant.toast.content, /会话已不在运行/, 'a dormant session is named as such')
+  assert.equal(dormant.toast.content.includes('已过期'), false, 'not as an expired result')
+
+  // The desk opens the session again, which is what gives it a live agent.
+  const followed = []
+  second.agents.set('s_1', { status: 'idle', followup: (message) => { followed.push(message) } })
+  await sleep(30)
+
+  const accepted = await clickCard(submit, { [answer]: '接着把文档补上' })
+  assert.equal(accepted.toast.content, '已发送给 agent', 'the reply is taken after a restart')
+  await sleep(10)
+  assert.equal(followed.length, 1, 'and it reaches the session')
+  assert.equal(followed[0].content[0].text, '接着把文档补上')
+})
+
+
+test('a notice whose session moved on while the process was down is retired', async () => {
+  // What happens while DSH is not running leaves no trace in it, so the rule cannot be
+  // read off an event stream — it is asked of the session's own log, and the card gets
+  // the same reason the live path would have given it.
+  const stored = { appId: 'cli_stored', appSecret: 'secret_stored', recipient: 'ou_stored' }
+  const first = await scaffold({ resultNotify: 'idle' }, { stored })
+  first.sessionQuery.exists('s_1', 5)
+  first.agents.set('s_1', { status: 'idle', followup: () => {} })
+  runTurn(first.listenerOf('session/event').handler, 's_1')
+  await sleep(1100)
+  const submit = callbackValues(sentCard()).find(value => value.submit === true)
+
+  // Somebody speaks at seq 9, after the notice went out at seq 5 — while nothing is
+  // running to see it, which is the whole reason the question is asked of the log.
+  first.sessionQuery.personSpoke('s_1', 9)
+  const second = await scaffold({ resultNotify: 'idle' }, { stored, keepDurable: true })
+  assert.equal(second.agents.size, 0, 'nothing is running after the restart')
+  await sleep(40)
+
+  const retired = JSON.parse(observed.patched.at(-1).data.content)
+  assert.match(JSON.stringify(retired), /该结果已有新消息/, 'the card says the session moved on')
+  assert.deepEqual(callbackValues(retired), [], 'and it stops offering the reply')
+})
+
+
+test('a notice whose session is gone is retired, not left waiting', async () => {
+  const stored = { appId: 'cli_stored', appSecret: 'secret_stored', recipient: 'ou_stored' }
+  const first = await scaffold({ resultNotify: 'idle' }, { stored })
+  first.agents.set('s_gone', { status: 'idle', followup: () => {} })
+  runTurn(first.listenerOf('session/event').handler, 's_gone')
+  await sleep(1100)
+  assert.equal(observed.created.length, 1, 'the notice went out')
+
+  // The session itself is gone from the durable corpus, so there is nothing to instruct.
+  const second = await scaffold({ resultNotify: 'idle' }, { stored, keepDurable: true })
+  await sleep(40)
+
+  const retired = JSON.parse(observed.patched.at(-1).data.content)
+  assert.match(JSON.stringify(retired), /该结果已过期/, 'the card says the result is over')
+  assert.deepEqual(callbackValues(retired), [], 'and offers nothing left to reply with')
+})
+
+
+test('a notice answered before a restart is not offered again by it', async () => {
+  // The rid is single use, and a single use that a restart undoes would be no use at all.
+  const stored = { appId: 'cli_stored', appSecret: 'secret_stored', recipient: 'ou_stored' }
+  const first = await scaffold({ resultNotify: 'idle' }, { stored })
+  first.sessionQuery.exists('s_1', 5)
+  const followed = []
+  first.agents.set('s_1', { status: 'idle', followup: (message) => { followed.push(message) } })
+  runTurn(first.listenerOf('session/event').handler, 's_1')
+  await sleep(1100)
+
+  const card = sentCard()
+  const submit = callbackValues(card).find(value => value.submit === true)
+  const [answer] = controlNames(card)
+  await clickCard(submit, { [answer]: '按第一轮来' })
+  await sleep(10)
+  assert.equal(followed.length, 1, 'the reply was taken')
+
+  const second = await scaffold({ resultNotify: 'idle' }, { stored, keepDurable: true })
+  second.sessionQuery.exists('s_1', 9)
+  second.agents.set('s_1', { status: 'idle', followup: (message) => { followed.push(message) } })
+  await sleep(40)
+
+  const replayed = await clickCard(submit, { [answer]: '再来一次' })
+  assert.equal(replayed.toast.type, 'warning', 'the consumed rid does not come back')
+  await sleep(10)
+  assert.equal(followed.length, 1, 'and no second instruction reaches the session')
 })
 
 
