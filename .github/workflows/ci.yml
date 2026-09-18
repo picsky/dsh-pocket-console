@@ -41,9 +41,27 @@ jobs:
           node-version: 24
       # Only the application that installs the plugin proves it activates: a
       # hand-built context does not enforce Cordis's service rules, which is how
-      # an undeclared service read once reached a user. Pinned to the release the
-      # plugin is verified against.
-      - run: npm install -g @deepseek-ai/dsh@0.1.6-alpha.1
+      # an undeclared service read once reached a user.
+      #
+      # Both packages are named, at the same version, on purpose. `dsh` depends on
+      # `@deepseek-ai/dsh-app-boot` through a caret range, so pinning only `dsh` still let
+      # the boot library float: when 0.1.6-alpha.2 was published on 2026-09-17,
+      # `^0.1.6-alpha.1` began resolving to it, and this job has been red ever since —
+      # `dsh plugin --profile web add` died importing `watchUserPatches` from the boot
+      # library, before it reached this plugin at all. Verifying a pair means pinning the
+      # pair.
+      - run: npm install -g @deepseek-ai/dsh@0.1.6-alpha.1 @deepseek-ai/dsh-app-boot@0.1.6-alpha.1
+      # Which boot library `dsh` actually got is the fact the failure above hid, so the
+      # job states it rather than leaving it to be inferred from a stack trace.
+      - name: which boot library dsh got
+        run: |
+          root=$(npm root -g)
+          for candidate in \
+            "$root/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-app-boot/package.json" \
+            "$root/@deepseek-ai/dsh-app-boot/package.json"
+          do
+            [ -e "$candidate" ] && node -p "require('$candidate').version + '  ' + '$candidate'"
+          done
       - uses: pnpm/action-setup@v6
         with:
           version: 11
