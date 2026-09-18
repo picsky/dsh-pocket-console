@@ -43,14 +43,17 @@ jobs:
       # hand-built context does not enforce Cordis's service rules, which is how
       # an undeclared service read once reached a user.
       #
-      # Both packages are named, at the same version, on purpose. `dsh` depends on
-      # `@deepseek-ai/dsh-app-boot` through a caret range, so pinning only `dsh` still let
-      # the boot library float: when 0.1.6-alpha.2 was published on 2026-09-17,
-      # `^0.1.6-alpha.1` began resolving to it, and this job has been red ever since —
-      # `dsh plugin --profile web add` died importing `watchUserPatches` from the boot
-      # library, before it reached this plugin at all. Verifying a pair means pinning the
-      # pair.
-      - run: npm install -g @deepseek-ai/dsh@0.1.6-alpha.1 @deepseek-ai/dsh-app-boot@0.1.6-alpha.1
+      # The release is pinned, and so is the moment its dependencies are resolved at.
+      # `dsh` reaches its subpackages — the boot library, the subprocess runner — through
+      # caret ranges, so pinning `dsh` alone still let them float: when
+      # `@deepseek-ai/dsh-app-boot@0.1.6-alpha.2` was published on 2026-09-17, this job went
+      # red and stayed red, with `dsh plugin --profile web add` dying inside its own loader
+      # on an import the boot library no longer provides. Naming the boot library as well
+      # does not help: npm keeps the nested copy `dsh` resolved and adds a second one at the
+      # root (the step below prints both, which is how that was found). `--before` is the
+      # mechanism for this — resolve the tree as it stood when the pair was verified, so a
+      # published dependency cannot change what this job verifies.
+      - run: npm install -g @deepseek-ai/dsh@0.1.6-alpha.1 --before=2026-09-17T00:00:00Z
       # Which boot library `dsh` actually got is the fact the failure above hid, so the
       # job states it rather than leaving it to be inferred from a stack trace.
       - name: which boot library dsh got
