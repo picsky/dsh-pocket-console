@@ -58,9 +58,15 @@ The tag starts the workflow, which:
 
 The workflow is the path. This is the fallback for when it cannot run — the trusted
 publisher is not configured yet, the tag build is broken while the release is not, or npm
-is having a bad day. **The last release, 0.7.7, was published this way**, because the
-workflow was failing at the publish step, so this is a route that has been used rather
+is having a bad day. **0.7.7, 0.7.8, and 0.7.9 were all published this way**, because the
+workflow has been failing at the publish step, so this is a route that has been used rather
 than a theoretical one.
+
+**A hand publish ships a version number that no commit and no tag names.** That is exactly
+how 0.7.8 came to be a byte-for-byte duplicate of 0.7.7: the version was bumped in the
+working tree, published, and never committed, so the registry gained a version the history
+has no record of and the tag check never saw. Bump and commit the version *before*
+publishing, and tag the commit it was published from.
 
 **Use `pnpm publish`, not `npm publish`.** Two separate reasons, and both are fatal:
 

@@ -6,7 +6,7 @@ names the point in the history it corresponds to, so `git log` can fill in the d
 The project is pre-1.0: a minor bump can carry a behaviour change, and one is called
 out when it does.
 
-## 0.7.8
+## 0.7.9
 
 ### Fixed
 
@@ -19,6 +19,16 @@ out when it does.
   `escalation.js`, `results.js`). A card sent before that report existed is still read
   under the core's names, so answers already sitting in a chat keep working. See
   [0010](docs/decisions/0010-the-channel-names-its-own-controls.md).
+
+## 0.7.8
+
+**0.7.8 is an accidental duplicate of 0.7.7 and should not be used.** It was published by
+hand from a working tree whose version had been bumped but never committed, so it carries no
+change of its own: its 1152 files are byte-for-byte 0.7.7's apart from the version string,
+which is what comparing the two tarballs shows. No tag points at it, because no commit
+describes it. Preparing *this* release as 0.7.8 then failed on the duplicate, which is why
+it is 0.7.9 — see [releasing.md](docs/releasing.md) for how a hand publish lets a version
+number escape the workflow's tag check.
 
 ## 0.7.7
 
