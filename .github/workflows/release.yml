@@ -129,14 +129,23 @@ jobs:
       - name: The registry carries this version, with provenance
         run: |
           version=$(node -p "require('./package.json').version")
-          meta=""
+          published=""
           for attempt in $(seq 1 30); do
-            meta=$(npm view "dsh-pocket-console@$version" --json 2>/dev/null || true)
-            [ -n "$meta" ] && break
+            # `npm view --json` answers a version the registry does not have yet with an
+            # E404 *object* on stdout, and exits non-zero, so "the answer was not empty" is
+            # not "the registry has it". The plain form prints the version itself, and the
+            # exit status is what says whether it is there at all — which is the whole
+            # question this loop is asking. 0.8.1's first run broke exactly here: the poll
+            # took the error document for an answer and reported `published undefined@undefined`
+            # for a release that had gone out perfectly well.
+            published=$(npm view "dsh-pocket-console@$version" version 2>/dev/null || true)
+            [ -n "$published" ] && break
             echo "attempt $attempt: the registry does not carry $version yet"
             sleep 10
           done
-          [ -n "$meta" ] || { echo "the registry never reported dsh-pocket-console@$version"; exit 1; }
+          [ -n "$published" ] || { echo "the registry never reported dsh-pocket-console@$version"; exit 1; }
+          echo "the registry reports $published"
+          meta=$(npm view "dsh-pocket-console@$version" --json)
           node -e "
           const meta = JSON.parse(process.argv[1]);
           console.log('published', meta.name + '@' + meta.version);
