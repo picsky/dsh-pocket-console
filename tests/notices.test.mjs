@@ -332,6 +332,11 @@ test('a notice survives a restart and still takes a reply', async () => {
   const submit = callbackValues(card).find(value => value.submit === true)
   const [answer] = controlNames(card)
 
+  // The rid is also the record key, and the storage layout turns a key into a path
+  // segment — so the grammar is load-bearing, not cosmetic.
+  assert.match(submit.nid, /^[a-zA-Z0-9_-]+$/,
+    'a notice id doubles as a path-safe durable key')
+
   // The restart: same deployment and same durable medium. A session comes back dormant —
   // a restart leaves no agent running — which is a state the live path already answers
   // honestly, so it must not be mistaken for the session being gone.

@@ -26,7 +26,9 @@ of ending them.**
 
 - The plugin owns one domain, `pocket_console`, with one table, `notices`, keyed by the notice's
   rid, `layout: 'per-record'` so each notice is a document of its own and one bad record cannot
-  cost the others.
+  cost the others. Under that layout a key becomes a path segment, which makes the rid's
+  grammar load-bearing: it is `n` plus twenty hex characters, path-safe on every platform, and a
+  test pins that rather than leaving it to look like a coincidence.
 - A record holds `{ session, handle, seq, sentAt }`: the session to instruct, the message to
   rewrite, the session's last event seq when the card went out, and when it went out.
 - It is written **after the card is delivered** — a card that never arrived has nothing to put

@@ -52,7 +52,9 @@ export function createNoticeStore({ ctx, log, messages }) {
           name: DOMAIN,
           version: 1,
           // One document per notice: they are individually disposable, and a record the
-          // schema rejects is then skipped instead of costing every other notice.
+          // schema rejects is then skipped instead of costing every other notice. The key
+          // becomes a path segment under this layout, which is why the rid is drawn from
+          // the path-safe grammar `noticeId` uses — a test pins that.
           layout: 'per-record',
           invalidRecords: 'backup-and-skip',
           tables: {
