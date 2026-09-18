@@ -431,3 +431,49 @@ test('a notice answered before a restart is not offered again by it', async () =
 })
 
 
+test('a notice is remembered even when storage arrives after the plugin does', async () => {
+  // The storage service is provided inside another plugin's own activation, so it can
+  // appear after this one has loaded. The store used to open only from the startup path,
+  // and a notice delivered in that window was dropped in silence: no record, no log line,
+  // and a promise discovered broken only at the next restart.
+  const stored = { appId: 'cli_stored', appSecret: 'secret_stored', recipient: 'ou_stored' }
+  const first = await scaffold({ resultNotify: 'idle' }, {
+    stored,
+    services: ['settings', 'webServer', 'sessionQuery'],
+  })
+  first.sessionQuery.exists('s_1', 5)
+  first.agents.set('s_1', { status: 'idle', followup: () => {} })
+
+  // Storage turns up now, after the plugin has installed and already tried to restore.
+  first.compose('storageDomain')
+
+  runTurn(first.listenerOf('session/event').handler, 's_1')
+  await sleep(1100)
+  const card = sentCard()
+  const submit = callbackValues(card).find(value => value.submit === true)
+  const [answer] = controlNames(card)
+
+  // The restart proves it was written: nothing else could have put it there.
+  const second = await scaffold({ resultNotify: 'idle' }, { stored, keepDurable: true })
+  const followed = []
+  second.agents.set('s_1', { status: 'idle', followup: (message) => { followed.push(message) } })
+  await sleep(40)
+
+  const response = await clickCard(submit, { [answer]: '接着做' })
+  assert.equal(response.toast.content, '已发送给 agent', 'the notice survived the restart')
+  await sleep(10)
+  assert.equal(followed.length, 1, 'and carried the reply')
+})
+
+
+test('a deployment with no storage says so instead of failing quietly', async () => {
+  // Silence is what made the earlier failure take a filesystem dig to find: a missing
+  // service and a broken medium have to be tellable apart from the log alone.
+  const { infos } = await scaffold({ resultNotify: 'idle' }, { services: ['settings', 'webServer'] })
+  await sleep(30)
+
+  assert.match(infos.join('\n'), /未装配持久存储服务/,
+    `the deployment says the notices will not be kept: ${infos.join(' | ')}`)
+})
+
+

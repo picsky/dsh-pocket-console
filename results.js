@@ -51,6 +51,10 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
   const store = createNoticeStore({ ctx, log, messages })
   /** Set while the notifier is unloaded: a restore in flight must not outlive it. */
   let disposed = false
+  /** Set once the notices from the previous run have been read back. */
+  let restored = false
+  /** Set while a restore is in flight, so the two triggers cannot both run it. */
+  let restoring = false
 
   /**
    * One session's observation state.
@@ -260,6 +264,23 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
    * resumed — by the desk, which is where the session belongs.
    */
   async function restore() {
+    // Two triggers call this — installing the listener, and the storage service becoming
+    // available — and either may be the one that finds the medium up. Only one of them
+    // may do the work, and an attempt that found no medium yet leaves it to the other
+    // rather than marking the restore done.
+    if (restored || restoring) return
+    restoring = true
+    try {
+      if (!await store.ensureOpen()) return
+      restored = true
+      await restoreFromStore()
+    } finally {
+      restoring = false
+    }
+  }
+
+  /** Read the stored notices back and put each through the rules that retire one. */
+  async function restoreFromStore() {
     const stored = await store.open()
     if (stored.length === 0) return
     let kept = 0
@@ -464,6 +485,9 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
     install() {
       disposed = false
       const off = ctx.on('session/event', onEvent)
+      // Tried here as well as when the storage service arrives: whichever finds the
+      // medium up does the work, and the other becomes a no-op.
+      void restore().catch(error => { log.warn(messages().logNoticeRestoreFailed, error) })
       return () => {
         disposed = true
         off()
