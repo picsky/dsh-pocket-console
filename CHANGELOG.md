@@ -6,6 +6,20 @@ names the point in the history it corresponds to, so `git log` can fill in the d
 The project is pre-1.0: a minor bump can carry a behaviour change, and one is called
 out when it does.
 
+## Unreleased
+
+### Fixed
+
+- **A request carrying several questions was refused by the platform, so the card never
+  arrived.** A card may not hold two elements of the same name, and the core names every
+  question's controls `value` and `custom` — so a three-question card held three elements
+  called `value` and Feishu rejected the whole document. The failure reached the reader as
+  no message at all. Each form's controls are namespaced now, and the submit reports the
+  names the card used so the core reads the answer back (`providers/feishu.js`,
+  `escalation.js`, `results.js`). A card sent before that report existed is still read
+  under the core's names, so answers already sitting in a chat keep working. See
+  [0010](docs/decisions/0010-the-channel-names-its-own-controls.md).
+
 ## 0.7.7
 
 ### Fixed

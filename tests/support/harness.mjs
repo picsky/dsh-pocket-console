@@ -365,6 +365,20 @@ function callbackValues(card) {
   return found
 }
 
+/**
+ * The name of each form control in a card, in the order the card declares them.
+ *
+ * A card's form answers arrive keyed by the name the element carries, so a test that
+ * wants to submit one has to read that name off the card rather than assume it: the
+ * channel is free to name its controls to suit the card it is building.
+ */
+function controlNames(card) {
+  return card.body.elements
+    .flatMap(element => element.elements ?? [])
+    .filter(element => element.tag === 'input' || element.tag === 'checker')
+    .map(element => element.name)
+}
+
 /** Parse the single card the channel sent. */
 function sentCard() {
   assert.equal(observed.created.length, 1, 'expected exactly one card delivery')
@@ -386,6 +400,7 @@ export {
   scan,
   bind,
   callbackValues,
+  controlNames,
   sentCard,
   observed,
   resetObserved,

@@ -12,6 +12,7 @@ import {
   scaffold,
   bind,
   callbackValues,
+  controlNames,
   sentCard,
   observed,
 } from './support/harness.mjs'
@@ -104,6 +105,131 @@ test('accumulates answers until every question is answered', async () => {
 })
 
 
+test('every element in a card is named uniquely, however many questions it carries', async () => {
+  // A card may not hold two elements of the same name, and the core names every
+  // question's controls the same two things (`value`, `custom`). A card carrying three
+  // questions therefore used to hold three elements called `value`, which the platform
+  // refuses outright — so the message never arrived at all, and the only trace was the
+  // delivery warning in the log. No fixture could catch it: they all accept any card.
+  const { route, listenerOf } = await scaffold()
+  await bind(route)
+
+  const desktop = Promise.withResolvers()
+  const result = listenerOf('user-questions/request').handler({
+    questions: [
+      { id: 'a', question: 'A?', options: [{ label: 'a1' }, { label: 'a2' }] },
+      { id: 'b', question: 'B?', options: [{ label: 'b1' }, { label: 'b2' }] },
+      { id: 'c', question: 'C?', multiSelect: true, options: [{ label: 'c1' }, { label: 'c2' }] },
+      { id: 'd', question: 'D?' },
+    ],
+    signal: new AbortController().signal,
+  }, () => desktop.promise)
+  await sleep(1200)
+
+  const card = sentCard()
+  const names = []
+  const walk = (node) => {
+    if (node === null || typeof node !== 'object') return
+    if (Array.isArray(node)) { for (const item of node) walk(item); return }
+    if (typeof node.name === 'string') names.push(node.name)
+    for (const value of Object.values(node)) walk(value)
+  }
+  walk(card)
+
+  assert.ok(names.length >= 6, `the card names its controls: ${names.join(', ')}`)
+  const seen = new Set()
+  const repeated = names.filter(name => (seen.has(name) ? true : (seen.add(name), false)))
+  assert.deepEqual(repeated, [], `no two elements may share a name (${names.join(', ')})`)
+
+  // The names are namespaced per form, which is what keeps them unique — and the mapping
+  // comes back on the submit payload so the core can read the values it receives.
+  assert.deepEqual(
+    [...new Set(names)].sort(),
+    [
+      'form_0', 'form_0_value',
+      'form_1', 'form_1_value',
+      'form_2', 'form_2_custom', 'form_2_value',
+      'form_3', 'form_3_value',
+    ],
+    `each question has its own namespaced controls: ${[...new Set(names)].sort().join(', ')}`,
+  )
+
+  // Answering each one still works, which is what the namespacing must not break.
+  const payloads = callbackValues(card)
+  await clickCard(payloads.find(value => value.q === 'a' && value.v === 'a1'))
+  await clickCard(payloads.find(value => value.q === 'b' && value.v === 'b2'))
+  const multi = payloads.find(value => value.q === 'c' && value.submit === true)
+  const checker = card.body.elements.find(element => element.name === 'form_2').elements
+    .find(element => element.tag === 'checker').name
+  const note = card.body.elements.find(element => element.name === 'form_2').elements
+    .find(element => element.tag === 'input').name
+  await clickCard(multi, { [checker]: ['c1'], [note]: '一条说明' })
+  const free = payloads.find(value => value.q === 'd' && value.submit === true)
+  const [freeName] = card.body.elements.find(element => element.name === 'form_3').elements
+    .filter(element => element.tag === 'input')
+    .map(element => element.name)
+  await clickCard(free, { [freeName]: '自由作答' })
+
+  assert.deepEqual(await result, {
+    answers: [
+      { id: 'a', selected: ['a1'] },
+      { id: 'b', selected: ['b2'] },
+      { id: 'c', selected: ['c1'], custom: '一条说明' },
+      { id: 'd', selected: [], custom: '自由作答' },
+    ],
+  })
+})
+
+
+test('the submit reports the names the card gave its controls', async () => {
+  // A card may not hold two elements of the same name, so the channel names its own
+  // controls and tells the core what it called them. The core reads the answer through
+  // that map rather than assuming the name it asked for survived to the card.
+  const { route, listenerOf } = await scaffold()
+  await bind(route)
+  const questions = listenerOf('user-questions/request')
+
+  const desktop = Promise.withResolvers()
+  const result = questions.handler({
+    questions: [{ id: 'only', question: '叫什么名字？' }],
+    signal: new AbortController().signal,
+  }, () => desktop.promise)
+  await sleep(1200)
+
+  const card = sentCard()
+  const [control] = controlNames(card)
+  const submit = callbackValues(card).find(value => value.submit === true)
+  assert.equal(submit.submits?.value, control,
+    'the submit reports the name the card gave the control it submits from')
+
+  await clickCard(submit, { [control]: '小美' })
+  assert.deepEqual(await result, { answers: [{ id: 'only', selected: [], custom: '小美' }] })
+})
+
+
+test('a card that reports no names is read under the ones the core asked for', async () => {
+  // A card sent before the channel reported its names is still sitting in someone's
+  // chat; pressing its submit reports nothing, and the answer is read under the name
+  // the core put in the view. That fallback is why this is not a breaking change.
+  const { route, listenerOf } = await scaffold()
+  await bind(route)
+  const questions = listenerOf('user-questions/request')
+
+  const desktop = Promise.withResolvers()
+  const result = questions.handler({
+    questions: [{ id: 'only', question: '叫什么名字？' }],
+    signal: new AbortController().signal,
+  }, () => desktop.promise)
+  await sleep(1200)
+
+  const card = sentCard()
+  const submit = callbackValues(card).find(value => value.submit === true)
+  const { submits: _ignored, ...older } = submit
+  await clickCard(older, { value: '小美' })
+  assert.deepEqual(await result, { answers: [{ id: 'only', selected: [], custom: '小美' }] })
+})
+
+
 test('accepts a multi-select form submission with a typed answer beside the choices', async () => {
   const { route, listenerOf } = await scaffold()
   await bind(route)
@@ -124,9 +250,17 @@ test('accepts a multi-select form submission with a typed answer beside the choi
   const card = sentCard()
   const submit = callbackValues(card).find(value => value.submit === true)
   assert.ok(submit, 'a multi-select question needs a submit button')
-  assert.match(JSON.stringify(card), /"name":"custom"/, 'a multi-select form carries a typed answer beside its choices')
 
-  await clickCard(submit, { value: ['x', 'y'], custom: '带上发布说明' })
+  // A multi-select question takes a typed answer beside its choices, the pair the
+  // desktop card offers. The names are read back off the card rather than assumed: a
+  // card has to keep every element name unique, so a channel namespaces them when one
+  // request carries several questions — and reports the names it used on the submit.
+  const own = card.body.elements.flatMap(element => element.elements ?? [])
+  const choiceName = own.find(element => element.tag === 'checker').name
+  const customName = own.find(element => element.tag === 'input')?.name
+  assert.ok(customName, `a multi-select form carries a typed answer beside its choices: ${JSON.stringify(card)}`)
+
+  await clickCard(submit, { [choiceName]: ['x', 'y'], [customName]: '带上发布说明' })
   assert.deepEqual(await result, {
     answers: [{ id: 'pick', selected: ['x', 'y'], custom: '带上发布说明' }],
   })
@@ -150,8 +284,15 @@ test('a multi-select submission without typed text carries no custom answer', as
   }, () => desktop.promise)
   await sleep(1200)
 
-  const submit = callbackValues(sentCard()).find(value => value.submit === true)
-  await clickCard(submit, { value: ['x'], custom: '   ' })
+  const card = sentCard()
+  const own = card.body.elements.flatMap(element => element.elements ?? [])
+  const submit = callbackValues(card).find(value => value.submit === true)
+  // Blank text is not an answer: submitted under the names the card gave its controls,
+  // which the case reads back rather than assuming.
+  await clickCard(submit, {
+    [own.find(element => element.tag === 'checker').name]: ['x'],
+    [own.find(element => element.tag === 'input').name]: '   ',
+  })
   assert.deepEqual(
     await result,
     { answers: [{ id: 'pick', selected: ['x'] }] },
@@ -241,7 +382,10 @@ test('accepts a free-text form submission when the question offers no options', 
   assert.match(JSON.stringify(card), /"tag":"input"/, 'a no-option question needs a text field')
 
   const submit = callbackValues(card).find(value => value.submit === true)
-  await clickCard(submit, { value: '按 B 方案来' })
+  const field = card.body.elements
+    .flatMap(element => element.elements ?? [])
+    .find(element => element.tag === 'input').name
+  await clickCard(submit, { [field]: '按 B 方案来' })
   assert.deepEqual(await result, {
     answers: [{ id: 'note', selected: [], custom: '按 B 方案来' }],
   })

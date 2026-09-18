@@ -12,6 +12,7 @@ import {
   scaffold,
   bind,
   callbackValues,
+  controlNames,
   sentCard,
   observed,
   SAME_ORIGIN,
@@ -67,7 +68,11 @@ test('sends a stopped answer to the phone and takes the next instruction back', 
   assert.ok(infos.some(message => message.includes('结果已发送')), 'the delivery is logged')
 
   const submit = callbackValues(card).find(value => value.submit === true)
-  const toast = await clickCard(submit, { value: '接着把文档补上' })
+  // The card names the control and the submit reports the name it used, which is what
+  // the notice decoder reads — so a reply typed into the card is not silently dropped.
+  const [answer] = controlNames(card)
+  assert.equal(submit.submits?.value, answer, 'the notice card reports the name it used')
+  const toast = await clickCard(submit, { [answer]: '接着把文档补上' })
   assert.equal(toast.toast.content, '已发送给 agent')
   await sleep(10)
   assert.equal(followed.length, 1)
@@ -75,7 +80,7 @@ test('sends a stopped answer to the phone and takes the next instruction back', 
   assert.deepEqual(followed[0].source, { kind: 'user' },
     'the reader speaking through a remote surface, as the harness ACP client records it')
 
-  const replayed = await clickCard(submit, { value: '再来一次' })
+  const replayed = await clickCard(submit, { [answer]: '再来一次' })
   assert.equal(replayed.toast.type, 'warning', 'a notice id is single-use')
   assert.equal(followed.length, 1)
 })
@@ -144,7 +149,9 @@ test('a notice stops taking replies once the session has new input', async () =>
 
   runTurn(emit, 's_1')
   await sleep(1100)
-  const submit = callbackValues(sentCard()).find(value => value.submit === true)
+  const card = sentCard()
+  const submit = callbackValues(card).find(value => value.submit === true)
+  const [answer] = controlNames(card)
 
   // The reader types at the desk. That result is no longer the session's latest
   // word, so replying to it would inject an instruction written against it.
@@ -153,7 +160,7 @@ test('a notice stops taking replies once the session has new input', async () =>
   assert.equal(observed.patched.length, 1, 'the card says why it stopped')
   assert.match(JSON.stringify(JSON.parse(observed.patched[0].data.content)), /已有新消息/)
 
-  const refused = await clickCard(submit, { value: '接着做' })
+  const refused = await clickCard(submit, { [answer]: '接着做' })
   assert.equal(refused.toast.type, 'warning')
   assert.match(refused.toast.content, /已过期/)
   await sleep(10)
@@ -169,22 +176,25 @@ test('a newer notice retires the one before it', async () => {
 
   runTurn(emit, 's_3', '第一轮完成。', { turn: 1 })
   await sleep(1100)
-  const first = callbackValues(sentCard()).find(value => value.submit === true)
+  const firstCard = sentCard()
+  const first = callbackValues(firstCard).find(value => value.submit === true)
+  const [firstName] = controlNames(firstCard)
 
   // A later round with nothing said in between, so only superseding can retire
   // the first card rather than the new-input rule.
   runTurn(emit, 's_3', '第二轮完成。', { said: false, turn: 2 })
   await sleep(1100)
   assert.equal(observed.created.length, 2, 'the newest result is offered too')
-  const second = callbackValues(JSON.parse(observed.created[1].data.content))
-    .find(value => value.submit === true)
+  const secondCard = JSON.parse(observed.created[1].data.content)
+  const second = callbackValues(secondCard).find(value => value.submit === true)
+  const [secondName] = controlNames(secondCard)
 
-  const stale = await clickCard(first, { value: '按第一轮来' })
+  const stale = await clickCard(first, { [firstName]: '按第一轮来' })
   assert.match(stale.toast.content, /已过期/)
   await sleep(10)
   assert.deepEqual(followed, [], 'the older notice injects nothing')
 
-  const live = await clickCard(second, { value: '按第二轮来' })
+  const live = await clickCard(second, { [secondName]: '按第二轮来' })
   assert.equal(live.toast.content, '已发送给 agent')
   await sleep(10)
   assert.equal(followed.length, 1, 'the newest notice still works')
@@ -199,12 +209,14 @@ test('a notice you come back to later is still an offer', async () => {
 
   runTurn(emit, 's_4')
   await sleep(1100)
-  const submit = callbackValues(sentCard()).find(value => value.submit === true)
+  const card = sentCard()
+  const submit = callbackValues(card).find(value => value.submit === true)
+  const [answer] = controlNames(card)
 
   // Nothing replaced the result and nobody replied, so elapsed time decides
   // nothing: a notice answered much later is still answered, not refused.
   await sleep(1200)
-  const accepted = await clickCard(submit, { value: '再改一下' })
+  const accepted = await clickCard(submit, { [answer]: '再改一下' })
   assert.equal(accepted.toast.type, 'success')
   await sleep(10)
   assert.equal(followed.length, 1, 'a late reply still reaches the session')
@@ -249,7 +261,8 @@ test('the notice copy follows the deployment language', async () => {
   assert.match(rendered, /Send to the agent/)
 
   const submit = callbackValues(card).find(value => value.submit === true)
-  const settled = await clickCard(submit, { value: 'Ship it.' })
+  const [answer] = controlNames(card)
+  const settled = await clickCard(submit, { [answer]: 'Ship it.' })
   assert.equal(settled.toast.content, 'Sent to the agent')
   await sleep(10)
   assert.equal(followed.length, 1)

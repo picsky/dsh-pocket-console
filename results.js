@@ -258,7 +258,11 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
     if (id === undefined) return undefined
     const notice = notices.get(id)
     if (notice === undefined) return { toast: messages().noticeGone, accepted: false }
-    const text = typeof values?.[INSTRUCTION_FIELD] === 'string' ? values[INSTRUCTION_FIELD].trim() : ''
+    // The channel names the control and reports what it called it, because a card may
+    // not hold two elements of the same name; a card that reported nothing is read
+    // under the name this side asked for.
+    const submitted = values?.[payload?.submits?.[INSTRUCTION_FIELD] ?? INSTRUCTION_FIELD]
+    const text = typeof submitted === 'string' ? submitted.trim() : ''
     if (text === '') return { toast: messages().emptyInstruction, accepted: false }
     const agent = ctx.get?.('agents')?.get?.(notice.session)
     if (agent === undefined) {

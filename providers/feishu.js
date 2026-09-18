@@ -278,19 +278,28 @@ function renderCard(view, messages) {
     ))
   }
 
+  // A card may not hold two elements of the same name. The core names every question's
+  // controls `value` and `custom` — the same two names on every form — so a card
+  // carrying three questions held three elements called `value`, and the platform
+  // refused the whole card: the message never arrived at all, and the only trace was a
+  // delivery warning in the log. Each form therefore namespaces the names it submits
+  // under, and the submit carries the mapping back so the core knows what to read.
   for (const [index, form] of view.forms.entries()) {
+    const name = (field) => `form_${index}_${field}`
+    const submits = Object.fromEntries(
+      [form.fieldId, form.customFieldId]
+        .filter(field => field !== undefined)
+        .map(field => [field, name(field)]),
+    )
     elements.push({
       tag: 'form',
-      // One request can carry several questions, and a card may not hold two
-      // elements of the same name; the input's own name stays `fieldId` so the
-      // submitted value arrives under the key the core decodes.
-      name: `form_${index}_${form.fieldId}`,
+      name: `form_${index}`,
       elements: [
         form.options === undefined
-          ? { tag: 'input', name: form.fieldId, placeholder: plainText(messages().answerPlaceholder) }
+          ? { tag: 'input', name: name(form.fieldId), placeholder: plainText(messages().answerPlaceholder) }
           : {
               tag: 'checker',
-              name: form.fieldId,
+              name: name(form.fieldId),
               options: form.options.map(option => ({
                 text: plainText(option.label),
                 value: option.value,
@@ -300,9 +309,9 @@ function renderCard(view, messages) {
         // pair the desktop card offers; one submit carries both names.
         ...(form.customFieldId === undefined
           ? []
-          : [{ tag: 'input', name: form.customFieldId, placeholder: plainText(messages().notePlaceholder) }]),
+          : [{ tag: 'input', name: name(form.customFieldId), placeholder: plainText(messages().notePlaceholder) }]),
         {
-          ...button(form.submitLabel, 'primary', form.payload),
+          ...button(form.submitLabel, 'primary', { ...form.payload, submits }),
           form_action_type: 'submit',
         },
       ],

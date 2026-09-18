@@ -78,9 +78,9 @@ SDK 通常提供 `logger` 与 `loggerLevel`：把它的日志接进 `log.warn` /
   buttons: [{ payload, label, tone: 'default' | 'primary' | 'danger' }],
   forms: [{
     payload,                 // 提交时原样回传
-    fieldId,                 // 提交值到达 onAction(values) 时使用的键
+    fieldId,                 // 核心为「提交值」起的名字
     options?,                // {label, value}[]；缺省渲染自由文本输入
-    customFieldId?,          // 同一次提交里再带回一个自由文本（多选题的「补充说明」）
+    customFieldId?,          // 核心为那次提交里额外那个自由文本起的名字
     multiSelect: boolean,
     submitLabel: string,
   }],
@@ -96,14 +96,31 @@ onAction({ payload, values, messageId, sender })
 ```
 
 - `payload`：用户按下的按钮所携带的 `payload`。
-- `values`：表单提交值，形如 `{ [fieldId]: string | string[] }`；非表单按钮时为 `undefined`。
-  一个表单可以同时声明 `fieldId` 与 `customFieldId`，那时两个键在同一次提交里一起到达——
+- `values`：表单提交值，形如 `{ [控件名]: string | string[] }`；非表单按钮时为 `undefined`。
+  一个表单可以同时声明 `fieldId` 与 `customFieldId`，那时两个值在同一次提交里一起到达——
   多选题的选项与「补充说明」就是这样一起回传的。
 - `messageId`：通道自己的消息句柄，核心不用，供通道实现 `update` 时关联。
 - `sender`：**操作发起者在该通道上的身份**。核心不用它做授权，因为「谁能操作」是通道自己
   的信任模型；飞书通道就是在这里校验它等于绑定接收人。
 
 返回值是 `{ toast, accepted }`，通道可据此给用户即时反馈（飞书里映射为 toast 弹窗）。
+
+**控件名由通道自己起，起了什么就要说清楚。** `values` 里的键是卡片元素实际携带的名字，所以
+通道一旦改名，就必须在提交回传时按视图里请求的 `fieldId` / `customFieldId` 附上这份对应关系：
+
+```js
+// 卡片上第三个表单的提交按钮 payload
+{ rid, q, submit: true, submits: { value: 'form_2_value', custom: 'form_2_custom' } }
+```
+
+核心按这份对应关系去读 `values`：查的是 `form_2_value`，而不是 `value`。改了名却不回传对应
+关系的通道，在核心看来就是一次「没有答案」的提交——值到了，然后被丢掉。
+
+通道为什么非改名不可：**卡片不允许出现两个同名元素**。一个表单对应一道题，所以核心给每道题
+的控件起的名字都是 `value` 和 `custom`；于是一张回答三道题的卡片上会有三个叫 `value` 的元素，
+平台会拒收整张卡片，读者那边表现为**消息根本没到**。飞书通道给每个表单的控件加上前缀，并把
+对应关系回传。如果某通道从不让一张卡片上出现两个表单，或者本来就用了别的命名方式，那么只需
+回传它改过的那些。
 
 ## 安全性要求
 

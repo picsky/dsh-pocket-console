@@ -324,8 +324,15 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
 
     let answer
     if (payload.submit === true) {
-      const submitted = values?.[FORM_VALUE_FIELD]
-      const typed = values?.[FORM_CUSTOM_FIELD]
+      // A card may not hold two elements of the same name, and one request can carry
+      // several questions that this side names alike, so the channel is free to name
+      // its controls to suit the card it is building and to say what it called them.
+      // The names it reported are the ones to read; a card that reported nothing —
+      // older than that report — is read under the names this side asked for.
+      const submits = payload.submits ?? {}
+      const submitted = values?.[submits[FORM_VALUE_FIELD] ?? FORM_VALUE_FIELD]
+      const customName = submits[FORM_CUSTOM_FIELD]
+      const typed = customName === undefined ? undefined : values?.[customName]
       const selected = Array.isArray(submitted) ? submitted.map(String) : []
       // A form with no options carries its typed answer in the value field; a
       // multi-select form carries choices there and the typed answer beside

@@ -82,9 +82,9 @@ step, and the event dispatcher's ready line all go to `debug`; errors and warnin
   buttons: [{ payload, label, tone: 'default' | 'primary' | 'danger' }],
   forms: [{
     payload,                 // echoed back verbatim on submit
-    fieldId,                 // the key the submitted value arrives under in onAction(values)
+    fieldId,                 // the core's name for the submitted value
     options?,                // {label, value}[]; absent renders a free-text input
-    customFieldId?,          // carries one extra free-text value in the same submission
+    customFieldId?,          // the core's name for one extra free-text value
     multiSelect: boolean,
     submitLabel: string,
   }],
@@ -100,9 +100,9 @@ onAction({ payload, values, messageId, sender })
 ```
 
 - `payload` — the `payload` carried by the button the user pressed.
-- `values` — form submission, shaped `{ [fieldId]: string | string[] }`; `undefined` for a
+- `values` — form submission, shaped `{ [controlName]: string | string[] }`; `undefined` for a
   non-form button. A form may declare both `fieldId` and `customFieldId`, in which case both
-  keys arrive in the same submission — that is how a multi-select answer and its "extra note"
+  values arrive in the same submission — that is how a multi-select answer and its "extra note"
   travel together.
 - `messageId` — the channel's own message handle. The core does not use it; it is for the
   channel to correlate when implementing `update`.
@@ -112,6 +112,26 @@ onAction({ payload, values, messageId, sender })
 
 The return value is `{ toast, accepted }`, which the channel uses for immediate feedback (in
 Feishu it maps to a toast popup).
+
+**A channel names its own controls, and says what it called them.** The names in `values` are
+the ones the card's elements carry, so a channel that renames them reports the mapping back on
+the submit payload, keyed by the `fieldId` / `customFieldId` the view asked for:
+
+```js
+// the submit button's payload, for the third form on the card
+{ rid, q, submit: true, submits: { value: 'form_2_value', custom: 'form_2_custom' } }
+```
+
+The core reads `values` through that map, so it looks up `form_2_value` and not `value`. A
+channel that renames without reporting the mapping looks to the core like a submission carrying
+no answer at all: the values arrive and are discarded.
+
+Why a channel has to rename at all: **a card may not hold two elements of the same name.** The
+core names every question's controls `value` and `custom`, because a form answers one question,
+so a card answering three questions would otherwise hold three elements called `value` — and the
+platform refuses the whole card, which reaches the reader as no message at all. The Feishu
+channel namespaces each form's controls and reports the map. A channel that never puts two forms
+on one card, or that names its controls some other way, reports only what it changed.
 
 ## Security requirements
 
