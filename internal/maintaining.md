@@ -196,6 +196,11 @@ gh api repos/picsky/dsh-pocket-console --jq '{allow_squash_merge, allow_merge_co
 gh api repos/picsky/dsh-pocket-console --jq '.security_and_analysis'
 ```
 
+**Read a ruleset back one at a time.** The list endpoint answers with a summary: for a ruleset
+that has both, `bypass_actors` comes back `null` and `rules` empty, which reads exactly like a
+ruleset whose bypass has been removed. `…/rulesets/<id>` is the one that carries them, which is
+why the commands above use the list only to find the id.
+
 ## 5. Changing the rules safely
 
 The rules can lock the repository, so a change to them is rehearsed rather than hoped for.
@@ -234,8 +239,15 @@ git push --delete origin v0.0.0-not-a-release
 git tag -d v0.0.0-not-a-release
 ```
 
-GitHub records every bypass on the ruleset's insights, so the shortcut taken in an emergency
-is visible afterwards without anyone having to remember it.
+GitHub records every evaluation, bypassed ones included, so the shortcut taken in an emergency
+is visible afterwards without anyone having to remember it:
+
+```sh
+gh api "repos/picsky/dsh-pocket-console/rulesets/rule-suites?ref=refs/heads/main" --jq '.[].result'
+# pass, fail — the merge that satisfied the rules, and the direct push that did not
+gh api "repos/picsky/dsh-pocket-console/rulesets/rule-suites?ref=refs/tags/v0.0.0-not-a-release" --jq '.[].result'
+# bypass, bypass, fail — the creation and the deletion the administrator made, and the refusal before them
+```
 
 **Do not** temporarily remove a required check to get one pull request through. The correct
 move for that is the documented bypass, by the actor who owns it, and the pull request that
