@@ -19,11 +19,19 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # Reading the tagged commit's check runs is how this job refuses a commit CI
+      # never judged. Naming any permission sets the others to none, so this one has
+      # to be listed even though it is only read.
+      checks: read
       # What npm exchanges for the publish credential. Without it the registry
       # asks for a token this workflow deliberately does not have.
       id-token: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          # The ancestry check below needs `main` to exist in this checkout, and a
+          # tag push by itself fetches one commit's worth of history.
+          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -66,6 +74,66 @@ jobs:
             process.exit(1);
           }
           console.log('tag names version', version);
+          "
+      # A tag is not a claim about a commit, it *is* a commit — and the repository's
+      # ruleset lets the administrator bypass the pull-request and required-check rules
+      # on purpose, so that a broken workflow can still be repaired. This job is the
+      # half that cannot be bypassed. A release is tagged from a commit `main` holds,
+      # and one CI actually judged.
+      - name: The tagged commit must be on main
+        run: |
+          git fetch --quiet origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+            echo "tag $GITHUB_REF_NAME points at $GITHUB_SHA, which is not on main"
+            echo "a release is tagged from a commit on main: merge the release pull request, then tag its squash commit"
+            exit 1
+          fi
+          echo "$GITHUB_SHA is on main"
+      # The ruleset already required these four on the way into `main`. Asking again is
+      # what makes the bypass safe rather than a hole: a commit that reached main
+      # through the bypass has no green checks to point at, and this refuses it.
+      - name: The tagged commit's checks must be green
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node -e "
+          const commit = process.env.GITHUB_SHA
+          const required = ['verify (node 22)', 'verify (node 24)', 'real composition', 'publish payload']
+          const url = 'https://api.github.com/repos/' + process.env.GITHUB_REPOSITORY + '/commits/' + commit + '/check-runs?per_page=100'
+          const read = async () => {
+            const response = await fetch(url, {
+              headers: {
+                accept: 'application/vnd.github+json',
+                authorization: 'Bearer ' + process.env.GITHUB_TOKEN,
+                'x-github-api-version': '2022-11-28',
+              },
+            })
+            if (!response.ok) {
+              console.error('could not read the check runs for ' + commit + ': ' + response.status + ' ' + (await response.text()).slice(0, 200))
+              return false
+            }
+            const runs = (await response.json()).check_runs
+            const problems = []
+            for (const name of required) {
+              const run = runs.find((candidate) => candidate.name === name)
+              if (run === undefined) problems.push(name + ': no run on this commit')
+              else if (run.status !== 'completed' || run.conclusion !== 'success') problems.push(name + ': ' + run.status + '/' + run.conclusion)
+            }
+            if (problems.length > 0) {
+              console.error('the commit ' + commit + ' is not one CI has passed:')
+              for (const problem of problems) console.error('  ' + problem)
+              console.error('wait for main to be green, then tag the same commit again -- re-running this job does not change the answer')
+              return false
+            }
+            console.log('all four checks passed on ' + commit)
+            return true
+          }
+          // `process.exitCode` rather than `process.exit`: exiting while the fetch's
+          // connection is still open trips a libuv assertion on Windows, and this step
+          // has to fail cleanly on the platform a maintainer might run it from.
+          read()
+            .then((ok) => { if (!ok) process.exitCode = 1 })
+            .catch((error) => { console.error(error); process.exitCode = 1 })
           "
       # One setting lives in six places, and the docs must not link to a file the
       # tarball lacks; publishing a disagreeing tree would ship the disagreement to

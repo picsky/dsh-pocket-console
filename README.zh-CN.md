@@ -174,6 +174,7 @@ user-questions/request    ─┘         │
 | [docs/development.md](docs/development.md) | 测试套件、真实装配检查、对着运行中的部署调试 |
 | [docs/zh-CN/providers.md](docs/zh-CN/providers.md) | 通道契约：写一个飞书之外的传输需要实现什么 |
 | [SECURITY.md](SECURITY.md) | 本插件声明的安全不变式 |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | 一个改动如何落地：issue、分支、PR、四道检查（英文） |
 | [CHANGELOG.md](CHANGELOG.md) | 每个版本改了什么 |
 
 ## 许可

@@ -76,12 +76,14 @@ including the Feishu SDK's own connection chatter.
 
 ## Where the rest lives
 
-- [CONTRIBUTING.md](../CONTRIBUTING.md) — what a change needs, and the six places one
-  setting lives in.
+- [CONTRIBUTING.md](../CONTRIBUTING.md) — what a change needs, how a change lands (issue,
+  branch, pull request, the four checks), and the six places one setting lives in.
 - [CHANGELOG.md](../CHANGELOG.md) — what changed, and when.
 - [docs/decisions/](decisions/) — why the plugin is shaped the way it is.
 - [docs/releasing.md](releasing.md) — the tag-driven release and the npm-side setup.
 - [SECURITY.md](../SECURITY.md) — the invariants, and how to report a hole in one.
+- [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md) — the Contributor Covenant this repository
+  follows, and where a conduct report goes instead of the issue tracker.
 - [providers/README.md](../providers/README.md) — the channel contract, for a transport
   that is not Feishu.
 - `internal/launch.md` — the release-and-announcement checklist. Deliberately not

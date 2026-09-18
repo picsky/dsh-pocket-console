@@ -1,0 +1,28 @@
+# What can be updated here is narrower than it looks. There are no devDependencies:
+# the two entries under `dependencies` are bundled into the published tarball, so a
+# bump to either one changes what an installer runs and is worth a release path, not
+# just a green suite. `internal/maintaining.md` says how one lands.
+#
+# Actions are watched weekly because a broken or retired action tag is a CI outage,
+# and the workflow pins major tags rather than commit SHAs.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    groups:
+      actions:
+        patterns: ['*']
+
+  # Monthly, and capped: these arrive as ordinary pull requests against a tree whose
+  # CI installs, packs, and boots the real application, so each one costs a full run.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    groups:
+      bundled-transport:
+        patterns: ['*']

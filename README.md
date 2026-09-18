@@ -189,6 +189,7 @@ These are honest gaps, not choices. The choices are in the previous two sections
 | [docs/development.md](docs/development.md) | Test suite, real-assembly check, debugging a running deployment |
 | [providers/README.md](providers/README.md) | The channel contract: what a transport other than Feishu must implement |
 | [SECURITY.md](SECURITY.md) | The security invariants this plugin claims |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How a change lands: issue, branch, pull request, the four checks |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in each version |
 
 ## License

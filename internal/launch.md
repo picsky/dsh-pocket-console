@@ -123,9 +123,12 @@ release:
 ```sh
 npm run check:parity
 npm test
-git add -A && git commit -m "…"
-npm version minor        # new behaviour, not a bugfix: 0.7.6 → 0.8.0
-git push --follow-tags
+# the version bump and the changelog land as a pull request now (`internal/maintaining.md` §3):
+git switch -c release/0.9.0
+npm version minor --no-git-tag-version
+# open the PR as "Release 0.9.0", merge it once the four checks are green, then:
+git fetch origin && git switch main && git pull --ff-only
+git tag -a v0.9.0 -m "Release 0.9.0" && git push origin v0.9.0
 ```
 
 Then confirm the release ran (`release.yml` publishes on a `v*` tag through npm's
