@@ -13,10 +13,10 @@ introduction; this is where to go once you have a specific job.
 | **Work on the code** | [development.md](development.md) — the suite, the real-composition check, and debugging a live deployment | — |
 | **Cut a release** | [releasing.md](releasing.md) — the one-time npm setup, what the tag workflow checks, and how to publish by hand | — |
 | **Write a transport** | [providers/README.md](../providers/README.md) — the channel contract, and the security duties it puts on a channel | [中文](zh-CN/providers.md) |
-| **Understand a choice** | [decisions/](decisions/) — thirteen records of why the plugin is shaped the way it is | — |
+| **Understand a choice** | [decisions/](decisions/) — fourteen records of why the plugin is shaped the way it is | — |
 | **Check a claim** | [SECURITY.md](../SECURITY.md) — the invariants this plugin asserts, and how to report a hole in one | — |
 | **See what changed** | [CHANGELOG.md](../CHANGELOG.md) — what each release carried | — |
-| **Contribute** | [CONTRIBUTING.md](../CONTRIBUTING.md) — what a change needs before it lands, and the rules this repository holds itself to | — |
+| **Contribute** | [CONTRIBUTING.md](../CONTRIBUTING.md) — what a change needs before it lands, how it lands (issue, branch, pull request, four checks), and the [code of conduct](../CODE_OF_CONDUCT.md) review happens under | — |
 
 ## Language
 

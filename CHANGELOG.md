@@ -8,7 +8,44 @@ out when it does.
 
 ## Unreleased
 
+### Added
+
+- **The development process is written down, and the repository now enforces it.** A
+  contributor-facing *How a change lands* section in `CONTRIBUTING.md` (issue first, branch,
+  one topic per pull request, squash merge, the four checks and what each one proves), a pull
+  request template that mirrors what a change needs, a feature-request issue form — blank
+  issues are disabled, so an idea previously had nowhere to go but Discussions — and a
+  [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) (Contributor Covenant 3.0, with this project's
+  own reporting channel and enforcement process in place of the template's two placeholders).
+  The maintainer's side lives in `internal/maintaining.md`, which is not published. The
+  argument is [0014](docs/decisions/0014-the-process-binds-every-change.md).
+- **`main` requires a pull request, and the four checks are not advisory any more.** Required
+  checks with no `paths` filter, a linear history, squash-only merges, no force-push and no
+  deletion; the repository administrator keeps one documented bypass so a broken workflow can
+  still be repaired. Only the maintainer may create a `v*` tag, because a tag is what
+  publishes this package. No plugin behaviour changed.
+- **The release workflow refuses a tag whose commit CI never judged.** It now asserts that
+  the tagged commit is an ancestor of `origin/main` and that all four of its checks concluded
+  `success`, and it asks for `checks: read` to do it. Where the ruleset can be bypassed, the
+  publish job cannot.
+- **Dependabot watches the action pins weekly and the bundled transport monthly**, and
+  repository security updates are enabled. There are no devDependencies here, so an npm
+  update is always a change to what an installer runs.
+- **`npm run check:parity` reads the channel contract too.** `providers/README.md` is the one
+  published document outside `docs/`, and it was not being held to the published file list —
+  a link from it to something the tarball does not carry would have 404d on the registry with
+  the gate reporting success.
+
 ### Changed
+
+- **[`docs/releasing.md`](docs/releasing.md) describes the release that now exists**: the
+  version bump and the changelog land as a `Release x.y.z` pull request, and the tag names the
+  squash commit once `main` is green. `npm version minor` and `git push --follow-tags`, which
+  tagged whatever was checked out locally, no longer describe the flow.
+- **`CODE_OF_CONDUCT.md` is part of the published package**, so a reader of the tarball can
+  follow it from `CONTRIBUTING.md` rather than meeting a 404.
+- **Both READMEs link `CONTRIBUTING.md`**, which neither did before: what a change needs was
+  reachable only from the documentation index.
 
 - **Both READMEs were rewritten around what the plugin is not.** The old first line borrowed
   a GUI-mirroring plugin's slogan and promised approval "from anywhere", which is the one thing

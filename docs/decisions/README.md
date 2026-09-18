@@ -18,3 +18,4 @@ code. A change that contradicts a record here needs a new record, not a quiet ed
 | [0011](0011-one-question-per-card.md) | One question per card, and the card steps to the next as each is answered |
 | [0012](0012-the-desktop-composer-steps-without-the-phone.md) | The desktop composer cannot be advanced per question, and the phone does not try |
 | [0013](0013-a-notice-is-remembered.md) | A live notice is kept in durable storage, so a restart re-applies the rules instead of ending them |
+| [0014](0014-the-process-binds-every-change.md) | Every change lands as a pull request with the four checks green; the release keeps one documented shortcut, and a tag is a publish |

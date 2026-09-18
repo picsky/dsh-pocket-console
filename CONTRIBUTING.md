@@ -6,7 +6,7 @@ channel-neutral core, one transport, and a browser card.
 ## Getting set up
 
 There is no build step and nothing to install for development — the suite
-replaces its five production dependencies with in-repo stubs through a Node
+replaces its seven production dependencies with in-repo stubs through a Node
 module resolution hook. Cases live under `tests/`, one file per domain, over a
 shared harness (`tests/support/harness.mjs`); `node --test` runs them in
 parallel.
@@ -34,6 +34,71 @@ dsh plugin --profile web add .
 ```sh
 dsh web
 ```
+
+## How a change lands
+
+**An issue first, for anything that changes behaviour.** A bug, a new setting, a new
+channel, or anything that would move an acceptance rule is worth agreeing on before
+anyone writes the code: a change that contradicts the position in the [README](README.md)
+or a [decision record](docs/decisions/) is the expensive kind, and it is cheapest to find
+that out first. An [issue](https://github.com/picsky/dsh-pocket-console/issues) is the
+place for it.
+
+**The exception is part of the rule, not a hole in it.** A typo, a broken link, or a
+sentence that says the wrong thing can go straight to a pull request, and so can a fix
+that is one line and obviously right. Nobody should have to file a ticket to correct a
+word.
+
+Then:
+
+1. **Branch from `main`** and name the branch for the change — `fix/…`, `docs/…`,
+   `channel/…`, `feat/…`. Nothing enforces the spelling; it is what makes a list of open
+   branches readable.
+2. **One topic per pull request.** A pull request is squashed into one commit on `main`, and
+   that commit keeps the branch's own commit messages — so the commit message is the record,
+   and the description is what your reviewer reads. Say in the description what was wrong,
+   what the change does about it, and what the diff cannot: what you tried and rejected, what
+   is deliberately out of scope, and what still needs a real Feishu tenant to confirm.
+3. **Write the commit message as one imperative sentence**, in the voice of the history
+   around it — `Open the notice store on first use, so no write can be silently dropped`.
+   No `feat:` / `fix:` prefix and no sign-off line; the changelog carries the categories,
+   and there is [no CLA to sign](#license).
+4. **Wait for the four checks**, and treat the pull request's checklist as the review's
+   first pass. All four must be green:
+
+   | Check | What it proves |
+   |---|---|
+   | `verify (node 22)`, `verify (node 24)` | `npm run check:parity` and `npm test` on both ends of the supported engine range |
+   | `real composition` | the packed tarball activates inside a real `dsh web` |
+   | `publish payload` | every path the manifest promises exists, and the packed tarball still carries its bundled transport |
+
+   If this is your first contribution here, GitHub holds the workflow until a maintainer
+   approves it, so a check sitting at *pending* with no run behind it is expected rather
+   than a failure of your change.
+
+   **Do not make a check skippable to save time.** A required check that a diff skips
+   stays pending forever on that pull request, which means the pull request can never be
+   merged — so all four run on every change, including a docs-only one. A `paths` filter
+   is the usual way this is discovered, and it is discovered at the worst moment.
+
+5. **Expect a small, opinionated review.** This is one maintainer's project: the
+   turnaround is days rather than hours, and silence is not a decision — a comment on the
+   pull request is how to ask for one. Review asks four things before anything else:
+   whether the change belongs in the plugin at all, whether it arrives with the case that
+   pins it, whether a non-obvious choice has a record, and whether the diff can be
+   smaller.
+
+**A pull request can be closed rather than merged.** The usual reasons: it contradicts the
+README's position or an existing decision record; it adds a channel concept to the core,
+where the fix is the contract instead; or it re-opens a seam that already has one.
+[ADR 0009](docs/decisions/0009-a-channel-is-one-file.md) and
+[ADR 0006](docs/decisions/0006-binding-is-not-up-for-grabs.md) decide most of these. A
+closed pull request is not a verdict on the work — the reasoning is in the thread, and the
+same problem is usually welcome in a different shape.
+
+**Neither a security report nor a conduct report is an issue or a pull request.**
+[SECURITY.md](SECURITY.md) is the private channel for a hole in an invariant, and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) is where a report about a person goes.
 
 ## The real-composition check
 
@@ -116,18 +181,14 @@ reader of the package needs belongs in `docs/`, not there.
 
 **Docs in both languages, or in one with a reason.** `README.md` is English and the
 primary document; `README.zh-CN.md` is its counterpart, and a change to one belongs in the
-other. Two reference pages are also paired: `docs/configuration.md` with
-`docs/zh-CN/configuration.md`, and `docs/troubleshooting.md` with
-`docs/zh-CN/troubleshooting.md`. Everything else — the decision records,
+other. Three reference pages are also paired: `docs/configuration.md` with
+`docs/zh-CN/configuration.md`, `docs/troubleshooting.md` with
+`docs/zh-CN/troubleshooting.md`, and the channel contract — `providers/README.md`, which is
+English — with `docs/zh-CN/providers.md`. Everything else — the decision records,
 `docs/development.md`, `docs/releasing.md`, `SECURITY.md`, `CHANGELOG.md`, this file — is
 English only, on the same reasoning that the source, the commit messages, and the issue
 tracker are: one copy to keep true. `README.zh-CN.md` says so at the top, and a request
 for another translated page is a worthwhile issue rather than a silent gap.
-
-`providers/README.md` is the exception, and it is the wrong way round: the channel
-contract is written in Chinese while every document around it is English, so a reader who
-follows the link from either README meets a wall. It is being translated; until then, treat
-a Chinese page in an English-only set as a defect rather than a precedent.
 
 **A new setting touches six places**, and `npm run check:parity` refuses to pass
 until they agree: the `Config` schema in `index.js`, the `SectionSchema` the
@@ -173,3 +234,8 @@ the invariants a report should be measured against.
 
 By contributing you agree that your contribution is licensed under the
 [MIT License](LICENSE).
+
+There is no CLA to sign and no DCO sign-off to add. Contributions come in under the same
+licence the project ships and go out under it, and every commit keeps its author.
+Participation here — issues, discussions, review — is covered by the
+[Code of conduct](CODE_OF_CONDUCT.md).

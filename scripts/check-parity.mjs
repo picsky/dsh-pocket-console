@@ -302,6 +302,10 @@ function checkPublishedLinks(manifest, root) {
   // record that ships — what it must not do is become the reason a published file
   // exists, which is why it lives outside `docs/` and is never in `files`.
   const documents = ['README.md', 'README.zh-CN.md', 'SECURITY.md', 'CHANGELOG.md', 'CONTRIBUTING.md']
+  // The channel contract is published as well, and it is the one published document outside
+  // `docs/`: a link from it to something the tarball does not carry 404s on the registry
+  // exactly the way a README's does.
+  documents.push('providers/README.md')
   const walk = (dir) => {
     if (!existsSync(resolve(root, dir))) return
     for (const entry of readdirSync(resolve(root, dir), { withFileTypes: true })) {

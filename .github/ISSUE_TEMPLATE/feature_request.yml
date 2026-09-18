@@ -1,0 +1,56 @@
+name: Feature or change request
+description: Something the plugin does not do, or does in a way that costs you
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A request that names a **problem** can be solved in more than one way; a request
+        that names a solution can only be accepted or refused. Lead with the problem.
+
+        For "how does this work", [Discussions](https://github.com/picsky/dsh-pocket-console/discussions)
+        is the better room. For anything security-shaped, do not open an issue —
+        [SECURITY.md](https://github.com/picsky/dsh-pocket-console/blob/main/SECURITY.md)
+        is the private channel.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you were trying to do, and where it stopped working or cost you something.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What happens today
+      description: The setting you tried, the card you got, the log line — whatever is closest to the seam.
+    validations:
+      required: false
+  - type: textarea
+    id: shape
+    attributes:
+      label: What you have in mind (optional)
+      description: |
+        A shape for the fix, if you have one. It will be weighed against the position in the
+        README and the existing [decision records](https://github.com/picsky/dsh-pocket-console/tree/main/docs/decisions),
+        so a request that contradicts one of them is asked to argue with it explicitly.
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The plugin version and `dsh --version`, if this is about behaviour you are running.
+    validations:
+      required: false
+  - type: dropdown
+    id: offer
+    attributes:
+      label: Would you implement it?
+      description: An honest "no" is useful — it tells the maintainer to weigh the work as well as the idea.
+      options:
+        - "No — reporting it is all I can do"
+        - "Yes, with some guidance"
+        - "Yes, I have a change ready"
+    validations:
+      required: true

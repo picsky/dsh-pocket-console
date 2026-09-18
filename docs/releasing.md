@@ -46,24 +46,55 @@ The interim path is a manual `pnpm publish` with a granular access token that ha
 
 ## Cutting a release
 
+`main` takes changes only through a pull request, so a release is two steps: the version bump
+lands like any other change, and the tag then names the commit that landed.
+
 ```sh
-npm version minor          # or patch / major; writes package.json and commits
-git push --follow-tags     # pushes the commit and the v<version> tag
+npm version minor --no-git-tag-version   # writes package.json; commits nothing, tags nothing
 ```
+
+Move the changelog's **Unreleased** entries into the new version's section, open the pull
+request, and title it `Release x.y.z`. Merge it once the four checks are green, then tag the
+squash commit it produced:
+
+```sh
+git fetch origin
+git switch main && git pull --ff-only
+git tag -a v0.9.0 -m "Release 0.9.0"
+git push origin v0.9.0
+```
+
+Two things about that flow are enforced rather than advised. **Only the maintainer can create
+a `v*` tag** — a tag is what starts this workflow and therefore what publishes, so a ruleset
+restricts creation to the maintainer and blocks updating or deleting tags. And **the tag must
+name a commit on `main`**: `npm version minor` followed by `git push --follow-tags`, which is
+what this repository did before, tags whatever commit is checked out locally. The ruleset
+refuses the branch half of that push, and if the tag half lands anyway the workflow refuses
+it, because the commit it names is not an ancestor of `origin/main`.
 
 The tag starts the workflow, which:
 
 1. requires the tag to name `package.json`'s version, and the run to be a tag at
    all — a manual dispatch from a branch is refused;
-2. proves the job holds **no publish token**, so the OIDC exchange is the only
+2. requires the tagged commit to be an **ancestor of `origin/main`**, so a tag on a local
+   commit or a side branch cannot publish;
+3. requires all four of that commit's check runs to have concluded `success`. The branch
+   ruleset already required them on the way into `main`; this is the assertion that survives
+   the maintainer's bypass, which exists so a broken workflow can still be repaired. The check
+   runs are read live, so a tag pushed while `main`'s CI is still running is refused **now**
+   and passes on a re-run once those runs are green. The ancestry question is not like that:
+   time does not change whether a commit is on `main`, so a tag that fails item 2 fails
+   however often the job is re-run;
+4. proves the job holds **no publish token**, so the OIDC exchange is the only
    credential it can be using: a stray `NODE_AUTH_TOKEN` or `NPM_TOKEN` fails the run
    rather than silently turning it back into a token publish;
-3. runs `npm run check:parity`, so the one setting that lives in six places cannot
+5. runs `npm run check:parity`, so the one setting that lives in six places cannot
    ship disagreeing, and no published document links to a file the tarball lacks;
-4. runs the suite;
-5. runs `npm publish --provenance`, whose `prepack` refuses a tarball that lost a
-   bundled library or would import a module `files` does not publish;
-6. reads the version back off the registry and fails if it carries **no provenance
+6. runs the suite;
+7. packs with `pnpm`, whose `prepack` refuses a tarball that lost a bundled library or would
+   import a module `files` does not publish, and publishes that tarball with
+   `npm publish --provenance`;
+8. reads the version back off the registry and fails if it carries **no provenance
    attestation** — the release asserts what it claims instead of trusting that the
    previous step meant it.
 
