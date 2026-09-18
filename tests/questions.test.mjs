@@ -419,9 +419,41 @@ test('rejects an unknown request id and a forged option label', async () => {
 
   const expired = await clickCard({ rid: 'nope', v: 'ok' })
   assert.equal(expired.toast.type, 'warning')
+  const retired = observed.patched.length
+  assert.equal(retired, 1, 'the card the press came from is retired, since its request is not here')
 
   const forged = await clickCard({ rid, q: 'q', v: '模型没提供过的选项' })
   assert.equal(forged.toast.type, 'warning', 'an answer no option offered must be refused')
-  assert.equal(observed.patched.length, 0, 'a refused answer must not close the request')
+  assert.equal(observed.patched.length, retired, 'a refused answer must not rewrite the live card')
+})
+
+
+test('a card whose request is gone stops looking answerable', async () => {
+  // Live requests are held in memory, so a restart — or a crash — leaves the card on the
+  // phone with nobody behind it. Pressing it answered with a toast and nothing else, so
+  // the card went on looking like it would take an answer forever. The press names the
+  // message it came from, which is enough to rewrite the card where it lies.
+  const stored = { appId: 'cli_stored', appSecret: 'secret_stored', recipient: 'ou_stored' }
+  const first = await scaffold({ delaySeconds: 0 }, { stored })
+  void first.listenerOf('user-questions/request').handler({
+    questions: [{ id: 'q', question: 'Q?', options: [{ label: 'ok' }] }],
+    signal: new AbortController().signal,
+  }, () => Promise.withResolvers().promise)
+  await sleep(200)
+  const button = callbackValues(sentCard()).find(value => value.v === 'ok')
+  assert.ok(button, 'the card offers its option')
+
+  // The restart: a new process loads the same deployment, and its registry is empty.
+  await scaffold({ delaySeconds: 0 }, { stored })
+
+  const refused = await clickCard(button)
+  assert.equal(refused.toast.type, 'warning', 'the press is refused')
+  assert.match(refused.toast.content, /已处理或已过期/, 'and says why')
+  await sleep(20)
+
+  const dead = JSON.parse(observed.patched.at(-1).data.content)
+  assert.match(JSON.stringify(dead), /请求已结束/, 'the card is rewritten to say the request is over')
+  assert.deepEqual(callbackValues(dead), [], 'and offers nothing left to press')
+  assert.equal(JSON.stringify(dead).includes('ok'), false, 'the option went with the controls')
 })
 

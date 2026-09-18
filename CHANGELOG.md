@@ -19,6 +19,16 @@ out when it does.
   rhythm the desktop composer already steps through (`escalation.js`, `messages.js`). See
   [0011](docs/decisions/0011-one-question-per-card.md).
 
+### Fixed
+
+- **A card whose request no longer existed stayed answerable.** Live requests are held in
+  memory, so after a restart — or a crash — the card on the phone had nothing behind it:
+  pressing a button produced a toast saying the request was gone and the card went on offering
+  the same buttons for good. A press carries the message it came from, so the card is now
+  rewritten where it lies with its controls removed, for question cards and for result notices
+  alike (`escalation.js`, `results.js`, `index.js`). A channel must therefore report the message
+  a press came from (`providers/README.md`).
+
 ## 0.7.9
 
 ### Fixed

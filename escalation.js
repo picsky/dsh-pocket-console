@@ -320,6 +320,27 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
     }
   }
 
+  /**
+   * Take the controls off a card whose request is gone.
+   *
+   * Used when a press names no live request — after a restart, or for a request this
+   * process has already dropped. There is no record left to render from, so the card
+   * gets the least a card can say rather than the content it had; what matters is that
+   * it stops offering buttons that cannot work.
+   * @param handle - the message the press came from, as the channel reported it.
+   */
+  const retireCard = (handle) => {
+    if (handle === undefined || typeof channel.update !== 'function') return
+    const copy = messages()
+    void Promise.resolve(channel.update(handle, {
+      title: `${settings().titlePrefix} ${copy.requestGoneTitle}`,
+      tone: 'muted',
+      body: [copy.requestGone],
+      buttons: [],
+      forms: [],
+    })).catch(error => { log.warn(copy.logMessageRewriteFailed, error) })
+  }
+
   /** Answer one approval from an action payload. */
   const decodeApproval = (record, payload) => {
     if (payload?.v !== ALLOW && payload?.v !== REJECT) return undefined
@@ -403,14 +424,22 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
     escalate,
     /**
      * Route one phone action to its open escalation.
-     * @param payload - the button or form payload the channel echoed.
-     * @param values - submitted form values.
+     * @param action - what the channel reported: the echoed payload, the submitted
+     *   values, and the message the press came from.
      * @returns the channel's toast response, or undefined for an unknown action.
      */
-    handleAction(payload, values) {
+    handleAction({ payload, values, messageId } = {}) {
       const id = typeof payload?.rid === 'string' ? payload.rid : undefined
       const record = id === undefined ? undefined : open.get(id)
-      if (record === undefined) return { toast: messages().requestGone, accepted: false }
+      if (record === undefined) {
+        // The card outlived the request it asks about. The registry is in memory, so a
+        // restart — or a request this process already settled and dropped — leaves a
+        // card whose buttons are still there and whose only answer is a toast saying so.
+        // The press carries the message it came from, so the card is rewritten where it
+        // lies: `muted`, with the controls gone, so it stops looking answerable.
+        retireCard(messageId)
+        return { toast: messages().requestGone, accepted: false }
+      }
       const outcome = record.kind === 'approval'
         ? decodeApproval(record, payload)
         : decodeQuestion(record, payload, values)

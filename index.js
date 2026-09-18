@@ -298,10 +298,13 @@ export async function apply(ctx, config) {
       { prepend: true },
     )
     const offResults = results.install()
-    const offAction = channel.subscribe(({ payload, values }) => {
-      const notice = results.handleAction(payload, values)
+    const offAction = channel.subscribe((action) => {
+      // The action carries the message the press came from, which is how a card whose
+      // request is gone — after a restart, or once settled — is rewritten to stop
+      // looking answerable. It reaches both decoders for that reason.
+      const notice = results.handleAction(action)
       if (notice !== undefined) return notice
-      return escalation.handleAction(payload, values)
+      return escalation.handleAction(action)
     })
 
     // Without a server there is no card to ask for a binding, so the

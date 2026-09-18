@@ -28,7 +28,7 @@ const COPY = {
   allowedOnce: 'Allowed', rejected: 'Rejected', cancelled: 'Cancelled',
   answeredAtDesk: 'Answered at the desk', recorded: (a, t) => `${a}/${t}`,
   answered: summary => `Answered: ${summary}`, answersSubmitted: 'Submitted',
-  requestGone: 'Gone', actionUnknown: 'Unknown', truncated: '…',
+  requestGone: 'Gone', requestGoneTitle: 'Ended', actionUnknown: 'Unknown', truncated: '…',
   // The log lines the machine reaches for, so a case that settles or retries does
   // not fail on copy rather than on behaviour.
   logMessageRewriteFailed: 'rewrite failed', logDeliveryFailed: 'delivery failed',
@@ -188,7 +188,7 @@ test('a phone answer settles the race even if the desktop branch fails afterward
     await new Promise(resolve => setTimeout(resolve, 30))
 
     const allow = delivered[0].buttons.find(button => button.payload.v === 'allowed-once')
-    const handled = escalation.handleAction(allow.payload)
+    const handled = escalation.handleAction({ payload: allow.payload })
     assert.equal(handled.accepted, true, 'the phone answer is the one that settles it')
     assert.equal(await result, 'allowed-once', 'and it is what the caller receives')
 
@@ -241,7 +241,7 @@ test('disposal abandons the phone side and leaves the desktop branch to answer',
   assert.equal(delivered.length, 0, 'a disposed escalation must not deliver a card')
   assert.deepEqual(escalation.pending(), [], 'and the registry is emptied')
   assert.equal(
-    escalation.handleAction({ rid: 'whatever', v: 'allowed-once' }).accepted,
+    escalation.handleAction({ payload: { rid: 'whatever', v: 'allowed-once' } }).accepted,
     false,
     'a press after disposal is refused rather than answered',
   )

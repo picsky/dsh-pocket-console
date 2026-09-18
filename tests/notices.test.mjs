@@ -288,3 +288,31 @@ test('the deployment log follows the deployment language too', async () => {
 })
 
 
+test('a notice card whose process is gone stops taking a reply', async () => {
+  // Notices live in memory too, so after a restart the card still invited an instruction
+  // and answering it produced a toast and nothing else. The press names its message, so
+  // the card is rewritten to stop offering the reply.
+  const stored = { appId: 'cli_stored', appSecret: 'secret_stored', recipient: 'ou_stored' }
+  const first = await scaffold({ resultNotify: 'idle' }, { stored })
+  first.agents.set('s_1', { status: 'idle', followup: () => {} })
+  runTurn(first.listenerOf('session/event').handler, 's_1')
+  await sleep(1100)
+
+  const card = sentCard()
+  const submit = callbackValues(card).find(value => value.submit === true)
+  const [answer] = controlNames(card)
+
+  // The restart: the same deployment loads again with no notice behind it.
+  await scaffold({ resultNotify: 'idle' }, { stored })
+
+  const refused = await clickCard(submit, { [answer]: '接着做' })
+  assert.equal(refused.toast.type, 'warning', 'the reply is refused')
+  assert.match(refused.toast.content, /已过期/, 'and says the result expired')
+  await sleep(20)
+
+  const dead = JSON.parse(observed.patched.at(-1).data.content)
+  assert.match(JSON.stringify(dead), /该结果已过期/, 'the card says the notice is over')
+  assert.deepEqual(callbackValues(dead), [], 'and offers nothing left to reply with')
+})
+
+

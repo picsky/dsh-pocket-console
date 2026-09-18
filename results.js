@@ -184,16 +184,31 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
       notices.delete(id)
       retired += 1
       if (notice.handle === undefined) continue
-      void Promise.resolve(channel.update(notice.handle, {
-        title: `${settings().titlePrefix} ${messages().resultTitle}`,
-        tone: 'muted',
-        body: [headline],
-        buttons: [],
-        forms: [],
-      })).catch(error => { log.warn(messages().logNoticeCardFailed, error) })
+      retract(notice.handle, headline)
     }
     if (retired > 0) log.debug(messages().logNoticeRetired(headline))
     return retired
+  }
+
+  /**
+   * Take the reply control off a notice card that is no longer live.
+   *
+   * A notice card outlives the process that sent it: the map is in memory, so after a
+   * restart a press found nothing and answered with a toast alone, leaving a card that
+   * still looked like it would take a reply. The press carries the message it came from,
+   * so the card is rewritten where it lies.
+   * @param handle - the message the press came from, as the channel reported it.
+   * @param headline - what the card says instead.
+   */
+  function retract(handle, headline) {
+    if (handle === undefined || typeof channel.update !== 'function') return
+    void Promise.resolve(channel.update(handle, {
+      title: `${settings().titlePrefix} ${messages().resultTitle}`,
+      tone: 'muted',
+      body: [headline],
+      buttons: [],
+      forms: [],
+    })).catch(error => { log.warn(messages().logNoticeCardFailed, error) })
   }
 
   /**
@@ -249,15 +264,18 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
   /**
    * Route one phone action. Returns undefined when it names no live notice, so
    * the core keeps decoding approvals and question answers.
-   * @param payload - the button or form payload the channel echoed.
-   * @param values - submitted form values.
+   * @param action - what the channel reported: the echoed payload, the submitted
+   *   values, and the message the press came from.
    * @returns the channel's toast response, or undefined.
    */
-  function handleAction(payload, values) {
+  function handleAction({ payload, values, messageId } = {}) {
     const id = typeof payload?.nid === 'string' ? payload.nid : undefined
     if (id === undefined) return undefined
     const notice = notices.get(id)
-    if (notice === undefined) return { toast: messages().noticeGone, accepted: false }
+    if (notice === undefined) {
+      retract(messageId, messages().noticeGone)
+      return { toast: messages().noticeGone, accepted: false }
+    }
     // The channel names the control and reports what it called it, because a card may
     // not hold two elements of the same name; a card that reported nothing is read
     // under the name this side asked for.

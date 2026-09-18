@@ -111,8 +111,11 @@ onAction({ payload, values, messageId, sender })
   non-form button. A form may declare both `fieldId` and `customFieldId`, in which case both
   values arrive in the same submission — that is how a multi-select answer and its "extra note"
   travel together.
-- `messageId` — the channel's own message handle. The core does not use it; it is for the
-  channel to correlate when implementing `update`.
+- `messageId` — **the message the press came from**, and the core does use it: a press that
+  names no live request rewrites that message with its controls removed. Live requests are held
+  in memory, so a restart leaves cards on the phone that nothing can answer — without this the
+  press produced a toast and the card kept looking answerable. It must identify the message the
+  card is in, so that `update` can reach it.
 - `sender` — **the acting user's identity on that channel**. The core does not use it for
   authorization, because "who may act" is the channel's own trust model; the Feishu channel
   checks here that it equals the bound recipient.

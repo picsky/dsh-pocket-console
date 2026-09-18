@@ -43,6 +43,8 @@ const zh = {
   answered: summary => `已回答：${summary}`,
   answersSubmitted: '已提交全部回答',
   requestGone: '该请求已处理或已过期',
+  /** Titles a card that is rewritten because the request it asked about is gone. */
+  requestGoneTitle: '请求已结束',
   actionUnknown: '无法识别该操作',
   /** Returned by the channel when a card action names no live request. */
   requestExpired: '该请求已失效',
@@ -138,6 +140,8 @@ const en = {
   answered: summary => `Answered: ${summary}`,
   answersSubmitted: 'Every answer submitted',
   requestGone: 'That request was already handled or has expired',
+  /** Titles a card that is rewritten because the request it asked about is gone. */
+  requestGoneTitle: 'Request ended',
   actionUnknown: 'That action could not be recognized',
   requestExpired: 'That request has expired',
   notRecipient: 'Only the bound recipient can act on this card',
