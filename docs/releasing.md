@@ -68,8 +68,9 @@ Two things about that flow are enforced rather than advised. **Only the maintain
 a `v*` tag** — a tag is what starts this workflow and therefore what publishes, so a ruleset
 restricts creation to the maintainer and blocks updating or deleting tags. And **the tag must
 name a commit on `main`**: `npm version minor` followed by `git push --follow-tags`, which is
-what this repository did before, tags whatever commit is checked out locally, and the ruleset
-now refuses the branch push that flow depended on.
+what this repository did before, tags whatever commit is checked out locally. The ruleset
+refuses the branch half of that push, and if the tag half lands anyway the workflow refuses
+it, because the commit it names is not an ancestor of `origin/main`.
 
 The tag starts the workflow, which:
 
@@ -89,8 +90,9 @@ The tag starts the workflow, which:
 5. runs `npm run check:parity`, so the one setting that lives in six places cannot
    ship disagreeing, and no published document links to a file the tarball lacks;
 6. runs the suite;
-7. packs with `pnpm`, then runs `npm publish --provenance`, whose `prepack` refuses a tarball
-   that lost a bundled library or would import a module `files` does not publish;
+7. packs with `pnpm`, whose `prepack` refuses a tarball that lost a bundled library or would
+   import a module `files` does not publish, and publishes that tarball with
+   `npm publish --provenance`;
 8. reads the version back off the registry and fails if it carries **no provenance
    attestation** — the release asserts what it claims instead of trusting that the
    previous step meant it.
