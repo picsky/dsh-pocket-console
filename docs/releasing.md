@@ -62,11 +62,26 @@ is having a bad day. **0.7.7, 0.7.8, and 0.7.9 were all published this way**, be
 workflow has been failing at the publish step, so this is a route that has been used rather
 than a theoretical one.
 
+As of 0.7.9 the workflow has still never completed its publish step. Everything before it
+passes — the tag check, the no-token guard, `check:parity`, the suite, and `prepack` with its
+own verification — and then `npm publish --provenance` dies with npm's own
+`Exit handler never called!`, on 0.7.8's run and again on 0.7.9's. **No release yet carries a
+provenance attestation**, which is the property this workflow exists to provide, so fixing it
+is not cosmetic.
+
 **A hand publish ships a version number that no commit and no tag names.** That is exactly
 how 0.7.8 came to be a byte-for-byte duplicate of 0.7.7: the version was bumped in the
 working tree, published, and never committed, so the registry gained a version the history
 has no record of and the tag check never saw. Bump and commit the version *before*
 publishing, and tag the commit it was published from.
+
+That duplicate also shows what the tag check cannot do. A hand publish never compares the
+version against the registry, so it will happily try a version that is already taken — and
+the workflow cannot report that either, because it dies before the registry answers. 0.7.8
+being taken was found by reading the version list afterwards, which is why the fix meant for
+0.7.8 shipped as 0.7.9. `pnpm view dsh-pocket-console versions` costs one command and belongs
+before the publish, not after it. (The duplicate was deprecated once 0.7.9 was out: the
+registry tells an installer what it is.)
 
 **Use `pnpm publish`, not `npm publish`.** Two separate reasons, and both are fatal:
 
