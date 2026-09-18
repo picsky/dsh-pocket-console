@@ -19,8 +19,8 @@ jobs:
         # Matches the harness engine range: ^22.19 || >=24.
         node: [22, 24]
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
       # One setting lives in six places, and a published document must not link to a
@@ -35,8 +35,8 @@ jobs:
     name: real composition
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       # Only the application that installs the plugin proves it activates: a
@@ -78,8 +78,8 @@ jobs:
     name: publish payload
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       # Every path the manifest promises must exist, and every relative runtime
