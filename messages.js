@@ -116,6 +116,9 @@ const zh = {
   logNoticeStoreReadFailed: '读取会话日志以核对结果通知失败',
   logNoticeRestoreFailed: '恢复上次运行的结果通知失败',
   logNoticeRestored: count => `已恢复 ${count} 条上次运行的结果通知，仍可回复。`,
+  logNoticeStored: rid => `结果通知已记入持久存储（${rid}）。`,
+  logNoticeRestoreEmpty: '上次运行没有留下结果通知。',
+  logNoticeRestoreRetired: (rid, reason) => `恢复通知 ${rid} 时作废：${reason}`,
   logInstructionQueued: '已把手机上的指令排入会话。',
   logInstructionFailed: '指令注入失败',
 }
@@ -211,6 +214,9 @@ const en = {
   logNoticeStoreReadFailed: 'reading the session log to check a result notice failed',
   logNoticeRestoreFailed: 'restoring the result notices from the last run failed',
   logNoticeRestored: count => `restored ${count} result notice(s) from the last run; they still take a reply.`,
+  logNoticeStored: rid => `result notice written to durable storage (${rid}).`,
+  logNoticeRestoreEmpty: 'the last run left no result notices behind.',
+  logNoticeRestoreRetired: (rid, reason) => `restored notice ${rid} was retired: ${reason}`,
   logInstructionQueued: 'the instruction from the phone was queued for the session.',
   logInstructionFailed: 'injecting the instruction failed',
 }

@@ -172,7 +172,7 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
         handle,
         seq: await sessionSeq(session),
         sentAt: track.sentAt,
-      })
+      }).then(() => { log.info(messages().logNoticeStored(id)) })
     } catch (error) {
       notices.delete(id)
       log.warn(messages().logNoticeSendFailed, error)
@@ -238,6 +238,10 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
    * @returns true, false, or undefined when there is no way to tell.
    */
   async function sessionExists(session) {
+    // A live agent is proof on its own: whatever the corpus says, this session is here.
+    // The check exists to avoid retiring a notice over an ordinary restart, so it must
+    // not be able to do so on a listing that simply does not see the session yet.
+    if (ctx.get?.('agents')?.get?.(session) !== undefined) return true
     const query = ctx.get?.('sessionQuery')
     if (query === undefined || typeof query.filterSessions !== 'function') return undefined
     try {
@@ -282,32 +286,49 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
   /** Read the stored notices back and put each through the rules that retire one. */
   async function restoreFromStore() {
     const stored = await store.open()
-    if (stored.length === 0) return
+    if (stored.length === 0) {
+      // Diagnostic: an ordinary startup has nothing to restore, and saying so every time
+      // would be noise rather than news.
+      log.debug(messages().logNoticeRestoreEmpty)
+      return
+    }
     let kept = 0
     for (const record of stored) {
       if (disposed) return
       if (await sessionExists(record.session) === false) {
         // The session itself is gone, so there is nothing left to instruct.
-        retract(record.handle, messages().noticeGone)
-        void store.remove(record.rid)
+        retireRestored(record, messages().noticeGone)
         continue
       }
       if (kept >= RESTORE_LIMIT) {
         // More outstanding notices than a reader could act on: the oldest are retired
         // rather than left as a growing pile of cards that all claim to be live.
-        retract(record.handle, messages().superseded)
-        void store.remove(record.rid)
+        retireRestored(record, messages().superseded)
         continue
       }
       if (record.seq !== undefined && await spokeSince(record.session, record.seq) === true) {
-        retract(record.handle, messages().readerSpoke)
-        void store.remove(record.rid)
+        retireRestored(record, messages().readerSpoke)
         continue
       }
       noticeSet(record.rid, { session: record.session, handle: record.handle })
       kept += 1
     }
     if (kept > 0) log.info(messages().logNoticeRestored(kept))
+  }
+
+  /**
+   * Retire one notice that came back from the previous run.
+   *
+   * Which rule fired is logged, because from outside every one of them looks the same:
+   * a card that no longer takes a reply. Telling them apart is the difference between a
+   * session that moved on and a check that simply cannot see it.
+   * @param record - the stored notice.
+   * @param reason - the copy naming the rule that retired it.
+   */
+  function retireRestored(record, reason) {
+    log.info(messages().logNoticeRestoreRetired(record.rid, reason))
+    retract(record.handle, reason)
+    void store.remove(record.rid)
   }
 
   /** Record one notice; the map is the rid's validity window for this run. */
