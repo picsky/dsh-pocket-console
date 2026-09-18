@@ -62,12 +62,23 @@ is having a bad day. **0.7.7, 0.7.8, and 0.7.9 were all published this way**, be
 workflow has been failing at the publish step, so this is a route that has been used rather
 than a theoretical one.
 
-As of 0.7.9 the workflow has still never completed its publish step. Everything before it
-passes — the tag check, the no-token guard, `check:parity`, the suite, and `prepack` with its
-own verification — and then `npm publish --provenance` dies with npm's own
-`Exit handler never called!`, on 0.7.8's run and again on 0.7.9's. **No release yet carries a
-provenance attestation**, which is the property this workflow exists to provide, so fixing it
-is not cosmetic.
+As of 0.7.9 the workflow had never once completed its publish step, and the reason turned out not
+to be the publish at all. `npm publish --provenance` died with npm's own
+`Exit handler never called!` — and so did `npm pack --dry-run`, which never goes near the
+registry — while `pnpm pack` on the same tree succeeded. **The packer was the culprit, not the
+credentials.** `pnpm install` hard-links its store into `node_modules`, and npm 11.19.0 dies on
+that tree before it writes anything, while npm 11.6.2 packs hard-link entries the registry then
+refuses with `E415`. So the workflow packs with `pnpm pack` and hands the tarball to
+`npm publish --provenance`, which is the half npm does correctly; it refuses a tarball carrying
+hard links before publishing it. **No release before 0.8.0 carries a provenance attestation** —
+that is the property this workflow exists to provide, and it is why the crash was worth chasing
+instead of working around with a token.
+
+Two lessons from finding it, both now in the workflow. A crash inside npm's own code says only
+that npm crashed, so the workflow dumps npm's debug log when a publish fails — that log is the
+one place it records how far it got, and it dies with the runner. And "is it the tool or the
+tree" was settled by running the same command through an older npm in the same job: the whole
+investigation was three lines of shell.
 
 **A hand publish ships a version number that no commit and no tag names.** That is exactly
 how 0.7.8 came to be a byte-for-byte duplicate of 0.7.7: the version was bumped in the
