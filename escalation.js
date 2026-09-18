@@ -95,26 +95,37 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
     if (questions.length > 1) {
       body.push(copy.progress(recorded.size, questions.length))
     }
+    // An answered question keeps its place as a record of what is already decided,
+    // and loses its controls.
     for (const question of questions) {
-      const heading = question.header === undefined ? '' : `**${question.header}**`
       const answer = recorded.get(question.id)
-      if (answer !== undefined) {
-        // A recorded answer keeps its place and loses its controls, so the user
-        // sees what they already chose instead of a card that never changes.
-        body.push([
-          heading,
-          question.question,
-          `✅ ${answer.custom ?? answer.selected.join(copy.selectionSeparator)}`,
-        ].filter(Boolean).join('\n\n'))
-        continue
-      }
+      if (answer === undefined) continue
+      body.push([
+        question.header === undefined ? '' : `**${question.header}**`,
+        question.question,
+        `✅ ${answer.custom ?? answer.selected.join(copy.selectionSeparator)}`,
+      ].filter(Boolean).join('\n\n'))
+    }
+
+    // One question is asked at a time, and answering it rewrites the card to the next.
+    //
+    // A card is a flat document with the text blocks first and the controls after
+    // them, so a card carrying several questions renders every question's text and
+    // then every question's buttons: the reader cannot tell which button answers
+    // which question, and two identical `submitOther` forms are indistinguishable.
+    // Asking one question per card is also the rhythm the desktop composer already
+    // steps through, so both surfaces walk the same request the same way.
+    const current = questions.find(question => !recorded.has(question.id))
+    const position = current === undefined ? 1 : questions.indexOf(current) + 1
+    if (current !== undefined) {
+      const heading = current.header === undefined ? '' : `**${current.header}**`
       body.push([
         heading,
-        question.question,
-        question.detail === undefined ? '' : clip(question.detail, budget),
+        current.question,
+        current.detail === undefined ? '' : clip(current.detail, budget),
       ].filter(Boolean).join('\n\n'))
 
-      const options = question.options ?? []
+      const options = current.options ?? []
       // A button label carries no room for an option's description, so the
       // body holds the legend and the buttons stay the answer controls.
       if (options.some(option => option.description !== undefined && option.description !== '')) {
@@ -125,9 +136,9 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
           return `${index + 1}. **${option.label}**${description}`
         })].join('\n'))
       }
-      if (options.length === 0 || question.multiSelect === true) {
+      if (options.length === 0 || current.multiSelect === true) {
         forms.push({
-          payload: { rid: record.id, q: question.id, submit: true },
+          payload: { rid: record.id, q: current.id, submit: true },
           fieldId: FORM_VALUE_FIELD,
           ...(options.length === 0
             ? {}
@@ -137,29 +148,33 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
                 // the form offers the second control the desktop card shows.
                 customFieldId: FORM_CUSTOM_FIELD,
               }),
-          multiSelect: question.multiSelect === true,
+          multiSelect: current.multiSelect === true,
           submitLabel: copy.submitAnswer,
         })
-        continue
-      }
-      for (const option of options) {
-        buttons.push({
-          payload: { rid: record.id, q: question.id, v: option.label },
-          label: option.label,
-          tone: 'default',
+      } else {
+        for (const option of options) {
+          buttons.push({
+            payload: { rid: record.id, q: current.id, v: option.label },
+            label: option.label,
+            tone: 'default',
+          })
+        }
+        // The desktop card always accepts a typed answer beside its options, so
+        // the phone needs the same door; a single-select typed answer carries the
+        // text alone, with no option selected.
+        forms.push({
+          payload: { rid: record.id, q: current.id, submit: true },
+          fieldId: FORM_VALUE_FIELD,
+          submitLabel: copy.submitOther,
         })
       }
-      // The desktop card always accepts a typed answer beside its options, so
-      // the phone needs the same door; a single-select typed answer carries the
-      // text alone, with no option selected.
-      forms.push({
-        payload: { rid: record.id, q: question.id, submit: true },
-        fieldId: FORM_VALUE_FIELD,
-        submitLabel: copy.submitOther,
-      })
     }
     return {
-      title: `${settings().titlePrefix} ${copy.questionTitle}`,
+      // Which question this is, so a card that has moved on says where the reader
+      // is. One question needs no position: the title would only repeat itself.
+      title: questions.length > 1
+        ? `${settings().titlePrefix} ${copy.questionOf(position, questions.length)}`
+        : `${settings().titlePrefix} ${copy.questionTitle}`,
       tone: 'info',
       body,
       buttons,

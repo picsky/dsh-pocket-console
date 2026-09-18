@@ -91,6 +91,13 @@ step, and the event dispatcher's ready line all go to `debug`; errors and warnin
 }
 ```
 
+**A view is one message.** One request can carry several questions, and the core sends them
+**one per view**, rewriting the same message to the next question as each is answered — the
+rhythm the desktop composer already steps through. It never puts two questions' controls in one
+view, because a card renders its text blocks first and its controls after them: two questions on
+one card would show both questions' text and then both questions' controls, with nothing to say
+which button answers which.
+
 ## Actions (channel → core)
 
 A channel must echo `payload` back **verbatim**:
@@ -126,12 +133,13 @@ The core reads `values` through that map, so it looks up `form_2_value` and not 
 channel that renames without reporting the mapping looks to the core like a submission carrying
 no answer at all: the values arrive and are discarded.
 
-Why a channel has to rename at all: **a card may not hold two elements of the same name.** The
-core names every question's controls `value` and `custom`, because a form answers one question,
-so a card answering three questions would otherwise hold three elements called `value` — and the
-platform refuses the whole card, which reaches the reader as no message at all. The Feishu
-channel namespaces each form's controls and reports the map. A channel that never puts two forms
-on one card, or that names its controls some other way, reports only what it changed.
+Why a channel may have to rename at all: **a card may not hold two elements of the same name.**
+The core names a form's controls `value` and `custom` — the same two names on every form, because
+a form answers exactly one question — so a channel that builds a card holding more than one form
+would repeat them, and the platform refuses the whole card, which reaches the reader as no message
+at all. The core does not build such a card: it sends one question per view. The Feishu channel
+namespaces each form's controls and reports the map anyway, so that its renderer is correct for any
+view it is handed rather than only the ones this core currently builds.
 
 ## Security requirements
 

@@ -6,6 +6,19 @@ names the point in the history it corresponds to, so `git log` can fill in the d
 The project is pre-1.0: a minor bump can carry a behaviour change, and one is called
 out when it does.
 
+## Unreleased
+
+### Changed
+
+- **A request with several questions is now asked one question per card, and the card steps
+  to the next as each is answered.** Every question used to be rendered into one card, and
+  because a card puts its text blocks first and its controls after them, the reader got all
+  the questions' text and then all the questions' buttons below it — one identically worded
+  typed-answer box per question, with nothing to say which was which. Answered questions stay
+  on the card as a receipt and the title names the position (`提问 · 第 2/4 题`). This is the
+  rhythm the desktop composer already steps through (`escalation.js`, `messages.js`). See
+  [0011](docs/decisions/0011-one-question-per-card.md).
+
 ## 0.7.9
 
 ### Fixed

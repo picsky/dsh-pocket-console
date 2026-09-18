@@ -18,6 +18,7 @@ import { createEscalation } from '../escalation.js'
 /** Copy for a case that is not about language. */
 const COPY = {
   approvalTitle: 'Tool approval', questionTitle: 'Question',
+  questionOf: (position, total) => `Question ${position} of ${total}`,
   toolLabel: tool => `**Tool**: ${tool}`, callIdLabel: id => `**Call id**: ${id}`,
   reasonLabel: reason => `**Reason**: ${reason}`,
   approvalLive: 'live', approvalUpgraded: seconds => `upgraded after ${seconds}s`,

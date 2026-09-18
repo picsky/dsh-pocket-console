@@ -83,7 +83,9 @@ test('accumulates answers until every question is answered', async () => {
     'the answered question loses its controls while the open one keeps them',
   )
 
-  await clickCard(values.find(value => value.q === 'b'))
+  // The next question arrives with the rewrite, so its controls are read from there:
+  // one question per card means the card that asked `a` never carried `b` at all.
+  await clickCard(callbackValues(rewritten).find(value => value.q === 'b'))
   assert.deepEqual(await result, {
     answers: [
       { id: 'a', selected: ['a1'] },
@@ -105,12 +107,13 @@ test('accumulates answers until every question is answered', async () => {
 })
 
 
-test('every element in a card is named uniquely, however many questions it carries', async () => {
-  // A card may not hold two elements of the same name, and the core names every
-  // question's controls the same two things (`value`, `custom`). A card carrying three
-  // questions therefore used to hold three elements called `value`, which the platform
-  // refuses outright — so the message never arrived at all, and the only trace was the
-  // delivery warning in the log. No fixture could catch it: they all accept any card.
+test('a card asks one question at a time and steps to the next as each is answered', async () => {
+  // A card is a flat document: it renders every text block first and then every
+  // control. A card carrying several questions therefore showed every question's text
+  // and then every question's buttons below it, so the reader could not tell which
+  // button answered which question — and the typed-answer forms were identical, one
+  // per question, with nothing to say which was which. One question per card fixes
+  // that, and stepping the card as each is answered matches the desktop composer.
   const { route, listenerOf } = await scaffold()
   await bind(route)
 
@@ -126,49 +129,54 @@ test('every element in a card is named uniquely, however many questions it carri
   }, () => desktop.promise)
   await sleep(1200)
 
-  const card = sentCard()
-  const names = []
-  const walk = (node) => {
-    if (node === null || typeof node !== 'object') return
-    if (Array.isArray(node)) { for (const item of node) walk(item); return }
-    if (typeof node.name === 'string') names.push(node.name)
-    for (const value of Object.values(node)) walk(value)
-  }
-  walk(card)
+  // The card as it now stands: the first delivery, then each rewrite of it.
+  const shown = () => (observed.patched.length === 0
+    ? sentCard()
+    : JSON.parse(observed.patched.at(-1).data.content))
+  // Which questions the card offers controls for.
+  const asked = (card) => [...new Set(callbackValues(card).map(value => value.q))]
 
-  assert.ok(names.length >= 6, `the card names its controls: ${names.join(', ')}`)
-  const seen = new Set()
-  const repeated = names.filter(name => (seen.has(name) ? true : (seen.add(name), false)))
-  assert.deepEqual(repeated, [], `no two elements may share a name (${names.join(', ')})`)
-
-  // The names are namespaced per form, which is what keeps them unique — and the mapping
-  // comes back on the submit payload so the core can read the values it receives.
-  assert.deepEqual(
-    [...new Set(names)].sort(),
-    [
-      'form_0', 'form_0_value',
-      'form_1', 'form_1_value',
-      'form_2', 'form_2_custom', 'form_2_value',
-      'form_3', 'form_3_value',
-    ],
-    `each question has its own namespaced controls: ${[...new Set(names)].sort().join(', ')}`,
+  const first = shown()
+  assert.match(JSON.stringify(first), /第 1\/4 题/, 'the card says which question it is asking')
+  assert.match(JSON.stringify(first), /A\?/, 'and it carries that question')
+  assert.deepEqual(asked(first), ['a'], 'only that question offers controls')
+  assert.equal(
+    first.body.elements.filter(element => element.tag === 'form').length,
+    1,
+    'one question means one form, so two controls can never share a name',
   )
+  assert.equal(JSON.stringify(first).includes('B?'), false, 'the later questions are not on it yet')
 
-  // Answering each one still works, which is what the namespacing must not break.
-  const payloads = callbackValues(card)
-  await clickCard(payloads.find(value => value.q === 'a' && value.v === 'a1'))
-  await clickCard(payloads.find(value => value.q === 'b' && value.v === 'b2'))
-  const multi = payloads.find(value => value.q === 'c' && value.submit === true)
-  const checker = card.body.elements.find(element => element.name === 'form_2').elements
-    .find(element => element.tag === 'checker').name
-  const note = card.body.elements.find(element => element.name === 'form_2').elements
-    .find(element => element.tag === 'input').name
-  await clickCard(multi, { [checker]: ['c1'], [note]: '一条说明' })
-  const free = payloads.find(value => value.q === 'd' && value.submit === true)
-  const [freeName] = card.body.elements.find(element => element.name === 'form_3').elements
-    .filter(element => element.tag === 'input')
-    .map(element => element.name)
-  await clickCard(free, { [freeName]: '自由作答' })
+  await clickCard(callbackValues(first).find(value => value.q === 'a' && value.v === 'a1'))
+  await sleep(20)
+  const second = shown()
+  assert.match(JSON.stringify(second), /已答 1\/4/, 'the progress line advances')
+  assert.match(JSON.stringify(second), /✅ a1/, 'the answered question stays visible as a receipt')
+  assert.match(JSON.stringify(second), /第 2\/4 题/, 'and the card moved to the next question')
+  assert.deepEqual(asked(second), ['b'], 'the answered question loses its controls')
+
+  await clickCard(callbackValues(second).find(value => value.q === 'b' && value.v === 'b2'))
+  await sleep(20)
+  const third = shown()
+  assert.deepEqual(asked(third), ['c'], 'a multi-select question is asked on its own')
+  assert.equal(JSON.stringify(third).includes('D?'), false, 'and the question after it still waits')
+
+  // The form's control names are read off the card: one question per card means one
+  // form, and the channel still reports the names it used on the submit.
+  const [checker, note] = controlNames(third)
+  await clickCard(
+    callbackValues(third).find(value => value.q === 'c' && value.submit === true),
+    { [checker]: ['c1'], [note]: '一条说明' },
+  )
+  await sleep(20)
+  const fourth = shown()
+  assert.deepEqual(asked(fourth), ['d'], 'a question with no options is asked on its own')
+
+  const [answer] = controlNames(fourth)
+  await clickCard(
+    callbackValues(fourth).find(value => value.q === 'd' && value.submit === true),
+    { [answer]: '自由作答' },
+  )
 
   assert.deepEqual(await result, {
     answers: [
@@ -178,6 +186,12 @@ test('every element in a card is named uniquely, however many questions it carri
       { id: 'd', selected: [], custom: '自由作答' },
     ],
   })
+  await sleep(20)
+  assert.match(
+    JSON.stringify(shown()),
+    /已回答/,
+    'the last answer settles the request and the card says so',
+  )
 })
 
 

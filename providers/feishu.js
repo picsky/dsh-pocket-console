@@ -278,12 +278,13 @@ function renderCard(view, messages) {
     ))
   }
 
-  // A card may not hold two elements of the same name. The core names every question's
-  // controls `value` and `custom` — the same two names on every form — so a card
-  // carrying three questions held three elements called `value`, and the platform
-  // refused the whole card: the message never arrived at all, and the only trace was a
-  // delivery warning in the log. Each form therefore namespaces the names it submits
-  // under, and the submit carries the mapping back so the core knows what to read.
+  // A card may not hold two elements of the same name. The core names a form's controls
+  // `value` and `custom` on every form, because a form answers one question, so a card
+  // carrying two forms would repeat both names and the platform would refuse the whole
+  // card — which reaches the reader as no message at all, with only a delivery warning
+  // in the log to show for it. The core sends one question per view and so never builds
+  // such a card; the namespacing stays because this renderer must be correct for any
+  // view it is handed. The submit carries the mapping back so the core knows what to read.
   for (const [index, form] of view.forms.entries()) {
     const name = (field) => `form_${index}_${field}`
     const submits = Object.fromEntries(
