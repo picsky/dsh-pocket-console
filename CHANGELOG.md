@@ -31,6 +31,10 @@ out when it does.
 - **Dependabot watches the action pins weekly and the bundled transport monthly**, and
   repository security updates are enabled. There are no devDependencies here, so an npm
   update is always a change to what an installer runs.
+- **`npm run check:parity` reads the channel contract too.** `providers/README.md` is the one
+  published document outside `docs/`, and it was not being held to the published file list —
+  a link from it to something the tarball does not carry would have 404d on the registry with
+  the gate reporting success.
 
 ### Changed
 
@@ -42,8 +46,6 @@ out when it does.
   follow it from `CONTRIBUTING.md` rather than meeting a 404.
 - **Both READMEs link `CONTRIBUTING.md`**, which neither did before: what a change needs was
   reachable only from the documentation index.
-
-### Changed
 
 - **Both READMEs were rewritten around what the plugin is not.** The old first line borrowed
   a GUI-mirroring plugin's slogan and promised approval "from anywhere", which is the one thing

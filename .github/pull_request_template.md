@@ -1,7 +1,8 @@
 <!--
 One topic per pull request. If this changes more than one thing, say below why
-they cannot land separately — a PR is squashed into one commit on `main`, so the
-description is what the history records.
+they cannot land separately — a PR is squashed into one commit on `main`, and that
+commit keeps the branch's own commit messages, so write those as if they were the
+record. They are.
 
 An unticked box is allowed; an unexplained one is not. Delete a line this change
 genuinely does not touch, and say why in the notes.

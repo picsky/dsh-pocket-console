@@ -6,7 +6,7 @@ channel-neutral core, one transport, and a browser card.
 ## Getting set up
 
 There is no build step and nothing to install for development — the suite
-replaces its five production dependencies with in-repo stubs through a Node
+replaces its seven production dependencies with in-repo stubs through a Node
 module resolution hook. Cases live under `tests/`, one file per domain, over a
 shared harness (`tests/support/harness.mjs`); `node --test` runs them in
 parallel.
@@ -54,9 +54,10 @@ Then:
 1. **Branch from `main`** and name the branch for the change — `fix/…`, `docs/…`,
    `channel/…`, `feat/…`. Nothing enforces the spelling; it is what makes a list of open
    branches readable.
-2. **One topic per pull request.** A pull request is squashed into a single commit on
-   `main`, so its description is what the history keeps. Say what was wrong and what the
-   change does about it, then say what the diff cannot: what you tried and rejected, what
+2. **One topic per pull request.** A pull request is squashed into one commit on `main`, and
+   that commit keeps the branch's own commit messages — so the commit message is the record,
+   and the description is what your reviewer reads. Say in the description what was wrong,
+   what the change does about it, and what the diff cannot: what you tried and rejected, what
    is deliberately out of scope, and what still needs a real Feishu tenant to confirm.
 3. **Write the commit message as one imperative sentence**, in the voice of the history
    around it — `Open the notice store on first use, so no write can be silently dropped`.
@@ -180,18 +181,14 @@ reader of the package needs belongs in `docs/`, not there.
 
 **Docs in both languages, or in one with a reason.** `README.md` is English and the
 primary document; `README.zh-CN.md` is its counterpart, and a change to one belongs in the
-other. Two reference pages are also paired: `docs/configuration.md` with
-`docs/zh-CN/configuration.md`, and `docs/troubleshooting.md` with
-`docs/zh-CN/troubleshooting.md`. Everything else — the decision records,
+other. Three reference pages are also paired: `docs/configuration.md` with
+`docs/zh-CN/configuration.md`, `docs/troubleshooting.md` with
+`docs/zh-CN/troubleshooting.md`, and the channel contract — `providers/README.md`, which is
+English — with `docs/zh-CN/providers.md`. Everything else — the decision records,
 `docs/development.md`, `docs/releasing.md`, `SECURITY.md`, `CHANGELOG.md`, this file — is
 English only, on the same reasoning that the source, the commit messages, and the issue
 tracker are: one copy to keep true. `README.zh-CN.md` says so at the top, and a request
 for another translated page is a worthwhile issue rather than a silent gap.
-
-`providers/README.md` is the exception, and it is the wrong way round: the channel
-contract is written in Chinese while every document around it is English, so a reader who
-follows the link from either README meets a wall. It is being translated; until then, treat
-a Chinese page in an English-only set as a defect rather than a precedent.
 
 **A new setting touches six places**, and `npm run check:parity` refuses to pass
 until they agree: the `Config` schema in `index.js`, the `SectionSchema` the

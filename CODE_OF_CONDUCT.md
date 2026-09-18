@@ -1,10 +1,15 @@
 # Code of conduct
 
 This repository's community follows the **Contributor Covenant, version 3.0**, reproduced
-below in full. Two things are this project's own rather than the template's, and both are
-marked in place: the channel a report goes to, and the enforcement process. The
+below in full. Two things are this project's own rather than the template's: the sentence in
+**Reporting an Issue** that names the channel, and the note ahead of the enforcement ladder
+that says who applies it. The
 [Contributor Covenant FAQ](https://www.contributor-covenant.org/faq) is the place to read
 what the text means before arguing with how it is applied here.
+
+The text below addresses **Community Moderators** in the plural because that is how the
+covenant is written. This project has one maintainer, who fills that role: where it says
+*Community Moderators*, read the one person the reporting section names.
 
 Conduct reports are separate from the issue tracker. `SECURITY.md` explains why a security
 report is private; the same reasoning applies to a report about a person.

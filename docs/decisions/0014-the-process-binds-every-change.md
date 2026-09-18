@@ -45,20 +45,24 @@ that cannot publish anything CI has not verified.**
   pull request can never satisfy the ruleset. Four minutes of runner time is the cheaper
   failure.
 - **Squash merges, linear history, no force-push, no branch deletion.** One pull request is
-  one commit on `main`, which is what makes squashing honest: the description is the record,
-  and the branch's intermediate commits are not. This is why the process asks for one topic
-  per pull request.
+  one commit on `main`, and the configuration keeps the branch's **commit messages** rather
+  than the pull request's description (`squash_merge_commit_message: COMMIT_MESSAGES`), so
+  what is written on the branch is what the history keeps and the merge box is the last place
+  it can be corrected. This is why the process asks for one topic per pull request: the
+  intermediate commits are collapsed, and what survives has to read as one change.
 - **The repository administrator is a bypass actor on the branch ruleset, and that is the
   whole shortcut.** It exists for the two cases where the rules are the obstacle rather than
   the safeguard: repairing CI when CI is what is broken, and landing a fix during an
   incident. It is not a faster route for ordinary work, and GitHub records every use as a
   bypass on the ruleset's insights, so "documented" is checkable rather than a promise.
-- **`v*` tags may be created only by the maintainer, and are neither updated nor deleted.**
-  The ruleset's bypass actor is again the administrator, because the maintainer is who
+- **`v*` tags may be created only by the maintainer, and nobody else may update or delete
+  one.** The ruleset's bypass actor is again the administrator, because the maintainer is who
   publishes; everyone else is refused, which is the actual change — before it, write access
-  and publish access were the same thing. The tag ruleset is the only place this is written
-  down for anyone who is not the maintainer, since the workflow itself cannot refuse a tag
-  that it never gets to see.
+  and publish access were the same thing. The bypass covers deletion as well, deliberately: a
+  tag pushed by mistake has to be recoverable, and a tag that names nothing publishable is
+  harmless once it is gone. The tag ruleset is the only place this is written down for anyone
+  who is not the maintainer, since the workflow itself cannot refuse a tag that it never gets
+  to see.
 - **The release workflow re-checks what the ruleset assumes**: the tagged commit must be an
   ancestor of `origin/main`, and its four checks must have concluded `success`. A tag is not
   a claim about a commit; it is a commit, and the shortcut exists to let a human act quickly,
@@ -78,9 +82,11 @@ behind it.
   pull request, then tag the merge commit once `main` is green. `npm version minor` followed
   by `git push --follow-tags` no longer describes the flow, and `docs/releasing.md` was
   rewritten with it.
-- A tag pushed before `main`'s checks finish is refused by the workflow. The recovery is to
-  wait and tag again, not to re-run the job: the guard is asking about the commit, and time
-  does not change the answer.
+- A tag pushed before `main`'s checks finish is refused by the workflow, and the recovery
+  depends on which assertion refused it. The check runs are read live, so if CI was still
+  running the job passes on a re-run once `main` is green — that guard was asking about *now*.
+  The ancestry guard is asking about the commit, and no re-run changes that answer; the tag has
+  to be deleted through the bypass and pushed again against a commit `main` holds.
 - The bypass is a real hole, and it is bounded rather than eliminated: it can put an
   unverified commit on `main`, and it can therefore make the ancestry check pass for a
   commit CI never judged. That is the reason this record exists instead of a comment in the

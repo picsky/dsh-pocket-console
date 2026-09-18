@@ -9,15 +9,18 @@ Re-run any line with the commands in
 The process these checks sit inside is [`internal/maintaining.md`](maintaining.md): issue,
 branch, pull request, the four required checks, and a two-step release. It is enforced by the
 repository's rulesets rather than written down and hoped for —
-[ADR 0014](../docs/decisions/0014-the-process-binds-every-change.md). The counts in the table
-are a snapshot taken before that process landed and the suite has grown since; re-run them
-rather than reading them as current.
+[ADR 0014](../docs/decisions/0014-the-process-binds-every-change.md).
+
+**The table is a 0.8.1 snapshot, and the tree has moved since.** Rows 2 and 3 were re-run when
+the process landed (83 cases; 26 published entries); the rest still describe the tree of that
+release, so re-run a row before relying on its number. A count in here is a claim about a
+moment, not a property of the repository.
 
 | # | Check | Command | Result |
 |---|---|---|---|
 | 1 | Field, default, and published-link parity | `npm run check:parity` | **pass** — 8 config fields across 6 places, every published document links only to published files, every rendered visual resolves |
-| 2 | Behaviour suite | `npm test` | **65/65 pass**, no network, no credentials |
-| 3 | Manifest covers what it promises | `npm pack --dry-run` | **pass** — 23 `files` entries all exist |
+| 2 | Behaviour suite | `npm test` | **83/83 pass**, no network, no credentials |
+| 3 | Manifest covers what it promises | manifest and the tree | **pass** — 26 `files` entries all exist |
 | 4 | Bundled transport survives packing | `node scripts/verify-pack.mjs` | **pass** — 9 published modules close over their relative imports |
 | 5 | Tarball composition | `npm pack --dry-run` | 4.3 MB packed / 41.6 MB unpacked, 1152 files, 81 bundled deps; **16 docs files in, 0 `internal/`, 0 `assets/`** |
 | 6 | Local links | scan of every `*.md` | **83 links across 25 files, 0 broken** |

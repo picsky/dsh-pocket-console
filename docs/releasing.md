@@ -80,10 +80,11 @@ The tag starts the workflow, which:
    commit or a side branch cannot publish;
 3. requires all four of that commit's check runs to have concluded `success`. The branch
    ruleset already required them on the way into `main`; this is the assertion that survives
-   the maintainer's bypass, which exists so a broken workflow can still be repaired. A tag
-   pushed before `main` is green is refused here, and the recovery is to wait and tag the
-   same commit again — re-running the job does not change the answer, because the question is
-   about the commit;
+   the maintainer's bypass, which exists so a broken workflow can still be repaired. The check
+   runs are read live, so a tag pushed while `main`'s CI is still running is refused **now**
+   and passes on a re-run once those runs are green. The ancestry question is not like that:
+   time does not change whether a commit is on `main`, so a tag that fails item 2 fails
+   however often the job is re-run;
 4. proves the job holds **no publish token**, so the OIDC exchange is the only
    credential it can be using: a stray `NODE_AUTH_TOKEN` or `NPM_TOKEN` fails the run
    rather than silently turning it back into a token publish;

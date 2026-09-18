@@ -16,18 +16,19 @@ Look at the tracker when there is something in it. There is no SLA, and inventin
 side project is how a promise becomes a failure; what the repository does promise is in
 `CONTRIBUTING.md` — a report gets read, and a pull request gets an answer in days.
 
-**Labels.** The GitHub defaults plus two of this project's own:
+**Labels.** The GitHub defaults, plus three that mean something here:
 
 | Label | Means |
 |---|---|
 | `bug` | The behaviour disagrees with a document or a decision record |
 | `enhancement` | A change request; what the feature-request form files |
 | `documentation` | A document is wrong, missing, or links somewhere that is not there |
+| `accessibility` | The card or the page is a barrier for someone — a bug, with a person's account of it |
+| `breaking` | A change a deployment must read the changelog for before upgrading |
+| `channel` | A transport contribution: a new file under `providers/` |
 | `good first issue` | Small, self-contained, and the surrounding contract is written down |
 | `help wanted` | Wanted, and not something the maintainer is going to get to soon |
 | `question` | Answered, then closed — Discussions is the better room for the next one |
-| `breaking` | A change a deployment must read the changelog for before upgrading |
-| `channel` | A transport contribution: a new file under `providers/` |
 
 There is deliberately **no `security` label**: a public label on a private report is a
 contradiction. Security reports arrive through `SECURITY.md`'s private channel and never as
@@ -40,30 +41,28 @@ before assuming the report is wrong.
 
 ## 2. Reviewing a pull request
 
-Review in this order, because the later questions are wasted work if an earlier one fails:
-
-1. **Does it belong in the plugin?** The position is in `README.md`, and the refusals after
-   it are load-bearing. A change that contradicts a decision record needs a new record, not
-   a quiet edit.
-2. **Does it arrive with the case that pins it?** `npm test` must fail without the change.
-   A behaviour change with no new case is a claim nobody can check.
-3. **Is a non-obvious choice recorded?** If the reasoning is not readable from the file that
-   implements it, it is an ADR.
-4. **Can the diff be smaller?** Ask once, plainly. Most first contributions are right in
-   substance and too large in surface.
+Review in the order `CONTRIBUTING.md` sets out — does it belong in the plugin, does it arrive
+with the case that pins it, is a non-obvious choice recorded, can the diff be smaller — because
+the later questions are wasted work if an earlier one fails. Two of those are worth a word from
+this side: "belongs" is answered against `README.md`'s position and the decision records, and
+"can the diff be smaller" is worth asking once, plainly, because most first contributions are
+right in substance and too large in surface.
 
 For a first-time contributor, GitHub holds the workflow run until it is approved — *Actions*
 tab → the run → **Approve and run**. That is why their checks sit at *pending* with nothing
 behind them, and it is the one step a contributor cannot do for themselves.
 
-**Merging.** Squash only. The pull request's description becomes the commit message on
-`main`, so edit it if the author left it thin: the history is the only place the reasoning
-survives a squash. Then confirm `main` is green before moving on — the push to `main` gets
-its own CI run, and it is the run that says the merge is real.
+**Merging.** Squash only. GitHub pre-fills the squash message from the branch's commit
+messages — this repository is configured `squash_merge_commit_message: COMMIT_MESSAGES`,
+`squash_merge_commit_title: COMMIT_OR_PR_TITLE` — so the branch's message is what the history
+keeps, and the description is only what the reviewer read. That makes the merge box the last
+place the record can be fixed: edit the message there when the branch's commits read like
+scratch work. Then confirm `main` is green before moving on — the push to `main` gets its own
+CI run, and it is the run that says the merge is real.
 
 ```sh
 gh pr view <n> --json files,title -q '.title'
-gh pr merge <n> --squash --delete-branch
+gh pr merge <n> --squash --delete-branch        # add --body-file <file> to write the message yourself
 gh run list --branch main --limit 3
 ```
 
@@ -95,14 +94,16 @@ Then verify it went out, from the registry rather than from the run's summary:
 pnpm view dsh-pocket-console versions
 ```
 
-**What the workflow refuses, and why that is the point.** Before it installs anything, it
-asserts that the tag names `package.json`'s version, that the tagged commit is an ancestor
-of `origin/main`, and that all four CI checks on that commit concluded `success`. The
-administrator's ruleset bypass exists so a human can act quickly; it must not become a way
-for a commit CI never judged to reach the registry, so the job re-checks what the ruleset
-would have required. A tag that fails the ancestry or check assertion gets **no** publish,
-and the recovery is to wait for `main` to be green and tag again — never to re-run the job,
-because the guard is asking about the commit.
+**What the workflow refuses, and why that is the point.** After `pnpm install` and before it
+packs anything, it asserts that the tag names `package.json`'s version, that the tagged
+commit is an ancestor of `origin/main`, and that all four CI checks on that commit concluded
+`success`. The administrator's ruleset bypass exists so a human can act quickly; it must not
+become a way for a commit CI never judged to reach the registry, so the job re-checks what
+the ruleset would have required. Either assertion failing means **no** publish, and the
+recovery depends on which one it was: the check runs are read live, so if CI was simply still
+running, wait for `main` to be green and re-run the job; the ancestry answer is about the
+commit, so no re-run can change it — delete the tag through the bypass and push it again
+against a commit `main` holds.
 
 `docs/releasing.md` is the published account of the same path, including the trusted
 publisher setup, the hand-publish fallback, and what to do when npm itself falls over.
@@ -180,6 +181,7 @@ assertions carry the weight they do.
 | Setting | Value | Why |
 |---|---|---|
 | Merge methods | squash only | One pull request is one commit; linear history is what the tag then points at |
+| Squash message | `squash_merge_commit_message: COMMIT_MESSAGES`, `squash_merge_commit_title: COMMIT_OR_PR_TITLE` | The branch's commit messages are the record, not the pull request's description — so the merge box is where the message gets fixed |
 | `delete_branch_on_merge` | on | The branch is the pull request; a deleted one is not clutter to triage |
 | Auto-merge | on | A contributor may enable it; it waits for the four checks |
 | Dependabot security updates | on | Off until ADR 0014; it is a free alarm for a bundled transport |
