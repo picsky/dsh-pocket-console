@@ -27,8 +27,21 @@ happens in the package owner's npm account:
    authentication and disallow tokens**, which is the point: a leaked token can
    no longer publish this package.
 
-Until this is configured, `release.yml` fails at the publish step; the interim
-path is a manual `pnpm publish` with a granular access token that has *Bypass
+Until this is configured, `release.yml` fails at the publish step — and it fails in a way worth
+recognising, because it names neither the missing configuration nor the registry's refusal of it:
+
+```
+npm error code ENEEDAUTH
+npm error need auth This command requires you to be logged in to https://registry.npmjs.org/
+```
+
+npm does not attempt the OIDC exchange at all without a trusted publisher, so the job looks like
+a machine that simply forgot to log in. 0.8.0's first run failed exactly here. Managing the
+relationship from the CLI (`npm trust github …`, npm 11.19 and later) needs an authenticated web
+session: the granular publish token this repository's hand publishes use answers `403` on the
+trust endpoint, so this stays a browser step.
+
+The interim path is a manual `pnpm publish` with a granular access token that has *Bypass
 2FA* enabled, which is what earlier releases used.
 
 ## Cutting a release
