@@ -38,6 +38,17 @@ out when it does.
 
 ### Changed
 
+- **Both READMEs were restructured around the order a reader needs things in.** The entrance is
+  now the install, the uninstall, and the three settings the Settings card exposes; security,
+  what it deliberately does not do, and how it breaks follow; the comparison with the other
+  kinds of plugin moved to the end. The implementation walkthrough — the request diagram,
+  `prepend`, `next()`, the race — and the engineering limitations left the README altogether,
+  because they are material for whoever changes the code, and that reader now gets five pointers
+  instead of prose: `npm test`, the two gates, the decision records, `CONTRIBUTING.md`, and the
+  channel contract. The "three things that define it" section is gone, and the expectations it
+  carried — desktop first, a single-use decision, outbound only — are stated where they are
+  needed: the introduction, the settings table and the security section. Reading order, not
+  behaviour: nothing about the plugin itself changed.
 - **[`docs/releasing.md`](docs/releasing.md) describes the release that now exists**: the
   version bump and the changelog land as a `Release x.y.z` pull request, and the tag names the
   squash commit once `main` is green. `npm version minor` and `git push --follow-tags`, which
@@ -57,11 +68,11 @@ out when it does.
 - **The answer to "how are several questions shown" is now stated once.** `0.8.0` established
   one question per card ([0011](docs/decisions/0011-one-question-per-card.md)); the README had
   still been describing the older all-questions-on-one-card layout.
-- **Both READMEs show the profile-layer example again.** Rewriting them dropped the
-  `$DSH_HOME/profiles/web/cordis.patch.yml` block, and `npm run check:parity` reads that block
-  out of each README to hold the documented defaults to the ones the code ships. Without it the
-  gate threw on the missing example, so the two READMEs carry a short "retuning it" section with
-  every key at its shipped value.
+- **Both READMEs show the profile-layer example again**, with every key at its shipped value:
+  rewriting them had dropped the `$DSH_HOME/profiles/web/cordis.patch.yml` block that used to be
+  there, and that copy is the one a reader meets. `npm run check:parity` holds the same example
+  in `docs/configuration.md` and `docs/zh-CN/configuration.md`, and the bundle patch, to the
+  code's names and defaults.
 
 ### Removed
 

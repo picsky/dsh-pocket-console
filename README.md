@@ -1,11 +1,12 @@
 # dsh-pocket-console
 
-**Don't hand over the whole machine — hand over the one decision blocking it.**
+**Step out — the task won't stall.**
 
-When you leave your desk, an unattended [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
-run doesn't fail — it **waits**. `dsh-pocket-console` forwards only the moments that need a human
-(tool-call approvals and `ask_user_question` prompts) to your phone as Feishu cards, and only after
-the desktop has had its chance to answer. Nothing moves to your phone except the decision itself.
+You drop a task on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) before heading out, expecting to review the result when you get back — and it is stuck on the plan-confirmation question.
+
+`dsh-pocket-console` exists for that: it keeps a stalled session moving while nobody is at the desk.
+
+It turns the two moments that need a human — **tool-call approvals** and **`ask_user_question` prompts** — into Feishu cards on your phone once the desktop has had its chance to answer; one tap and the agent continues. The phone gets that one decision and nothing else: **approve, reject, or answer**. The desk, the session, the settings and the credentials stay where they are, and one outbound long connection is all it takes — no public IP, no domain, no tunnel.
 
 [![npm](https://img.shields.io/npm/v/dsh-pocket-console?label=npm&color=4b6bfb)](https://www.npmjs.com/package/dsh-pocket-console)
 [![CI](https://github.com/picsky/dsh-pocket-console/actions/workflows/ci.yml/badge.svg)](https://github.com/picsky/dsh-pocket-console/actions/workflows/ci.yml)
@@ -15,26 +16,11 @@ the desktop has had its chance to answer. Nothing moves to your phone except the
 
 English · [简体中文](README.zh-CN.md)
 
-> **Unofficial project.** Independently developed and maintained by community members — not affiliated with DeepSeek, and not reviewed or endorsed by it. Evaluate any third-party plugin before you install it.
-
 ---
 
-## Three things that define it
+## Install and uninstall
 
-- **Desktop first, by default for 120 seconds.** Every request reaches the desktop GUI first. Answer
-  there and your phone is never touched. Only after `delaySeconds` with no answer does the same request
-  go out as a Feishu card with buttons. A notification you didn't need is worse than no notification.
-- **The phone gets a one-time decision, and nothing else.** A card shows the request, the reason and the
-  options. Approving grants `allowed-once` — the same thing the desktop button grants — and the random id
-  that carries it dies the moment the request settles. No workspace, no session list, no settings,
-  no credentials. The blast radius of a lost phone is *one answer*.
-- **Outbound only.** One WebSocket long connection to Feishu. No public IP, no domain, no certificate,
-  no port forwarding, no tunnel, no relay. Nothing of yours becomes reachable from the internet.
-
-## Quick start
-
-The published tarball carries its Feishu transport inside it, so the install resolves nothing that needs
-a build permission and runs no install-time script:
+The published tarball carries its Feishu transport inside it, so the install resolves nothing that needs a build permission and runs no install-time script:
 
 ```sh
 dsh plugin --profile web add dsh-pocket-console
@@ -42,33 +28,31 @@ dsh plugin --profile web add dsh-pocket-console
 
 Then restart `dsh web` and open **Settings → Plugins → Plugin configuration → Pocket console**:
 
-1. Click **Create an app by scanning**, or **Use an existing app**.
+1. Click **Scan to create an app**. If you already have one, click **Use an existing app** and enter its App ID and App Secret.
 2. Scan the QR code with Feishu (the link is valid for 10 minutes and can be used once).
-3. The card reports **Bound** and lists the app, the recipient, and whether the long connection is up.
+3. The card reports **Bound** and lists the **App**, the **Recipient** and the **Connection** (established / dropped, reconnecting…).
 
-That is the whole setup. Application credentials and recipient id live in the credentials store, so every
-later `dsh` start reconnects the long connection by itself — no settings visit, no second scan.
+Credentials and the recipient live in the credentials store, so every later `dsh` start reconnects the long connection by itself — no settings visit, no second scan. **Use another app** switches apps; **Unbind** stops the phone side. Installing straight from GitHub needs one build script allowed through, which [troubleshooting](docs/troubleshooting.md) covers.
 
-**No scan at all** is also possible: put the app credentials in the credentials store under
-`DSH_FEISHU_APP_ID` / `DSH_FEISHU_APP_SECRET` (the names `appIdRef` / `appSecretRef` point at).
+To remove it:
 
-Install from GitHub works too, but a git dependency has pnpm resolve the channel's own dependencies, and
-`protobufjs`'s postinstall will stop the first install on pnpm ≥ 11. Set the placeholder pnpm appends to
-the profile's `pnpm-workspace.yaml` to `false` and retry:
-
-```yaml
-# $DSH_HOME/profiles/web/pnpm-workspace.yaml
-allowBuilds:
-  protobufjs: false
+```sh
+dsh plugin --profile web remove dsh-pocket-console
 ```
 
-To remove it: `dsh plugin --profile web remove dsh-pocket-console`.
+## Tuning it
 
-### Retuning it
+It works out of the box: the Settings card exposes three settings and nothing else.
 
-Every setting has a schema default, so this plugin works with no configuration at all. To tune a
-deployment, override the row in your own profile layer — a patch replaces the row's entire `config`,
-so restate every key you want to keep:
+| Setting | Default | Meaning |
+|---|---|---|
+| Desktop head start (seconds) | `120` | The request goes to the phone only if the desktop has not answered by then. `0` sends it immediately |
+| Title prefix | `DSH` | Prefix on every phone message title |
+| Result notices | `When idle` | After a session stops, the turn result goes to the phone with a box you can reply in. Its send delay reuses the desktop head start above |
+
+Every row can be **Reset**, and an edit has to be saved (the card marks it **Unsaved** first).
+
+**Anything the card does not show belongs to the deployment.** The channel, the interface language, the mirror lifetime and the like stay out of the card and are overridden in the profile layer — a patch replaces the row's entire `config`, so restate every key you want to keep:
 
 `$DSH_HOME/profiles/web/cordis.patch.yml`
 
@@ -85,28 +69,35 @@ so restate every key you want to keep:
     locale: zh
 ```
 
-That is every key at the value the code already ships, so copying it changes nothing.
-`delaySeconds` is the one worth thinking about: it is the desktop's head start, and `0` makes both
-sides live at once. `npm run check:parity` holds this example, both config pages, the plugin schema,
-the Settings card and the bundle patch to the same names *and* the same defaults.
-[Every setting](docs/configuration.md) documents the rest.
+That is every key at the value the code already ships, so copying it changes nothing. [Every setting](docs/configuration.md) documents the rest.
 
-## Where the data goes
+## Security
 
-```
-approval/request          ─┐
-                           ├─→ dsh-pocket-console ─→ Feishu long connection ─→ your phone
-user-questions/request    ─┘         │
-                                     └─→ next() → the desktop GUI
-```
+An approval card is a **remote code-execution authorization channel**, so it is built like one:
 
-The plugin registers with `prepend: true` on both waterfalls and **calls `next()` first**, so the desktop
-chain runs exactly as it would have. The two answers race: whichever settles first wins. A delivery
-problem cannot change the answer — if the channel is down, the escalation abandons the phone side and
-leaves the desktop racing alone rather than settling the request with an answer nobody gave.
+- **Grants are single-use.** `allowed-once` applies to that call only; the random id that carries it dies the moment the request settles.
+- **The blast radius of a lost phone is one answer.** The card is itself a credential, so only the bound recipient can press: a private chat only binds an unbound deployment, and group messages never bind.
+- **Secrets never go in environment variables.** Every command the agent runs inherits the process environment, so credentials live in `$DSH_HOME/.credentials.yaml`.
+- **The app asks for the minimum.** Three permissions, one event and one callback, from the minimum base rather than the default template's cloud-doc permissions.
+- **There is no server of ours in the path.** Feishu sees the card, because Feishu is the transport.
 
-There is no server of ours in this path, and no third party sees the request. Feishu sees the card,
-because Feishu is the transport.
+Full invariants, threat model and reporting: [SECURITY.md](SECURITY.md).
+
+## What it deliberately does not do
+
+- **No GUI mirroring.** Moving the interface would move the workspace, the session, the settings and the credentials — so you also **cannot keep working from the phone**.
+- **No push to the phone by default.** A card goes out only when the desktop has not answered in time.
+- **No auto-approval, ever.** The plugin never decides in your place: **silence never approves**.
+- **No inbound listener.** No port, tunnel, relay or third-party server — so also no "reachable from anywhere".
+- **No changes to DSH.** It ships as a `dsh.bundle` profile layer and registers on two documented waterfalls. Nothing in the harness is patched or forked, and a DSH upgrade cannot break it.
+
+## How it breaks
+
+These are honest gaps, not choices.
+
+- **Mirroring to the desktop needs the page open.** After a phone answer, the open page settles the way a click there would; with no page open the answer still reaches the model and the session log, but a page opened later will not replay it — the mirror is valid for one minute.
+- **One Feishu app serves one DSH instance.** Long-connection events are not broadcast, so two instances sharing one bot send approvals to a random side.
+- **Card text is limited by bytes, not characters.** A card request body caps at 30 KB and a CJK character costs 3, so text is held under 9 KB and truncated explicitly. A very long plan arrives as its opening section; the buttons still work.
 
 ## Which of these is this?
 
@@ -117,77 +108,23 @@ because Feishu is the transport.
 | **Notification only** — [dsh-turn-notify](https://www.npmjs.com/package/dsh-turn-notify), [@dsh-suite/plugin-notify](https://www.npmjs.com/package/@dsh-suite/plugin-notify) | toast, browser, webhook, Bark, ServerChan | a message it cannot answer | per-channel webhook or key | knowing when something happened |
 | **dsh-pocket-console** | one outbound WebSocket | **one decision, single-use** — approve, reject, or answer | nothing | an agent that must not stall while you are away from the desk |
 
-If you want the computer in your hand, install one of the first row. This plugin is for the case where
-the computer stays where it is and only the **decision** travels.
+If you want the computer in your hand, install one of the first three. This plugin is for the other case: **the computer stays where it is, and only the decision travels.**
 
-## What it deliberately does not do
+## For developers
 
-Each of these is a limitation you may be looking for — in which case, the right tool is named above.
-
-- **No GUI mirroring.** Moving the interface would move the workspace, the settings and the credentials.
-- **No multi-session management or history.** Those exist to work from the phone; this is for deciding.
-- **No push to the phone by default.** A card lands only when the desktop hasn't answered in time.
-- **No persistent authority on the phone.** Authorization is `allowed-once`, so no permission can accumulate.
-- **No auto-approval, ever.** The plugin never decides in your place: silence never approves.
-- **No changes to DSH.** It ships as a `dsh.bundle` profile layer and registers on two documented
-  waterfalls. Nothing in the harness is patched or forked, and a DSH upgrade cannot break it.
-- **No inbound listener.** No port, tunnel, relay, or third-party server — so also no "reachable from anywhere".
-- **No single-direction channels.** A transport that cannot answer (`supportsForms: false`) can only notify
-  and is out of this plugin's scope.
-
-## Security
-
-An approval card is a **remote code-execution authorization channel**, so it is built like one:
-
-- **Grants are single-use.** `allowed-once` applies to that call only; the random `rid` dies once the request settles.
-- **Secrets never go in environment variables.** Every command the agent runs inherits the process
-  environment and could read them. Credentials live in `$DSH_HOME/.credentials.yaml`.
-- **The app asks for the minimum.** The minimum base (`addons.preset: false`, bot capability only) plus
-  three permissions, one event and one callback — not the default template's cloud-doc and wiki permissions.
-- **Only the bound recipient can press.** The card is itself a credential, so the operator `open_id` must
-  equal the bound recipient. A private chat only binds an unbound deployment, and group messages never bind.
-- **Callback fields are strictly validated.** Buttons carry a single-use `rid`, and an answer must come
-  from an option the question actually offered.
-- **Credentials are verified before use.** The channel exchanges a tenant token first; only on success does
-  it connect, so a wrong App ID or Secret is shown on the card instead of retrying forever.
-- **Routing is behind the connection's trust fence.** Every `/__pocket` route answers only when the
-  connection accepts the request; cross-site writes are refused.
-
-Full invariants, threat model and reporting: [SECURITY.md](SECURITY.md).
-
-## Limitations
-
-These are honest gaps, not choices. The choices are in the previous two sections.
-
-- **Mirroring to the desktop needs the page open.** The browser half replays the same client call a click
-  makes, so the panel closes instead of waiting for a decision that already happened. With no page open the
-  answer still reaches the model and the session log, but a page opened later will not replay it — the
-  mirror is only valid for a minute.
-- **Card text is limited by bytes, not characters.** A Feishu card request body caps at 30 KB and a CJK
-  character costs 3, so text is held under 9 KB and truncated explicitly. A very long plan review arrives
-  as its opening section; the decision buttons still work.
-- **Idle notices do not wake a reclaimed session.** If the host has already released the agent, the notice
-  is skipped and logged rather than resurrecting the session.
-- **One Feishu app serves one DSH instance.** Long-connection events are not broadcast — Feishu delivers
-  each event to one connection — so sharing a bot between instances sends approvals to a random side.
-- **The client half is a single hand-written file** with no build step, rendering with basic React
-  elements rather than the shared UI kit.
-- **The published package is about 4 MB**, because it ships the Feishu transport and that transport's
-  dependencies inside the tarball. That is exactly why installing compiles nothing.
-- **Verified on a real Feishu tenant, but not for this version.** One-click app creation, the long
-  connection, card delivery and card callbacks all ran against a real app. The callback field paths,
-  option rows and free-text answers changed after that run: they are covered by tests, but still need one
-  device confirmation ([ADR 0005](docs/decisions/0005-connected-means-connected.md)).
+- **Shape**: a `dsh.bundle` profile layer, plain ESM, **no build step**; the published package is about 4 MB because the Feishu transport and its dependencies are bundled inside the tarball.
+- **Tests**: `npm test`. No install, no network and no credentials — the production dependencies are replaced by in-repo stubs.
+- **Gates**: `npm run check:parity` (one setting has to agree in six places) and `npm run e2e` (installs the packed artifact into a real `dsh web` to prove it activates). That is what CI runs: `verify` on two Node versions, `real composition`, `publish payload`.
+- **Before changing something**: [docs/decisions/](docs/decisions/) records why it is shaped this way; [docs/development.md](docs/development.md) covers the suite and debugging.
+- **How a change lands**: [CONTRIBUTING.md](CONTRIBUTING.md); what changed when is in [CHANGELOG.md](CHANGELOG.md). Writing a transport other than Feishu: [the channel contract](providers/README.md).
 
 ## Going further
 
 | Doc | What is in it |
 |---|---|
-| [docs/configuration.md](docs/configuration.md) | Every option, its default, and which ones the Settings card changes at runtime |
-| [docs/troubleshooting.md](docs/troubleshooting.md) | Install, binding, and cards that never arrive |
+| [Configuration](docs/configuration.md) | Every option, its default, and which ones the Settings card changes at runtime |
+| [Troubleshooting](docs/troubleshooting.md) | Install, binding, and cards that never arrive |
 | [docs/decisions/](docs/decisions/) | Why the plugin is shaped this way — one record per decision |
-| [docs/development.md](docs/development.md) | Test suite, real-assembly check, debugging a running deployment |
-| [providers/README.md](providers/README.md) | The channel contract: what a transport other than Feishu must implement |
 | [SECURITY.md](SECURITY.md) | The security invariants this plugin claims |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How a change lands: issue, branch, pull request, the four checks |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in each version |
