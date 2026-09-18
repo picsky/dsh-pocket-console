@@ -6,7 +6,7 @@ names the point in the history it corresponds to, so `git log` can fill in the d
 The project is pre-1.0: a minor bump can carry a behaviour change, and one is called
 out when it does.
 
-## Unreleased
+## 0.8.0
 
 ### Changed
 
