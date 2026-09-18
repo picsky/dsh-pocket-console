@@ -6,6 +6,37 @@ names the point in the history it corresponds to, so `git log` can fill in the d
 The project is pre-1.0: a minor bump can carry a behaviour change, and one is called
 out when it does.
 
+## Unreleased
+
+### Changed
+
+- **Both READMEs were rewritten around what the plugin is not.** The old first line borrowed
+  a GUI-mirroring plugin's slogan and promised approval "from anywhere", which is the one thing
+  an outbound-only transport cannot offer. The new entry states the position up front, puts
+  "which of these is this" and "what it deliberately does not do" in the path of anyone
+  choosing between plugins, and moves the implementation walkthrough out of the entrance.
+  Nothing about the plugin itself changed. The npm `description` and `keywords` follow the
+  same positioning.
+- **The answer to "how are several questions shown" is now stated once.** `0.8.0` established
+  one question per card ([0011](docs/decisions/0011-one-question-per-card.md)); the README had
+  still been describing the older all-questions-on-one-card layout.
+- **Both READMEs show the profile-layer example again.** Rewriting them dropped the
+  `$DSH_HOME/profiles/web/cordis.patch.yml` block, and `npm run check:parity` reads that block
+  out of each README to hold the documented defaults to the ones the code ships. Without it the
+  gate threw on the missing example, so the two READMEs carry a short "retuning it" section with
+  every key at its shipped value.
+
+### Removed
+
+- **The competitive research and the positioning draft are no longer in the repository.** The
+  plugin's position now lives in the [README](README.md) itself — the "which of these is this"
+  table and the refusals after it — and the research behind it is a working note that goes stale
+  within weeks, so `.gitignore` keeps it in the working tree and out of the repository.
+  Position is a product decision, not a document to maintain; what survives is the shape of the
+  plugin.
+- **`docs/README.md` no longer indexes them**, adds the Chinese README to the list of paired
+  pages, and stops claiming nine decision records when there are thirteen.
+
 ## 0.8.1
 
 **Nothing about the plugin changed.** This release exists so that the tag names the tree the

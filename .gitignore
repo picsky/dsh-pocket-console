@@ -9,6 +9,17 @@ node_modules/
 .DS_Store
 Thumbs.db
 
+# Working notes that are not part of the project
+#
+# Competitive research, positioning drafts and the material under them are inputs
+# to a decision, not documents the project maintains. They go stale within weeks
+# and nothing published links to them, so they stay in the working tree and out of
+# the repository. A published document may never link to one: `npm run check:parity`
+# fails the build when it does.
+positioning.md
+competitive-analysis.md
+research/
+
 # Logs
 *.log
 npm-debug.log*
