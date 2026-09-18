@@ -94,9 +94,18 @@ jobs:
           [ "$links" = "0" ] || { echo "the tarball carries hard links"; exit 1; }
       # Publishing the tarball is the half npm does correctly, and `--provenance` is why
       # it is npm at all: this is the one step that must carry the attestation.
+      #
+      # A version already on the registry is left alone. This is what makes re-running a
+      # tag — the reason `workflow_dispatch` exists — possible after a failure that came
+      # *after* the publish: without it the re-run dies on a duplicate version and the
+      # release can never be seen to be good.
       - name: Publish the tarball with provenance
         run: |
           version=$(node -p "require('./package.json').version")
+          if npm view "dsh-pocket-console@$version" version >/dev/null 2>&1; then
+            echo "dsh-pocket-console@$version is already on the registry; nothing to publish"
+            exit 0
+          fi
           npm publish "./dsh-pocket-console-$version.tgz" --provenance
       # npm's own debug log is the only place a crash of its own names where it got to,
       # and it dies with the runner. Printing it costs nothing and is what identified the
@@ -109,15 +118,27 @@ jobs:
             echo "=================== $log"
             tail -n 40 "$log"
           done
-      # Assert what the release claims, rather than trusting that the last step
-      # meant it: the version has to be on the registry, and it has to carry the
-      # attestation this job exists to produce.
+      # Assert what the release claims, rather than trusting that the last step meant it:
+      # the version has to be on the registry, and it has to carry the attestation this job
+      # exists to produce.
+      #
+      # It waits, because the registry says so itself: "Your package is being processed and
+      # may take a few minutes to become available". 0.8.0's publish signed its provenance
+      # statement and reported success, and the version was still a 404 four minutes later —
+      # reading once, immediately, turned a good release into a red run.
       - name: The registry carries this version, with provenance
         run: |
+          version=$(node -p "require('./package.json').version")
+          meta=""
+          for attempt in $(seq 1 30); do
+            meta=$(npm view "dsh-pocket-console@$version" --json 2>/dev/null || true)
+            [ -n "$meta" ] && break
+            echo "attempt $attempt: the registry does not carry $version yet"
+            sleep 10
+          done
+          [ -n "$meta" ] || { echo "the registry never reported dsh-pocket-console@$version"; exit 1; }
           node -e "
-          const { execSync } = require('node:child_process');
-          const version = require('./package.json').version;
-          const meta = JSON.parse(execSync('npm view dsh-pocket-console@' + version + ' --json', { encoding: 'utf8' }));
+          const meta = JSON.parse(process.argv[1]);
           console.log('published', meta.name + '@' + meta.version);
           const attestations = meta.dist && meta.dist.attestations;
           if (attestations === undefined || attestations === null) {
@@ -125,4 +146,4 @@ jobs:
             process.exit(1);
           }
           console.log('attestation present:', JSON.stringify(attestations).slice(0, 160));
-          "
+          " "$meta"

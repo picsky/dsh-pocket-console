@@ -85,7 +85,16 @@ refuses with `E415`. So the workflow packs with `pnpm pack` and hands the tarbal
 `npm publish --provenance`, which is the half npm does correctly; it refuses a tarball carrying
 hard links before publishing it. **No release before 0.8.0 carries a provenance attestation** —
 that is the property this workflow exists to provide, and it is why the crash was worth chasing
-instead of working around with a token.
+instead of working around with a token. **0.8.0 is the first release the workflow published, and
+the first with an attestation.**
+
+That first successful publish still came back as a failed run, for a reason worth knowing: the
+registry answered the publish with "Your package is being processed and may take a few minutes to
+become available", and the final assertion read the version once, immediately, and got a 404. The
+version appeared four minutes later. **A publish that reports success is not yet a version you can
+read back**, so the assertion waits for it rather than trusting the first look — and the publish
+step leaves a version that is already on the registry alone, so re-running a tag after a failure
+that came *after* the upload can still end green.
 
 Two lessons from finding it, both now in the workflow. A crash inside npm's own code says only
 that npm crashed, so the workflow dumps npm's debug log when a publish fails — that log is the
