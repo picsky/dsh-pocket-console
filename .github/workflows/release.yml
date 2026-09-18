@@ -27,12 +27,12 @@ jobs:
       # asks for a token this workflow deliberately does not have.
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # The ancestry check below needs `main` to exist in this checkout, and a
           # tag push by itself fetches one commit's worth of history.
           fetch-depth: 0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           # No `registry-url` on purpose. Supplying it makes setup-node write an
