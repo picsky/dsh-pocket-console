@@ -446,11 +446,19 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
     if (id === undefined) return undefined
     const notice = notices.get(id)
     if (notice === undefined) {
-      // The card says only what this side knows: the notice is not live here. It cannot
-      // tell whether it was superseded, whether the reader moved the session on, or
-      // whether the process that held it is gone — and an earlier rewrite may already be
-      // showing the true reason, which "expired" would replace with a guess.
-      retract(messageId, messages().noticeStale)
+      // A press may only conclude that the notice is gone once this side has finished
+      // looking. While the store is still opening, or a restore is still running, the
+      // notice may be about to appear — and retiring the card then would throw away one
+      // that is still valid, which is exactly what the durable record exists to prevent.
+      // An early press therefore reports and changes nothing, leaving the card usable for
+      // the moment the process can actually serve it.
+      if ((store.isOpen() && restored) || store.unavailable()) {
+        // Even then the card says only what this side knows: it is not live here. It
+        // cannot tell whether it was superseded, whether the reader moved the session on,
+        // or whether the process that held it is gone — and an earlier rewrite may already
+        // be showing the true reason, which "expired" would replace with a guess.
+        retract(messageId, messages().noticeStale)
+      }
       return { toast: messages().noticeGone, accepted: false }
     }
     // The channel names the control and reports what it called it, because a card may

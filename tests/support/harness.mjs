@@ -122,14 +122,16 @@ const corpus = new Map()
  * @param host - which optional services this deployment composes, what the
  *   credential store already holds from an earlier run, whether that store refuses
  *   writes (the environment layer shadows the reference), what the platform
- *   answers when the stored pair is checked at load, and whether the durable
- *   medium survives from the previous scaffold (a restart).
+ *   answers when the stored pair is checked at load, whether the durable
+ *   medium survives from the previous scaffold (a restart), and whether the
+ *   storage medium is held shut so a case can press a card before it answers.
  */async function scaffold(configOverrides = {}, {
   services = ['settings', 'webServer', 'storageDomain', 'sessionQuery'],
   stored = {},
   refuseWrites = false,
   tenantToken,
   keepDurable = false,
+  holdStorage = false,
 } = {}) {
   resetObserved()
   // The durable medium — the storage hub and the session logs — is what a restart does
@@ -156,6 +158,20 @@ const corpus = new Map()
   const sections = new Map()
   const agents = new Map()
   const storageDomain = createStorageDomain()
+  /**
+   * A gate a case can hold shut to model a medium that has not answered yet — the window
+   * in which a press must not conclude that a notice is gone.
+   */
+  let storageGate
+  if (holdStorage) {
+    const held = Promise.withResolvers()
+    storageGate = held
+    const inner = storageDomain.open.bind(storageDomain)
+    storageDomain.open = async (spec) => {
+      await held.promise
+      return await inner(spec)
+    }
+  }
   /** The session log as the query service reports it; durable, so declared above. */
   const sessionQuery = {
     /**
@@ -380,6 +396,8 @@ const corpus = new Map()
     config, ctx, listeners, disposers, warnings, infos, debugs, values, records,
     routes, sections, route, json, state, listenerOf, compose, agents,
     sessionQuery, storageDomain,
+    /** Let a held medium answer, so the pending open and restore can finish. */
+    releaseStorage: () => { storageGate?.resolve() },
   }
 }
 

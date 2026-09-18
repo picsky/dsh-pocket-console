@@ -48,6 +48,17 @@ and a restart leaves every session dormant until the Web client resumes the one 
 never of the live registry — asking the registry would retire every notice on every restart,
 which is the bug this record exists to fix.
 
+**A press may not retire a card before this side has finished looking.** The record is on disk,
+but a restarted process has not read it yet — the medium can take seconds to answer, and in one
+observed run it took half a minute. A press arriving in that window finds nothing, and "finds
+nothing" is not "is gone": retiring the card then destroys an offer that was still valid, which is
+the one outcome the durable record exists to prevent. So a press retires a card only once the
+medium has been reached and the restore has finished, or once the deployment genuinely has no
+medium to reach. Before that it reports and changes nothing, and the card is still there to use
+when the process can serve it. That satisfies both complaints at once: a card for a request that
+is really gone stops looking answerable, and a card whose notice is merely not loaded yet is never
+thrown away.
+
 **The store opens when it is first needed, not from a startup path.** This one cost a real
 failure. The store first opened only while restoring, and `put`/`remove` did nothing while it was
 closed; the storage facility is provided inside another plugin's own activation

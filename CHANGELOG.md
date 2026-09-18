@@ -28,7 +28,9 @@ out when it does.
   actually retire one: the session may have been deleted, or somebody may have spoken in it while
   dsh was down, which is settled against the session's own log rather than assumed. A notice
   answered before the restart is not offered again — the record is deleted the moment the rid is
-  used (`notice-store.js`, `results.js`). See
+  used (`notice-store.js`, `results.js`). A press arriving before the durable medium has answered
+  no longer retires the card it came from: at that moment this side has not finished looking, and
+  discarding an offer that is still valid is the one thing the record exists to prevent. See
   [0013](docs/decisions/0013-a-notice-is-remembered.md).
 - **A card whose request no longer existed stayed answerable.** Live requests are held in
   memory, so after a restart — or a crash — the card on the phone had nothing behind it:

@@ -124,6 +124,17 @@ export function createNoticeStore({ ctx, log, messages }) {
   return {
     /** Reach the medium, so a caller can tell "late" from "never". */
     ensureOpen,
+    /** Whether the medium has been reached and the store can be read. */
+    isOpen: () => table !== undefined,
+    /**
+     * Whether this deployment has no medium to reach at all.
+     *
+     * Distinct from "not open yet": a deployment composing no storage service will never
+     * hold a record, so what it cannot show is genuinely not there. A medium that is merely
+     * slow has not answered that question and must not be treated as though it had.
+     * @returns whether storage is absent or has refused.
+     */
+    unavailable: () => refused || reportedAbsent,
     /**
      * Read back the notices that were live before this process.
      * @returns the stored notices, newest first; empty when storage is unavailable.

@@ -403,6 +403,42 @@ test('a notice whose session is gone is retired, not left waiting', async () => 
 })
 
 
+test('a press before the medium has answered leaves the card alone', async () => {
+  // The record is on disk, but this process has not read it yet. A press arriving in that
+  // window knows nothing — and the one thing it must not do is retire a card that is still
+  // valid, because that card is what the reader comes back to once the process can serve
+  // it. It reports, and changes nothing.
+  const stored = { appId: 'cli_stored', appSecret: 'secret_stored', recipient: 'ou_stored' }
+  const first = await scaffold({ resultNotify: 'idle' }, { stored })
+  first.sessionQuery.exists('s_1', 5)
+  first.agents.set('s_1', { status: 'idle', followup: () => {} })
+  runTurn(first.listenerOf('session/event').handler, 's_1')
+  await sleep(1100)
+  const card = sentCard()
+  const submit = callbackValues(card).find(value => value.submit === true)
+  const [answer] = controlNames(card)
+
+  // The restart, with a medium that has not answered yet.
+  const second = await scaffold({ resultNotify: 'idle' }, {
+    stored, keepDurable: true, holdStorage: true,
+  })
+  const early = await clickCard(submit, { [answer]: '来早了' })
+  assert.equal(early.toast.type, 'warning', 'the early press is refused')
+  assert.equal(observed.patched.length, 0, 'and it does not touch the card')
+
+  // The medium answers, the restore lands, and the same card works from here.
+  const followed = []
+  second.agents.set('s_1', { status: 'idle', followup: (message) => { followed.push(message) } })
+  second.releaseStorage()
+  await sleep(80)
+
+  const accepted = await clickCard(submit, { [answer]: '接着做' })
+  assert.equal(accepted.toast.content, '已发送给 agent', 'the card was still there to use')
+  await sleep(10)
+  assert.equal(followed.length, 1, 'and the reply reached the session')
+})
+
+
 test('a notice answered before a restart is not offered again by it', async () => {
   // The rid is single use, and a single use that a restart undoes would be no use at all.
   const stored = { appId: 'cli_stored', appSecret: 'secret_stored', recipient: 'ou_stored' }
