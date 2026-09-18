@@ -197,31 +197,39 @@ gh api repos/picsky/dsh-pocket-console --jq '.security_and_analysis'
 ## 5. Changing the rules safely
 
 The rules can lock the repository, so a change to them is rehearsed rather than hoped for.
-Three checks, in this order, and none of them touch `main`:
+Three checks, in this order, and none of them leaves anything behind on `main`:
 
 1. **The required check names are the ones CI actually reports.** Read them off a real pull
    request's head: `gh api repos/picsky/dsh-pocket-console/commits/<sha>/check-runs --jq
    '.check_runs[].name'`. A context that no check ever reports leaves every pull request
    pending forever, which is a lockout with a green-looking UI.
 2. **A refused push costs nothing, so test the refusal first.** With the bypass actor
-   temporarily removed, push an empty commit to `main` and an unused `v*` tag; both must be
+   temporarily removed, an empty commit pushed to `main` and an unused `v*` tag must both be
    refused. Nothing is written to the repository and no workflow starts, so this is the
-   cheapest possible proof that the rule bites — and the one line of output is the evidence.
+   cheapest possible proof that the rule bites — and GitHub's `remote: error: GH013 …` block
+   is the evidence to keep.
 3. **Then add the bypass back and confirm it is the actor it claims to be**, by pushing the
    same unused tag: it should be accepted, the Release run should refuse it at the version
    assertion, and the tag should then be deleted. A tag that names no version is inert; it
-   never reaches the registry.
+   never reaches the registry. The acceptance prints `remote: Bypassed rule violations for
+   refs/tags/…`, which is what says the bypass belongs to the administrator rather than being
+   a hole nobody owns.
 
 ```sh
 # 2 — with bypass_actors: []
 git commit --allow-empty -m "probe: the ruleset must refuse this"
-git push origin main                     # expected: refused, remote unchanged
-git push origin v0.0.0-not-a-release     # expected: refused, no tag, no workflow
+git push origin main                  # GH013: "Changes must be made through a pull request"
+git tag v0.0.0-not-a-release
+git push origin v0.0.0-not-a-release  # GH013: "Cannot create ref due to creations being restricted"
 git reset --hard HEAD~1
+git tag -d v0.0.0-not-a-release
 
 # 3 — with the bypass actor restored
-git push origin v0.0.0-not-a-release     # accepted; Release run fails at the version check
+git tag v0.0.0-not-a-release
+git push origin v0.0.0-not-a-release  # accepted, and printed as "Bypassed rule violations"
+# the Release run now fails at "The run must be the tag it publishes"; nothing is published
 git push --delete origin v0.0.0-not-a-release
+git tag -d v0.0.0-not-a-release
 ```
 
 GitHub records every bypass on the ruleset's insights, so the shortcut taken in an emergency
