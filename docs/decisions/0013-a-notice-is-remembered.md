@@ -48,6 +48,20 @@ and a restart leaves every session dormant until the Web client resumes the one 
 never of the live registry — asking the registry would retire every notice on every restart,
 which is the bug this record exists to fix.
 
+**The store opens when it is first needed, not from a startup path.** This one cost a real
+failure. The store first opened only while restoring, and `put`/`remove` did nothing while it was
+closed; the storage facility is provided inside another plugin's own activation
+(`domainCtx.provide('storageDomain', …)` inside its inject callback), so it can appear *after*
+this plugin loads. A notice delivered in that window was dropped in silence — no record, and no
+log line either, because "no service yet" and "nothing to write" look the same from inside. The
+first manual test passed for the wrong reason: the card being replied to had been sent by a build
+that predated the store entirely, so there was nothing to restore whatever the store did. Two
+things are therefore part of the decision, not implementation detail: the store reaches the medium
+on first use, and both restore triggers (installing the listener, and the service arriving) are
+single-flight, because opening one domain twice is refused by the facility. Its state is *visible*
+too — a missing service says so once, a refused medium warns — because silence is what turned a
+defect into a filesystem dig.
+
 **The plugin does not resume a session to deliver a reply.** A reply needs a live agent, and
 while the session is dormant the press is refused with `会话已不在运行` / "That session is no
 longer running" — true, and different from an expired result. Resuming would mean the phone
