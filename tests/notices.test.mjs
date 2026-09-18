@@ -312,7 +312,8 @@ test('without durable storage a notice is still refused after a restart', async 
   await sleep(20)
 
   const dead = JSON.parse(observed.patched.at(-1).data.content)
-  assert.match(JSON.stringify(dead), /该结果已过期/, 'the card says the notice is over')
+  assert.match(JSON.stringify(dead), /这条通知已不再有效/,
+    'the card says the notice is not live, without inventing a reason')
   assert.deepEqual(callbackValues(dead), [], 'and offers nothing left to reply with')
 })
 

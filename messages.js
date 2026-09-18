@@ -64,6 +64,8 @@ const zh = {
   superseded: '**这条结果已被新的结果取代**，请用最新那条回复。',
   readerSpoke: '**该结果已有新消息**，这条通知不再接受回复。',
   noticeGone: '该结果已过期',
+  /** Card copy for a notice that is gone, which does not know or claim why. */
+  noticeStale: '这条通知已不再有效',
   emptyInstruction: '指令为空，未发送',
   noAgent: '会话已不在运行，指令未发送',
   sent: '已发送给 agent',
@@ -170,6 +172,7 @@ const en = {
   superseded: '**A newer result replaced this one** — reply to that message instead.',
   readerSpoke: '**This session has a newer message**, so this notice no longer accepts a reply.',
   noticeGone: 'That result has expired',
+  noticeStale: 'This notice is no longer live',
   emptyInstruction: 'The instruction was empty, so nothing was sent',
   noAgent: 'That session is no longer running, so nothing was sent',
   sent: 'Sent to the agent',

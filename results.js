@@ -446,7 +446,11 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
     if (id === undefined) return undefined
     const notice = notices.get(id)
     if (notice === undefined) {
-      retract(messageId, messages().noticeGone)
+      // The card says only what this side knows: the notice is not live here. It cannot
+      // tell whether it was superseded, whether the reader moved the session on, or
+      // whether the process that held it is gone — and an earlier rewrite may already be
+      // showing the true reason, which "expired" would replace with a guess.
+      retract(messageId, messages().noticeStale)
       return { toast: messages().noticeGone, accepted: false }
     }
     // The channel names the control and reports what it called it, because a card may
