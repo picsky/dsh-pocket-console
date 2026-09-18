@@ -63,7 +63,9 @@ jobs:
             "$root/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-app-boot/package.json" \
             "$root/@deepseek-ai/dsh-app-boot/package.json"
           do
-            [ -e "$candidate" ] && node -p "require('$candidate').version + '  ' + '$candidate'"
+            # A branch that finds nothing must not fail the step: only one of these
+            # locations holds the copy, and which one it is is the answer.
+            if [ -e "$candidate" ]; then node -p "require('$candidate').version + '  ' + '$candidate'"; fi
           done
       - uses: pnpm/action-setup@v6
         with:
