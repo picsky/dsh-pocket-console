@@ -1,6 +1,6 @@
 {
   "name": "dsh-pocket-console",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Put DeepSeek Harness in your pocket: approve tool calls and answer ask_user_question prompts from your phone over Feishu, with the desktop always first in line.",
   "type": "module",
   "main": "index.js",

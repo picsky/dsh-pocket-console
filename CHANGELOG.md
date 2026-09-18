@@ -6,6 +6,15 @@ names the point in the history it corresponds to, so `git log` can fill in the d
 The project is pre-1.0: a minor bump can carry a behaviour change, and one is called
 out when it does.
 
+## 0.8.1
+
+**Nothing about the plugin changed.** This release exists so that the tag names the tree the
+published artifact was built from. 0.8.0's tag carries two edits made *after* it was published —
+the release workflow and `docs/releasing.md` — and the second of those is inside the package, so
+the tag and the tarball disagreed by one file. Publishing the tree as it now stands makes the tag,
+the artifact, and the workflow that produced them one commit, and it is the first release this
+repository's workflow has published end to end.
+
 ## 0.8.0
 
 ### Changed
