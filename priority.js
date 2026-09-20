@@ -44,6 +44,14 @@ export function createPriority({ ctx, log, settings, messages }) {
    */
   let storedUnreadable = false
 
+  /**
+   * What to tell when the side moves.
+   *
+   * Kept here rather than reaching out to the machines that care, so this state knows nothing
+   * about cards: whoever needs to react is told, and what they do about it is theirs.
+   */
+  const listeners = new Set()
+
   return {
     /** The side in force. */
     get: () => side,
@@ -60,9 +68,26 @@ export function createPriority({ ctx, log, settings, messages }) {
       if (next === side) return false
       side = next
       log.info(side === PHONE ? messages().logPhonePriority : messages().logDeskPriority)
+      for (const listener of listeners) {
+        try {
+          listener(side)
+        } catch (error) {
+          // A listener is a reaction, not the state: one that throws must not undo the move.
+          log.warn(messages().logPriorityListenerFailed, error)
+        }
+      }
       void ctx.credentials.modifyRecord(KEY, async () => ({ kind: 'grant', payload: { side } }))
         .catch(error => { log.warn(messages().logPriorityStoreFailed, error) })
       return true
+    },
+    /**
+     * Ask to be told when the side moves.
+     * @param listener - called with the side now in force.
+     * @returns the disposer removing the listener.
+     */
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
     },
     /**
      * The wait one timer is actually counting down.

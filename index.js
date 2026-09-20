@@ -20,6 +20,7 @@ import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import z from '@deepseek-ai/schemastery'
 import { createResultNotifier } from './results.js'
 import { createEscalation } from './escalation.js'
+import { createActivity } from './activity.js'
 import { LOCALES, messagesFor } from './messages.js'
 import { createMirror } from './mirror.js'
 import { createPriority } from './priority.js'
@@ -281,6 +282,12 @@ export async function apply(ctx, config) {
     ctx, log, channel, settings: () => settings, messages, workspaces, priority,
   })
 
+  // The activity card follows a run while it runs, but only once the phone holds the person:
+  // while the desk has them, the run is visible where they already are.
+  const activity = createActivity({
+    ctx, log, channel, settings: () => settings, messages, priority, workspaces,
+  })
+
   /** The card's status snapshot: what the section serves and what is open. */
   const snapshot = async () => ({
     namespace: NAME,
@@ -350,6 +357,10 @@ export async function apply(ctx, config) {
       { prepend: true },
     )
     const offResults = results.install()
+    const offActivity = activity.install()
+    // A card is minted when the phone takes the person, so the activity card has to hear
+    // about the move rather than wait for the session's next event to notice.
+    const offPriority = priority.subscribe(() => { activity.onPriority() })
     const offAction = channel.subscribe((action) => {
       // The action carries the message the press came from, which is how a card whose
       // request is gone — after a restart, or once settled — is rewritten to stop
@@ -370,6 +381,8 @@ export async function apply(ctx, config) {
       offApproval()
       offQuestion()
       offResults()
+      offActivity()
+      offPriority()
       offAction()
       // Abandon rather than settle: the desktop branch of each in-flight race
       // stays authoritative, so a still-open GUI can answer normally.
