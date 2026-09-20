@@ -185,7 +185,28 @@ export async function apply(ctx, config) {
    * never require.
    */
   let readSettings = () => entry
-  const reloadSettings = () => { settings = readSettings() }
+
+  /**
+   * The two machines that count a wait down, declared before anything can re-time
+   * them: the settings provider hands its source over synchronously, so
+   * `reloadSettings` runs before either exists.
+   */
+  let escalation
+  let results
+
+  /**
+   * Read the new values, then re-time everything already counting them down.
+   *
+   * An escalation's timer and a notice's calm window are armed from the value in
+   * force when they started, so an edit that only reached the next request would
+   * read as a setting that did not save — and the reader's next move would be to
+   * restart `dsh`, which withdraws every outstanding notice for nothing.
+   */
+  const reloadSettings = () => {
+    settings = readSettings()
+    escalation?.rearm()
+    results?.rearm()
+  }
 
   /**
    * The interface language a browser reported, until it reports another. The Host
@@ -232,11 +253,10 @@ export async function apply(ctx, config) {
 
   // The escalation machine owns the timer, the race, and the pending registry;
   // this file only wires it to the two seams and the channel's actions.
-  const escalation = createEscalation({ log, channel, settings: () => settings, mirror, messages })
-
+  escalation = createEscalation({ log, channel, settings: () => settings, mirror, messages })
   // Result notices ride the session firehose rather than a live request, so a
   // turn that ends while nobody is watching still reaches the phone.
-  const results = createResultNotifier({ ctx, log, channel, settings: () => settings, messages })
+  results = createResultNotifier({ ctx, log, channel, settings: () => settings, messages })
 
   /** The card's status snapshot: what the section serves and what is open. */
   const snapshot = async () => ({

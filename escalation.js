@@ -212,6 +212,10 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
       handle: undefined,
       delivered: false,
       timer: undefined,
+      /** When this request arrived, so a change to the wait keeps the time already spent. */
+      startedAt: Date.now(),
+      /** Whether the card has been sent, so a re-armed timer knows what it is waiting for. */
+      armed: false,
       finished: false,
       answers: new Map(),
       settle: Promise.withResolvers(),
@@ -269,23 +273,55 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
     }
     request.signal?.addEventListener('abort', record.onAbort, { once: true })
 
-    record.timer = setTimeout(() => {
-      record.timer = undefined
-      void deliverCard(record).then((handle) => {
-        record.handle = handle
-        record.delivered = true
-      }).catch((error) => {
-        log.warn(messages().logDeliveryFailed, error)
-        // The card never arrived, so there is no phone decision to wait for.
-        // Abandon rather than settle: the promise this call returns stays racing
-        // the desktop branch, which is still pending and still authoritative.
-        // Settling it here would end the race with no answer at all and hand the
-        // caller `undefined` — the caller would not know the desktop had never
-        // been consulted, and could not fall back to it.
-        abandon(record)
-      })
-    }, settings().delaySeconds * 1000)
-    record.timer.unref?.()
+    /** Whether this record is still waiting for its card to go out. */
+    const pending = () => !record.finished && !record.delivered && !record.armed
+
+    /**
+     * Arm the wait, or re-arm it against a deadline counted from the request's arrival.
+     *
+     * The deadline is the arrival plus the configured wait, so a change to the wait
+     * keeps the time already spent: a request that has waited 100 of 120 seconds and
+     * meets a 20-second value goes out now, rather than after another 20.
+     * @param delaySeconds - the wait in force right now.
+     */
+    const arm = (delaySeconds) => {
+      if (record.timer !== undefined) clearTimeout(record.timer)
+      const remaining = record.startedAt + delaySeconds * 1000 - Date.now()
+      record.timer = setTimeout(() => {
+        record.timer = undefined
+        record.armed = true
+        void deliverCard(record).then((handle) => {
+          record.handle = handle
+          record.delivered = true
+        }).catch((error) => {
+          log.warn(messages().logDeliveryFailed, error)
+          // The card never arrived, so there is no phone decision to wait for.
+          // Abandon rather than settle: the promise this call returns stays racing
+          // the desktop branch, which is still pending and still authoritative.
+          // Settling it here would end the race with no answer at all and hand the
+          // caller `undefined` — the caller would not know the desktop had never
+          // been consulted, and could not fall back to it.
+          abandon(record)
+        })
+      }, Math.max(0, remaining))
+      record.timer.unref?.()
+    }
+
+    arm(settings().delaySeconds)
+
+    /**
+     * Re-time this escalation against a changed wait.
+     *
+     * A wait that grew must not outlive the request it is holding, and a wait that
+     * shrank must not keep somebody waiting for a number nobody chose any more.
+     * Only a record still waiting for its first card is re-timed: one that has
+     * already gone out is being answered, not delayed.
+     * @param delaySeconds - the wait in force right now.
+     */
+    record.rearm = (delaySeconds) => {
+      if (!pending()) return
+      arm(delaySeconds)
+    }
 
     // A settled or abandoned escalation must never leave the caller waiting. The
     // desktop branch is what remains authoritative once the phone is out of the
@@ -475,6 +511,17 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
         record.finished = true
         open.delete(record.id)
       }
+    },
+    /**
+     * Re-time every request still waiting for its card against a changed wait.
+     *
+     * Called when the wait is edited, because the timer was armed from the value in
+     * force when the request arrived: without this, an edit reaches the next request
+     * and not the one the reader was looking at when they made it.
+     */
+    rearm() {
+      const delaySeconds = settings().delaySeconds
+      for (const record of [...open.values()]) record.rearm?.(delaySeconds)
     },
   }
 }

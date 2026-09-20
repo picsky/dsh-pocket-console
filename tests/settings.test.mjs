@@ -154,3 +154,74 @@ test('a later settings change replaces the one before it', async () => {
   assert.equal((await state()).settings.delaySeconds, 1, 'and a cleared field falls back to the composition entry')
 })
 
+
+test('shortening the wait releases a request that was already counting it down', async () => {
+  const { route, sections, listenerOf } = await scaffold({ delaySeconds: 600 })
+  await bind(route)
+  const section = sections.get('pocket-console')
+  const approval = listenerOf('approval/request')
+
+  const desktop = Promise.withResolvers()
+  void approval.handler({ toolName: 'pwsh', signal: new AbortController().signal }, () => desktop.promise)
+
+  // The wait is measured from the request's arrival, so what matters here is only
+  // that the new value is shorter than the time still to run — which is the case
+  // the reader meets as "the setting did not save". Under the 600 seconds in force
+  // nothing would go out for ten minutes.
+  section.change(layer => { layer.delaySeconds = 1 })
+  await sleep(1400)
+  assert.equal(observed.created.length, 1, 'the card goes out under the value now in force')
+
+  // A request that arrives under the short wait is untouched: the edit re-times a
+  // countdown, it does not deliver everything that is pending on principle.
+  desktop.resolve('rejected')
+  const later = Promise.withResolvers()
+  void approval.handler({ toolName: 'pwsh', signal: new AbortController().signal }, () => later.promise)
+  await sleep(1400)
+  assert.equal(observed.created.length, 2, 'and a request raised afterwards uses the same value')
+  later.resolve('rejected')
+})
+
+test('lengthening the wait defers a request that has not gone out yet', async () => {
+  const { route, sections, listenerOf } = await scaffold({ delaySeconds: 1 })
+  await bind(route)
+  const section = sections.get('pocket-console')
+  const approval = listenerOf('approval/request')
+
+  const desktop = Promise.withResolvers()
+  void approval.handler({ toolName: 'pwsh', signal: new AbortController().signal }, () => desktop.promise)
+  // The 1 second in force when the request arrived would have sent it by now; the
+  // longer wait is the one that holds it.
+  section.change(layer => { layer.delaySeconds = 600 })
+  await sleep(1400)
+  assert.equal(observed.created.length, 0, 'the longer wait is the one that holds it')
+  desktop.resolve('rejected')
+})
+
+test('shortening the wait releases a notice that was already inside its window', async () => {
+  const { route, sections, listenerOf, agents } = await scaffold({
+    delaySeconds: 600,
+    resultNotify: 'idle',
+  })
+  await bind(route)
+  const section = sections.get('pocket-console')
+  const emit = listenerOf('session/event').handler
+  agents.set('s_1', { status: 'idle', followup: () => {} })
+
+  // A turn that stops: the calm window is armed from the 600 seconds in force.
+  emit({ id: 's_1' }, { type: 'user/message', data: { source: { kind: 'user' } } })
+  emit({ id: 's_1' }, { type: 'turn/start', data: { turn: 1 } })
+  emit({ id: 's_1' }, {
+    type: 'assistant/message',
+    surfaceOp: 'append',
+    data: { turn: 1, message: { content: [{ type: 'text', text: '已经改好了。' }] } },
+  })
+  emit({ id: 's_1' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+  await sleep(50)
+  assert.equal(observed.created.length, 0, 'nothing is sent while 600 seconds are outstanding')
+
+  section.change(layer => { layer.delaySeconds = 1 })
+  await sleep(1400)
+  assert.equal(observed.created.length, 1, 'the notice follows the value now in force, not the one it was armed with')
+})
+
