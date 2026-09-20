@@ -25,6 +25,15 @@
  *   card is a credential for one decision; letting it name a directory would turn a lost phone into
  *   a way to run work anywhere on the machine.
  *
+ * A third one is invisible from here and was learned the hard way: **the new session has to be
+ * created *through* its workspace, not with a bare directory.** A session appears under a project in
+ * the Web interface because that workspace's account names it, and the account is written only on
+ * `create`'s `workspaceId` branch. Creating with a `cwd` produced a task that ran, reported to the
+ * phone, and sat under "ungrouped" at the desk — see
+ * [0020](../../docs/decisions/0020-a-phone-started-session-joins-its-workspace.md) and
+ * `tests/work-workspace.test.mjs`, which asserts the request shape rather than the outcome, because
+ * the request is the whole of it.
+ *
  * @module pocket-console/work
  */
 
@@ -158,7 +167,46 @@ export function createWork({ ctx, log, channel, settings, messages, workspaces, 
   }
 
   /**
+   * Give the new session its first prompt.
+   *
+   * Imported here rather than at load, the way the result card's reply does it: the message
+   * constructor lives in the harness, and a deployment without it must still load this plugin.
+   * @param sessionId - the session that was just created.
+   * @param text - what the person asked it to do.
+   * @returns whether the prompt was handed over.
+   */
+  const prompt = async (sessionId, text) => {
+    const agent = ctx.get?.('agents')?.get?.(sessionId)
+    if (typeof agent?.followup !== 'function') return false
+    const { createUserMessage } = await import('@deepseek-ai/dsh-llm')
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text }],
+      // Human input, minted by the surface the human is speaking through — and deliberately
+      // without a gateway request id, which is what keeps it from reading as a person at the desk.
+      source: { kind: 'user' },
+    }))
+    return true
+  }
+
+  /**
    * Start the session and hand it the first prompt.
+   *
+   * **The new session is created through the workspace, not through a bare directory.** A session
+   * is grouped in the Web interface because a workspace's `sessionIds` account names it, and the
+   * account is only written when creation names a workspace: `sessionController.create` attaches the
+   * session *solely* on the `workspaceId` branch, and treats `cwd` as the fallback for a session that
+   * belongs to no group. Creating with a bare `cwd` therefore produced a session that ran correctly
+   * and was reachable from the phone while sitting under "ungrouped" at the desk — reported from a
+   * real deployment, and reproduced in its stored data: a session whose header cwd was a registered
+   * workspace and whose id was in no workspace's account.
+   *
+   * The workspace is resolved from the asking session's own directory, so the inheritance the card
+   * promised is unchanged; it is named the way the registry names it rather than the way a string
+   * happens to be spelled. When it cannot be resolved — a deployment composing no workspace
+   * registry, or a directory that no longer exists — the start falls back to the bare directory
+   * rather than failing: a task that runs ungrouped is worth more than a card that does nothing, and
+   * the deployment log says which one happened so the next report needs no guessing.
+   *
    * @param session - the session whose workspace the new one inherits.
    * @param text - what the person asked the new session to do.
    * @returns the new session's id, or undefined when it could not be started.
@@ -177,21 +225,46 @@ export function createWork({ ctx, log, channel, settings, messages, workspaces, 
       return undefined
     }
 
-    const { sessionId } = await controller.create({ cwd })
-    const agent = ctx.get?.('agents')?.get?.(sessionId)
-    if (typeof agent?.followup !== 'function') {
-      log.warn(messages().logWorkFailed, new Error(`session "${String(sessionId)}" has no agent`))
+    let created
+    const registry = ctx.get?.('workspaceRegistry')
+    if (typeof registry?.resolveByPath === 'function') {
+      try {
+        // Resolved first, then handed to creation: an ungrouped session cannot be repaired by
+        // attaching it afterwards, because membership also requires the stored header's cwd to equal
+        // the workspace path, and creation is what writes that header.
+        const workspace = await registry.resolveByPath(cwd)
+        if (workspace === undefined) {
+          // The directory exists (or `resolveByPath` would have refused) but nothing owns it, so it
+          // has no group on the desk to join. A session created here is *not* chased into a new
+          // workspace record: this module's one write is the session it was asked to start, and
+          // inventing a registry entry from a phone press is a larger act than the card promised.
+          log.warn(messages().logWorkUnowned(cwd))
+        }
+        created = await controller.create(
+          workspace === undefined ? { cwd } : { workspaceId: workspace.id },
+        )
+      } catch (error) {
+        // Either the lookup refused (the directory does not resolve) or creation did. Creation fails
+        // *after* the session exists, so this is the branch that keeps a half-started task from
+        // leaving a card that says "已开新会话" with nothing behind it.
+        log.warn(messages().logWorkUngrouped, error)
+        created = await controller.create({ cwd })
+      }
+    } else {
+      created = await controller.create({ cwd })
+    }
+
+    const sessionId = created?.sessionId
+    if (typeof sessionId !== 'string' || sessionId === '') {
+      // A controller that answered without an id leaves nothing to prompt or to name, and saying so
+      // is not the same as blaming the agent for a session that was never handed over.
+      log.warn(messages().logWorkFailed, new Error('session creation returned no id'))
       return undefined
     }
-    // Imported here rather than at load, the way the result card's reply does it: the message
-    // constructor lives in the harness, and a deployment without it must still load this plugin.
-    const { createUserMessage } = await import('@deepseek-ai/dsh-llm')
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text }],
-      // Human input, minted by the surface the human is speaking through — and deliberately
-      // without a gateway request id, which is what keeps it from reading as a person at the desk.
-      source: { kind: 'user' },
-    }))
+    if (await prompt(sessionId, text) === false) {
+      log.warn(messages().logWorkFailed, new Error(`session "${sessionId}" has no agent`))
+      return undefined
+    }
     log.info(messages().logWorkStarted(String(sessionId), workspaceOf(sessionId) ?? workspaceLabel(cwd)))
     return sessionId
   }
