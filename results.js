@@ -17,6 +17,7 @@
  */
 
 import { CARD_TEXT_BUDGET, clipToBytes, looksLikeSizeRefusal } from './budget.js'
+import { titleOf, workspaceLabel } from './identity.js'
 import { RESTORE_LIMIT, createNoticeStore } from './notice-store.js'
 
 import { randomUUID } from 'node:crypto'
@@ -55,6 +56,19 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
   let restored = false
   /** Set while a restore is in flight, so the two triggers cannot both run it. */
   let restoring = false
+
+  /**
+   * The workspace one session belongs to, resolved once per notice.
+   *
+   * Read through the live agent, which is what this process is watching: the workspace
+   * is needed at the moment a card goes out — when the session is by definition loaded
+   * — and the answer is then carried on the notice, so no later rewrite has to read
+   * anything. A session with no agent, or with no working directory in its header, is
+   * left unnamed rather than labelled with a guess.
+   * @param session - the session id.
+   * @returns the label, or undefined when there is nothing to show.
+   */
+  const workspaceOf = (session) => workspaceLabel(ctx.get?.('agents')?.get?.(session)?.session?.header?.cwd)
 
   /**
    * One session's observation state.
@@ -173,14 +187,17 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
     // to, and an older card that still accepted a reply would inject an
     // instruction the reader wrote against a superseded answer.
     retire(session, messages().superseded)
+    // Resolved once, then carried: this card is rewritten when the reader replies and
+    // when a newer result supersedes it, and those rewrites must say the same thing.
+    const workspace = workspaceOf(session)
     const view = {
-      title: `${settings().titlePrefix} ${messages().resultTitle}`,
+      title: titleOf(`${settings().titlePrefix} ${messages().resultTitle}`, workspace),
       tone: 'info',
       body: [answer, messages().replyHint],
       buttons: [],
       forms: [{ payload: { nid: id, submit: true }, fieldId: INSTRUCTION_FIELD, submitLabel: messages().sendToAgent }],
     }
-    noticeSet(id, { session, handle: undefined })
+    noticeSet(id, { session, handle: undefined, workspace })
     track.ended = undefined
     track.sentAt = now()
     try {
@@ -200,6 +217,7 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
         rid: id,
         session,
         handle,
+        workspace,
         seq: await sessionSeq(session),
         sentAt: track.sentAt,
       }).then(() => { log.info(messages().logNoticeStored(id)) })
@@ -340,7 +358,7 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
         retireRestored(record, messages().readerSpoke)
         continue
       }
-      noticeSet(record.rid, { session: record.session, handle: record.handle })
+      noticeSet(record.rid, { session: record.session, handle: record.handle, workspace: record.workspace })
       kept += 1
     }
     if (kept > 0) log.info(messages().logNoticeRestored(kept))
@@ -357,7 +375,7 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
    */
   function retireRestored(record, reason) {
     log.info(messages().logNoticeRestoreRetired(record.rid, reason))
-    retract(record.handle, reason)
+    retract(record.handle, reason, record.workspace)
     void store.remove(record.rid)
   }
 
@@ -387,7 +405,7 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
       void store.remove(id)
       retired += 1
       if (notice.handle === undefined) continue
-      retract(notice.handle, headline)
+      retract(notice.handle, headline, notice.workspace)
     }
     if (retired > 0) log.debug(messages().logNoticeRetired(headline))
     return retired
@@ -402,11 +420,12 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
    * so the card is rewritten where it lies.
    * @param handle - the message the press came from, as the channel reported it.
    * @param headline - what the card says instead.
+   * @param workspace - the label the card was sent with, so the rewrite agrees with it.
    */
-  function retract(handle, headline) {
+  function retract(handle, headline, workspace) {
     if (handle === undefined || typeof channel.update !== 'function') return
     void Promise.resolve(channel.update(handle, {
-      title: `${settings().titlePrefix} ${messages().resultTitle}`,
+      title: titleOf(`${settings().titlePrefix} ${messages().resultTitle}`, workspace),
       tone: 'muted',
       body: [headline],
       buttons: [],
@@ -528,7 +547,7 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
       log.info(messages().logInstructionQueued)
       if (notice.handle !== undefined) {
         await Promise.resolve(channel.update(notice.handle, {
-          title: `${settings().titlePrefix} ${messages().resultTitle}`,
+          title: titleOf(`${settings().titlePrefix} ${messages().resultTitle}`, notice.workspace),
           tone: 'success',
           body: [messages().received],
           buttons: [],

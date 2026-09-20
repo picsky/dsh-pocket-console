@@ -38,6 +38,17 @@ out when it does.
 
 ### Changed
 
+- **Every phone card now names the workspace of the session it belongs to.** The title carried
+  the deployment's prefix and what the card was asking for and nothing else, so several sessions
+  running at once produced cards that could not be told apart, and a card that had finished
+  looked like a live one. The title is now `DSH 结果 · my-app`: the workspace taken from the
+  session header's working directory, and left out entirely for a session that has none rather
+  than filled with something invented. It is resolved once, when the card is built, and carried
+  on the record that owns it — a card is rewritten as it is answered, superseded or retired, and
+  reading the session again at each of those moments would drop the name from a rewrite whenever
+  the session had been reclaimed in between. The title is the one part of a card that shows in
+  the chat list, so this identifies a card without opening it (`identity.js`).
+
 - **Both READMEs were restructured around the order a reader needs things in.** The entrance is
   now the install, the uninstall, and the three settings the Settings card exposes; security,
   what it deliberately does not do, and how it breaks follow; the comparison with the other
