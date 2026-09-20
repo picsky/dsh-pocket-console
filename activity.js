@@ -62,6 +62,21 @@ const CLOCK_MS = 5_000
  */
 const RETRY_MS = 5_000
 
+/**
+ * How many times one write to this card is attempted before it is given up on.
+ *
+ * A retry is safe because the send carries an idempotency key, but safe is not the same as finite:
+ * a channel that is down for an hour would otherwise be retried every {@link RETRY_MS} for the life
+ * of the process, one warning per tick, describing a run that finished long ago. Four attempts span
+ * roughly a minute — long enough for a reconnect or a restart of the return path, short enough that a
+ * deployment which stays broken is not a machine that never stops trying.
+ *
+ * Giving up is a real loss and is logged as one: a card whose run has already ended is never written
+ * again, so a reader looking at it sees whatever it said last. That is the honest outcome — a card
+ * that cannot be sent cannot be read either — and it is strictly better than an unbounded loop.
+ */
+const MAX_TRIES = 4
+
 /** Sessions shown at once before the coldest are forgotten. */
 const CAPACITY = 64
 
@@ -163,6 +178,14 @@ export function createActivity({
       dirty: false,
       /** When a failed send may be tried again, so a dead channel is not hammered. */
       retryAt: undefined,
+      /**
+       * How many times the write now owed to this card has failed.
+       *
+       * One counter for the card rather than one per kind of write: a send that fails becomes the
+       * edit that follows it, and a reader does not care which half of the write gave up. Reset
+       * whenever a write lands, so a card that recovers has its full budget again.
+       */
+      attempts: 0,
       /** The idempotency key this card is sent under, so a retry cannot become a second card. */
       uuid: undefined,
       /**
@@ -455,6 +478,48 @@ export function createActivity({
   }
 
   /**
+   * Note that a write to one card failed, and say whether another attempt is owed.
+   *
+   * A failure during retry backoff is not requeued: the retry is already scheduled, and holding the
+   * refresh open for it would spin the timer instead of waiting. A send that is merely *in flight*
+   * is requeued, because that one has no future write scheduled and whatever changed meanwhile would
+   * otherwise never be written.
+   *
+   * @param record - the card whose write failed.
+   * @param error - what the channel raised.
+   * @param copy - the message copy, for the line that names the kind of write.
+   * @returns whether the flush should come back for this record.
+   */
+  /**
+   * Note that a write to one card failed, and schedule the next attempt.
+   *
+   * A failure during retry backoff is not requeued in the flush: the retry is already scheduled, and
+   * holding the refresh open for it would spin the timer instead of waiting. A send that is merely
+   * *in flight* is requeued, because that one has no future write scheduled and whatever changed
+   * meanwhile would otherwise never be written.
+   *
+   * @param record - the card whose write failed.
+   * @param error - what the channel raised.
+   * @param copy - the message copy, for the line that names the kind of write.
+   */
+  const noteFailure = (record, error, copy) => {
+    record.attempts += 1
+    if (record.attempts >= MAX_TRIES) {
+      // Given up on, and said out loud. The card keeps whatever it last showed — for a run that has
+      // already ended, that means it can read as unfinished — so the log has to be the place a
+      // deployment learns that this message stopped being maintained. Silence here is what would
+      // turn "the channel was down for a while" into "the plugin quietly stopped working".
+      record.dirty = false
+      record.retryAt = undefined
+      log.warn(messages().logActivityGivenUp(record.attempts, record.session), error)
+      return
+    }
+    record.retryAt = now() + RETRY_MS
+    record.dirty = true
+    log.warn(copy, error)
+  }
+
+  /**
    * Write out every card whose contents moved.
    *
    * Sends the first version and edits every one after it: the send is the only notification
@@ -470,9 +535,12 @@ export function createActivity({
     let requeue = false
     for (const record of activities.values()) {
       if (!record.dirty) continue
-      // Held back while a send is in flight, and while a send that failed is waiting its turn:
-      // dropping the flag instead would lose whatever changed in the meantime, which for a
-      // turn that ended mid-send means a card that says "working" for good.
+      // Held back while a send is in flight, and while a send that failed is waiting its turn — and
+      // **both** keep the flush coming back, which is not an optimisation to drop. A retry has no
+      // timer of its own: the requeue below is the only thing that brings the flush back after a
+      // failure, so removing it for the waiting case leaves a card whose send failed with nothing
+      // left to try it again. (An earlier version of this line did exactly that, and the only sign
+      // was an existing case timing out: no second attempt, and no error to say why.)
       if (record.sending || (record.retryAt ?? 0) > at) {
         requeue = true
         continue
@@ -499,6 +567,7 @@ export function createActivity({
             record.handle = handle
             record.sending = false
             record.retryAt = undefined
+            record.attempts = 0
             // Remembered against the message as well, so a card rewritten without its record —
             // after a restart — can still name the session it belongs to.
             workspaces?.record(handle, record.workspace)
@@ -507,15 +576,20 @@ export function createActivity({
             record.sending = false
             // An answer that never arrived is the one failure worth retrying: the card may or may
             // not exist, and the key is what makes trying again safe. A channel that is down is
-            // waited out rather than hammered at the refresh rate.
-            record.retryAt = now() + RETRY_MS
-            record.dirty = true
-            log.warn(messages().logActivitySendFailed, error)
+            // waited out rather than hammered at the refresh rate — and given up on eventually.
+            noteFailure(record, error, messages().logActivitySendFailed)
           })
         continue
       }
+      // A failed edit has to be retried, and this is the only place that can do it: the clock that
+      // re-marks a live card dirty stops touching a settled one, so a final write that failed used
+      // to leave the card saying "working" for good — the last state of a run nobody could correct.
       void writeCard(record, view => channel.update(record.handle, view))
-        .catch(error => { log.warn(messages().logActivityUpdateFailed, error) })
+        .then(() => {
+          record.attempts = 0
+          record.retryAt = undefined
+        })
+        .catch(error => { noteFailure(record, error, messages().logActivityUpdateFailed) })
     }
     if (requeue) armRefresh()
   }
@@ -527,12 +601,35 @@ export function createActivity({
     armRefresh()
   }
 
-  /** Keep the clock moving while nothing else changes. */
+  /**
+   * Re-mark the cards the clock is still responsible for.
+   *
+   * Three kinds are owed a write, and all three have to be named or the one that is left out becomes
+   * a card frozen in a state it is no longer in:
+   *
+   * - a live card, whose elapsed time is the thing that keeps answering "is it still going";
+   * - a card whose write failed, while it still has an attempt left — including a **settled** one,
+   *   because a finished run's last state is the whole of what a reader scrolls back to;
+   * - nothing else. A card that has been given up on is not touched, which is what keeps the retry
+   *   budget finite.
+   */
   const startClock = () => {
     if (clockTimer !== undefined) return
     clockTimer = setInterval(() => {
       if (disposed) return
-      if ([...activities.values()].some(record => record.handle !== undefined && !record.settled)) touch()
+      let owed = false
+      for (const record of activities.values()) {
+        if (record.handle === undefined) continue
+        // A live card keeps its clock moving. A settled one is re-marked only while it still owes a
+        // write that failed — which is the case that used to be dropped on the floor, because the
+        // clock's own test excluded every settled card and nothing else ever asked for that write.
+        const live = !record.settled
+        const retrying = record.retryAt !== undefined && record.attempts < MAX_TRIES
+        if (!live && !retrying) continue
+        record.dirty = true
+        owed = true
+      }
+      if (owed) armRefresh()
     }, CLOCK_MS)
     clockTimer.unref?.()
   }
