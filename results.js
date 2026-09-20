@@ -249,11 +249,10 @@ export function createResultNotifier({
   /**
    * One session's observation state.
    *
-   * The map is bounded because a long-running deployment meets every session it
-   * ever notifies about, and nothing else retires them: a track is small, but
-   * "one per session forever" is still a leak in a process that stays up for
-   * weeks. Eviction only ever drops a track that is not waiting on a notice, so
-   * a session about to notify keeps its place.
+   * The map is bounded because a long-running deployment meets every session it ever notifies about,
+   * and nothing else retires them: a track is small, but "one per session forever" is still a leak in
+   * a process that stays up for weeks. See {@link forgetColdest} for what the bound does when every
+   * track in it is busy — which is the case it used to get wrong.
    */
   const trackOf = (session) => {
     let track = tracks.get(session)
@@ -270,14 +269,34 @@ export function createResultNotifier({
     return track
   }
 
-  /** Drop the coldest idle tracks until the map is inside its capacity. */
+  /**
+   * Drop the coldest tracks until the map is inside its capacity.
+   *
+   * Idle tracks go first, and that order is the point: a track with no timer is a session between
+   * turns, and forgetting it costs nothing but a little state. A track whose calm window is still
+   * counting down is a notice that is about to be offered, and dropping it means that session never
+   * hears back.
+   *
+   * But the preference is a preference, not a shield. This used to skip every waiting track and then
+   * stop, so a deployment where all of them were waiting held every session it had ever met — the
+   * bound quietly not being one, which is the leak it exists to prevent. When nothing is idle the
+   * coldest waiting tracks go: the notice each was about to produce is lost, which is a real cost,
+   * but a process that grows without limit is a worse one. Reaching that branch needs
+   * {@link TRACK_CAPACITY} sessions with a window open at the same instant.
+   *
+   * Half the map at once, so the sort is paid for rarely rather than per event.
+   */
   const forgetColdest = () => {
     if (tracks.size < TRACK_CAPACITY) return
-    const idle = [...tracks.entries()]
-      .filter(([, track]) => track.timer === undefined)
-      .sort((left, right) => left[1].touched - right[1].touched)
-    // Half the map at once, so the sort is paid for rarely rather than per event.
-    for (const [session] of idle.slice(0, Math.max(1, Math.floor(TRACK_CAPACITY / 2)))) {
+    /** Waiting tracks rank behind idle ones, and older behind newer within each kind. */
+    const rank = (track) => (track.timer === undefined ? 0 : 1)
+    const coldest = [...tracks.entries()].sort((left, right) => (
+      rank(left[1]) - rank(right[1]) || left[1].touched - right[1].touched
+    ))
+    for (const [session, track] of coldest.slice(0, Math.max(1, Math.floor(TRACK_CAPACITY / 2)))) {
+      // Cleared, not merely forgotten: a timer left running would fire for a session this map no
+      // longer holds, and the notice it produced would be about a track that is gone.
+      if (track.timer !== undefined) clearTimeout(track.timer)
       tracks.delete(session)
     }
   }
