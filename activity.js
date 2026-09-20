@@ -90,33 +90,46 @@ export function createActivity({
   /**
    * One session's record, created on first sight.
    *
-   * The map is bounded because a record is small but permanent otherwise: forgetting the
-   * coldest is right, since a session nobody has run in that long is not about to be read.
+   * The map is bounded because a record is small but permanent otherwise. What it forgets is the
+   * **least recently used**, not the earliest created: a session that started long ago and is
+   * streaming right now would otherwise be evicted out from under its own live card, leaving that
+   * card frozen and giving the session a second message on its next turn. Re-inserting on every
+   * touch is what makes the first key the coldest one, the same rule the workspace registry uses.
    * @param session - the session id.
    * @returns its record.
    */
   const recordOf = (session) => {
-    let record = activities.get(session)
-    if (record === undefined) {
-      if (activities.size >= CAPACITY) activities.delete(activities.keys().next().value)
-      record = {
-        session,
-        handle: undefined,
-        sending: false,
-        dirty: false,
-        /** When a failed send may be tried again, so a dead channel is not hammered. */
-        retryAt: undefined,
-        workspace: undefined,
-        turn: undefined,
-        step: undefined,
-        tool: undefined,
-        fragments: [],
-        failed: undefined,
-        startedAt: now(),
-        settled: false,
+    const known = activities.get(session)
+    if (known !== undefined) {
+      // Moved to the end, so the oldest key is the least recently used one — but only while there
+      // is room to move it. At the cap, moving a key that is already last would first remove it
+      // and then find no room to put it back, and a live session would lose its card for good.
+      if (activities.size < CAPACITY) {
+        activities.delete(session)
+        activities.set(session, known)
       }
-      activities.set(session, record)
+      return known
     }
+
+    // A session nobody is following yet: make room for it, then take the newest place.
+    if (activities.size >= CAPACITY) activities.delete(activities.keys().next().value)
+    const record = {
+      session,
+      handle: undefined,
+      sending: false,
+      dirty: false,
+      /** When a failed send may be tried again, so a dead channel is not hammered. */
+      retryAt: undefined,
+      workspace: undefined,
+      turn: undefined,
+      step: undefined,
+      tool: undefined,
+      fragments: [],
+      failed: undefined,
+      startedAt: now(),
+      settled: false,
+    }
+    activities.set(session, record)
     return record
   }
 
@@ -338,6 +351,10 @@ export function createActivity({
       // and leaving it would have the card claim to be waiting on something that finished.
       record.tool = undefined
       if (reason?.kind === 'error') record.failed = reason.error?.message ?? messages().activityError
+      // A turn cut off by its output ceiling did not finish, and saying only "stopped" would make
+      // it look like one that did. It is the one end reason where the reader has a decision to
+      // make — continue, or leave it — so the card says so.
+      if (reason?.kind === 'max-tokens') record.failed = messages().activityTruncated
       record.dirty = true
       if (phoneHasIt()) armRefresh()
     }
@@ -417,5 +434,13 @@ export function createActivity({
     },
     /** How many sessions are being shown, for the suite and for diagnostics. */
     tracked: () => activities.size,
+    /**
+     * The sessions being shown, oldest first.
+     *
+     * The order is the one eviction uses, so a case can assert what would be forgotten next
+     * rather than inferring it from which cards happen to stop moving.
+     * @returns the session ids, least recently used first.
+     */
+    order: () => [...activities.keys()],
   }
 }

@@ -296,6 +296,8 @@ export async function apply(ctx, config) {
     priority: priority.get(),
     /** Open escalations, each with what it is waiting on. */
     pending: escalation.pending(),
+    /** How many runs the activity card follows, and which one it would forget next. */
+    activity: { tracked: activity.tracked(), order: activity.order() },
     enrollment: await channel.enrollmentState?.() ?? { state: 'unsupported' },
     ...mirror.state(),
   })

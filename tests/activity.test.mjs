@@ -222,6 +222,65 @@ test('a turn that ends while its first send is in flight still gets rendered', a
   assert.equal(content.includes('处理中'), false, 'and it does not keep claiming to work')
 })
 
+test('a disposed card is never written again, and a pending edit never fires', async () => {
+  const scaffolded = await phoneHoldsIt()
+  await startRun(scaffolded, 's_1')
+
+  // Disposal is what a reload, an unload, or the next case's scaffold does.
+  for (const dispose of scaffolded.disposers) dispose()
+  const before = observed.created.length + observed.patched.length
+
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'tool/call',
+    data: { turn: 2, step: 1, name: 'npm test' },
+  })
+  // Longer than the refresh window and the clock tick both: a timer that survived disposal would
+  // have fired by now. A leaked edit is not a small thing — it is what made one case's card
+  // appear inside the next case's log, and it would reach a reader as a card changing after the
+  // deployment it describes is gone.
+  await sleep(600)
+
+  assert.equal(observed.created.length + observed.patched.length, before, 'nothing is written after disposal')
+})
+
+test('a turn cut off by its output ceiling says the work did not finish', async () => {
+  const scaffolded = await phoneHoldsIt()
+  const { handle } = await startRun(scaffolded, 's_1')
+
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'turn/end',
+    data: { turn: 2, reason: { kind: 'max-tokens' } },
+  })
+  await settle()
+
+  // Every turn ends, so "stopped" alone cannot tell a finished one from one the ceiling cut in
+  // half — and it is the one end reason where the reader has a decision to make.
+  const content = JSON.stringify(cardFrom(handle))
+  assert.match(content, /输出达到上限/, 'the ceiling is named')
+  assert.match(content, /没有做完/, 'and so is what it means')
+})
+
+test('the map is capped, so a long-lived deployment does not remember every session forever', async () => {
+  const scaffolded = await phoneHoldsIt()
+
+  await startRun(scaffolded, 's_first')
+  for (let index = 0; index < 70; index += 1) {
+    scaffolded.emitToAll('session/event', { id: `s_${index}` }, { type: 'turn/start', data: { turn: 1 } })
+  }
+  await settle()
+
+  const order = (await scaffolded.state()).activity.order
+  assert.equal(order.length, 64, 'the map is capped')
+  assert.equal(order.includes('s_first'), false, 'and the session nobody has run since is forgotten first')
+
+  // A further event must not take a live neighbour's place: at the cap, a re-insertion that
+  // removed the oldest key and then found no room to put anything back would evict one running
+  // session per event, and each of them would lose its card and send a second message later.
+  scaffolded.emitToAll('session/event', { id: 's_overflow' }, { type: 'turn/start', data: { turn: 1 } })
+  await settle()
+  assert.equal((await scaffolded.state()).activity.tracked, 64, 'and the cap still holds')
+})
+
 test('a send that fails is retried, and not on the very next window', async () => {
   const scaffolded = await phoneHoldsIt()
 
