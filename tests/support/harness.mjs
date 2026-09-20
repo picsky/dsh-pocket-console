@@ -239,6 +239,14 @@ const corpus = new Map()
       payload: { id: stored.recipient },
     })
   }
+  // The side the person was on, as an earlier run left it. A restart is what has to read
+  // this back: a person away must not be put behind a desk head start by a new process.
+  if (stored.priority !== undefined) {
+    records.set(credentialKey('pocket-console', 'priority'), {
+      kind: 'grant',
+      payload: { side: stored.priority },
+    })
+  }
 
   const webServer = {
     register(route) {
