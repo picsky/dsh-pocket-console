@@ -181,18 +181,31 @@ export function createResultNotifier({
 }) {
   /** Per-session observation: the newest turn, its last message, and when we last spoke. */
   const tracks = new Map()
-  /** Notices whose rid is still live, keyed by that rid. */
+  /**
+   * Notices whose rid is still live, keyed by that rid.
+   *
+   * Each notice also carries the card it went out as, under {@link VIEW}, because a notice's card is
+   * rewritten more than once in its life — when the reader replies, when a newer result supersedes
+   * it — and every rewrite has to carry the same result. The first version of that dropped
+   * everything but a headline, which threw away the answer the reader had come back to read, and the
+   * run fold went with it.
+   *
+   * **The view lives on the notice and not in a second map, and that is the point.** It used to be
+   * a separate `Map` keyed by message, which meant two containers describing one thing and three
+   * code paths that each had to remember to clean both. One of them could not: a card superseded
+   * while its send was still in flight has no message to be keyed by yet, so the write that
+   * eventually recorded the view found no notice to record it against and left it in memory for the
+   * life of the process — one card's full text, per occurrence. Owning the view is what makes that
+   * unrepresentable rather than merely fixed.
+   */
   const notices = new Map()
   /**
-   * The card a notice was sent as, keyed by the message it went out on.
+   * Where a notice keeps the card it was sent as.
    *
-   * Kept because a notice's card is rewritten more than once in its life — when the reader replies,
-   * when a newer result supersedes it — and every rewrite has to carry the same result. The first
-   * version of this dropped everything but a headline, which threw away the answer the reader had
-   * come back to read, and the run fold went with it. Rebuilding from the sent view is what makes a
-   * rewrite agree with the message it rewrites.
+   * A property on the notice rather than a map of its own: two containers with the same lifetime
+   * drift, and this one did.
    */
-  const views = new Map()
+  const VIEW = 'view'
   /** Where those notices are remembered between runs. */
   const store = createNoticeStore({ ctx, log, messages })
   /** Set while the notifier is unloaded: a restore in flight must not outlive it. */
@@ -439,7 +452,13 @@ export function createResultNotifier({
       if (notice !== undefined) notice.handle = handle
       // The card exactly as it went out — including the offer, if it was appended. A later rewrite
       // starts from this, because the one thing a rewrite cannot reconstruct is the card itself.
-      if (handle !== undefined) views.set(handle, card)
+      //
+      // Recorded **on the notice**, and only while the notice is still there: a card superseded
+      // during its own delivery is a card nothing will ever rewrite, and giving it a view here is
+      // precisely how the old second map leaked one card's whole text per occurrence. When the
+      // notice is gone the view is not kept, because there is no longer anything that could ask for
+      // it.
+      if (notice !== undefined && handle !== undefined) notice[VIEW] = card
       // Remembered against the message as well, so a press that finds no live notice can
       // still be told which session the card belonged to — and so the next-task offer that rides
       // this card can name the workspace a new session would inherit. The session goes with it for
@@ -450,7 +469,8 @@ export function createResultNotifier({
       // The card is delivered, a press can find it, and this is the moment the phone has the
       // person's attention — so the moment to offer the one thing a result cannot: the next shard,
       // in a session of its own. It rides on this card (see `offer` above), so nothing more is sent
-      // here; `views` is what lets a later rewrite put the same card back together.
+      // here; the view kept on the notice is what lets a later rewrite put the same card back
+      // together.
       // Remembered only now: a card that never arrived has nothing to put back, and the
       // session's last seq is what a later run compares against to see whether the
       // session moved on while this process was not there to notice.
@@ -626,6 +646,30 @@ export function createResultNotifier({
   }
 
   /**
+  /**
+   * The card one notice was sent as, taken off the notice that owns it.
+   *
+   * A rewrite is asked for by the message it came from, and the notice is what knows the message —
+   * so this walks the live notices rather than keeping a second index beside them. The map holds the
+   * sessions with an offer outstanding, which is a handful, and this runs once per press or per
+   * retirement rather than per event.
+   *
+   * The ownership is not incidental: a view can only exist for a notice that is still live, so
+   * there is no third state to keep consistent and nothing to clean up twice.
+   * @param handle - the message the card lives in, as the channel reported it.
+   * @returns the notice that owns that message and the card it was sent as, when both are known.
+   */
+  function cardOf(handle) {
+    if (handle === undefined) return undefined
+    for (const notice of notices.values()) {
+      if (notice.handle !== handle) continue
+      const view = notice[VIEW]
+      if (view !== undefined) return { notice, view }
+    }
+    return undefined
+  }
+
+  /**
    * Take the reply control off a notice card that is no longer live.
    *
    * A notice card outlives the process that sent it: the map is in memory, so after a restart a
@@ -645,11 +689,11 @@ export function createResultNotifier({
    */
   function retract(handle, headline, workspace) {
     if (handle === undefined || typeof channel.update !== 'function') return
-    const view = views.get(handle)
-    const known = view !== undefined
-    if (known) views.delete(handle)
+    const known = cardOf(handle)
     // With nothing appended, `RESULT_ENDS` is the end of the card and this keeps the whole face.
-    const body = known ? [...view.body.slice(0, view[RESULT_ENDS] ?? view.body.length), headline] : [headline]
+    const body = known === undefined
+      ? [headline]
+      : [...known.view.body.slice(0, known.view[RESULT_ENDS] ?? known.view.body.length), headline]
     void Promise.resolve(channel.update(handle, {
       title: titleOf(`${settings().titlePrefix} ${messages().resultTitle}`, workspace),
       tone: 'muted',
@@ -657,7 +701,7 @@ export function createResultNotifier({
       buttons: [],
       forms: [],
       // Kept only when it is the card's own, so an unknown card is not given one by accident.
-      ...(known && view.details !== undefined ? { details: view.details } : {}),
+      ...(known?.view.details !== undefined ? { details: known.view.details } : {}),
     })).catch(error => { log.warn(messages().logNoticeCardFailed, error) })
   }
 
@@ -676,17 +720,18 @@ export function createResultNotifier({
    */
   async function aftermath(handle) {
     if (typeof channel.update !== 'function') return false
-    const sent = views.get(handle)
+    const known = cardOf(handle)
     // No view means the card went out before this process existed (a restart) or was never sent. It
     // is then left exactly as it is: rewriting it would replace a result nobody here has a copy of
     // with a sentence about a task, which is a worse card than a stale one.
-    if (sent === undefined || typeof nextTask?.mergeInto !== 'function') return false
+    if (known === undefined || typeof nextTask?.mergeInto !== 'function') return false
     const session = workspaces?.sessionOf?.(handle)
     const line = messages().workStarted(workspaceOf(session))
     // From the card as sent, not from the base result: the marker that says where the offer began
     // rides on the sent view, and without it the rewrite could not tell the offer from the answer.
-    const closed = nextTask.mergeInto(sent, session, line)
-    views.delete(handle)
+    const closed = nextTask.mergeInto(known.view, session, line)
+    // Taken off the notice it belongs to, so there is no second place that has to be told.
+    delete known.notice[VIEW]
     try {
       await channel.update(handle, closed)
       return true
@@ -925,9 +970,10 @@ export function createResultNotifier({
       // Only for a card this side still holds. A notice that came back from the previous run has no
       // view here, and guessing one would replace a result nobody has a copy of with a sentence
       // about an instruction — the exact failure this branch exists to stop.
-      if (notice.session !== undefined && views.has(notice.handle)) {
-        const sent = views.get(notice.handle)
-        views.delete(notice.handle)
+      const sent = notice[VIEW]
+      if (notice.session !== undefined && sent !== undefined) {
+        // Taken off the notice it belongs to, so there is no second place that has to be told.
+        delete notice[VIEW]
         // Everything the offer appended goes with the controls it came with. Keeping the sentence
         // "或者，在新会话里开下一段" on a card whose box has just been removed is the same lie in a
         // quieter form: it points at a control that is not there. What stays is the result — the

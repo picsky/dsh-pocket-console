@@ -37,7 +37,7 @@
  * @module pocket-console/work
  */
 
-import { titleOf, workspaceLabel } from './identity.js'
+import { workspaceLabel } from './identity.js'
 import { PHONE } from './priority.js'
 
 /** The payload key that marks a press as "start a new task" rather than an answer to a request. */
@@ -125,8 +125,11 @@ export function createWork({ ctx, log, channel, settings, messages, workspaces, 
    * the thing it was reporting on. For the same reason the fold is kept: it is the run that
    * produced the answer.
    *
-   * The title stays the result's as well: renaming it "新任务" would take the answer's own label
-   * away and make the card look like it is about something that has not happened yet.
+   * The title is left exactly as the caller built it. This module used to recompute it from the
+   * session, which named the same workspace a second time and did it by *re-reading* the session —
+   * the thing `identity.js` says never to do on a rewrite, because a session reclaimed in between
+   * names nothing and the label would vanish from the card that already carried it. The caller sets
+   * the title once, when it builds the card, and a rewrite now inherits it.
    *
    * @param view - the result's view, which is not mutated.
    * @param session - the session whose workspace a new task would inherit.
@@ -138,7 +141,7 @@ export function createWork({ ctx, log, channel, settings, messages, workspaces, 
     // Taken off whichever view is handed over: on the aftermath pass this is the card as sent,
     // which still carries the marker.
     const from = view[OFFER_FROM]
-    const base = { ...view, title: titleOf(`${settings().titlePrefix} ${copy.resultTitle}`, workspaceOf(session)) }
+    const base = { ...view }
     delete base[OFFER_FROM]
     if (outcome !== undefined) {
       // Every control goes, not just this module's: a card whose offer has been taken must not

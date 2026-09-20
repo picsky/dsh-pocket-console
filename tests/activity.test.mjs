@@ -938,3 +938,30 @@ test('a session that is not running is not taken on by the move', async () => {
 
   assert.equal(activityCard(), undefined, 'no card is minted for a session with no run')
 })
+
+test('an edit that fails after the run ended is tried again', async () => {
+  // The end of a run is the one state nothing else will come back for. The clock re-marks a card
+  // dirty only while its elapsed time still answers "is it going", so a card that is *settled* has
+  // exactly one write left in it — and that write used to be dropped on failure, leaving the reader
+  // looking at a card that says a finished run is still working.
+  const scaffolded = await phoneHoldsIt()
+  const { handle } = await startRun(scaffolded, 's_1')
+
+  // A failure that is not about size: a size refusal is retried smaller inside the writer, which
+  // would mask what this case is about.
+  observed.failNextPatch = 'the connection dropped before the platform answered'
+  scaffolded.emitToAll('session/event', { id: 's_1' }, { type: 'tool/call', data: { turn: 2, step: 1, name: 'npm test' } })
+  scaffolded.emitToAll('session/event', { id: 's_1' }, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
+  await settle()
+  assert.equal(observed.patchFailures, 1, 'the first edit was refused')
+
+  // The retry is owed a wait, so this has to outlast `RETRY_MS` rather than the refresh window.
+  await sleep(6_000)
+
+  const edits = observed.patched.filter(entry => entry.path?.message_id === handle)
+  assert.ok(
+    edits.length >= 1,
+    `the settled card was written again after the refusal: ${edits.length} edits, `
+    + `${observed.patchFailures} refusals`,
+  )
+})
