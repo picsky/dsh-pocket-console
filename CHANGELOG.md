@@ -8,6 +8,21 @@ out when it does.
 
 ## Unreleased
 
+### Fixed
+
+- **A run showed an answer to a question it could not show.** A turn that ended was not recorded as
+  ended, so the next turn's start looked like the same turn: the run was never closed, and the message
+  that opened the new turn was orphaned into a run nothing reads — the reader saw the answer with the
+  question missing. A turn now records that it is open, and a start closes the previous run whenever
+  one is. Neither the turn *number* nor "is anything in the run" can make that distinction: numbers
+  repeat in a session whose log was reset, and a person's message arrives before the turn that claims
+  it (`run-record.js`).
+
+- **The bytes a fold reported as left out could be wrong.** They were counted by matching kept entries
+  against every entry *by text*, so a run that ran the same command twice counted both as kept when
+  only one was — under-reporting what the reader is missing, which is the one thing that number exists
+  to get right. Entries are matched by position now (`results.js`).
+
 ### Changed
 
 - **A card may carry twenty times what it was carrying, because the limit it was built to does not

@@ -76,12 +76,27 @@ function runGroups(entries, dropped, copy, budget, maxGroups) {
   const all = entries.filter(entry => entry.text !== '')
   if (all.length === 0 && dropped === 0) return []
 
-  /** Bytes of the run a level leaves out, by comparing what it kept against everything. */
+  /**
+   * Bytes of the run a level leaves out.
+   *
+   * Compared **by position**, not by text: a run that ran the same command twice has two entries
+   * whose text is identical, and a set of the kept texts would count both as kept when only one was
+   * — under-reporting what the reader is missing, which is the one thing this number exists to get
+   * right.
+   * @param kept - the entries this level keeps, in the order they appear in the run.
+   * @returns the bytes a reader will not see.
+   */
   const lostBytes = (kept) => {
-    const keptText = new Set(kept.map(entry => entry.text))
-    return all
-      .filter(entry => !keptText.has(entry.text))
-      .reduce((total, entry) => total + rawBytes(entry.text) + 2, 0)
+    let at = 0
+    let lost = 0
+    for (const entry of all) {
+      if (at < kept.length && kept[at] === entry) {
+        at += 1
+        continue
+      }
+      lost += rawBytes(entry.text) + 2
+    }
+    return lost
   }
 
   /** Adjacent tool lines, joined; every other kind left as it is. */
