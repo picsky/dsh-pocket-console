@@ -132,6 +132,15 @@ out when it does.
 
 ### Fixed
 
+- **A retried card can no longer become a second notification.** A send the platform accepted but
+  whose answer never came back is the one way one card becomes two messages: this side cannot tell
+  "it was sent" from "it was not", so the activity card's retry would deliver it again. Every card
+  now carries an idempotency key — the same one for every attempt at that card — and the transport
+  makes a repeat of the key resolve to the message it already accepted. Feishu does this with the
+  request's own `uuid`, which it holds for an hour. The channel contract gains `deliver(view,
+  { uuid })`, optional for a transport with no such mechanism; `providers/README.md` and its
+  Chinese counterpart say what a channel must do with it (`activity.js`, `providers/feishu.js`).
+
 - **A composer answered from the phone stayed waiting when the desk was asleep.** A forwarded
   request is finished by a browser answering it, so the phone's answer reaches the model and
   leaves the desktop composer open; the browser half is what closes it. That half gave up on a

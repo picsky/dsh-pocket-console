@@ -26,8 +26,19 @@ export const observed = {
   registerAppCalls: [],
   /** Set to make the next delivery fail with that message. */
   failNextDelivery: undefined,
+  /**
+   * Set to make the next delivery be accepted and then fail.
+   *
+   * The failure a retry can make worse: the platform has the message, and this side never finds
+   * out. A case uses it to check that trying again does not notify the reader twice.
+   */
+  loseNextAnswer: false,
   /** How many deliveries the platform refused. */
   deliveryFailures: 0,
+  /** How many sends the platform answered with a message it had already accepted. */
+  deduplicated: 0,
+  /** How many deliveries were accepted and then failed before the answer arrived. */
+  lostAnswers: 0,
   /** Completes the pending `registerApp()` promise; set while it is pending. */
   completeRegisterApp: undefined,
   /** Rejects the pending `registerApp()` promise. */
@@ -62,7 +73,10 @@ export function resetObserved() {
   observed.closed = 0
   observed.registerAppCalls.length = 0
   observed.failNextDelivery = undefined
+  observed.loseNextAnswer = false
   observed.deliveryFailures = 0
+  observed.deduplicated = 0
+  observed.lostAnswers = 0
   observed.completeRegisterApp = undefined
   observed.failRegisterApp = undefined
   observed.handshake = 'ready'
@@ -113,9 +127,24 @@ export class Client {
      * @type {number}
      */
     this.sent = 0
+    /**
+     * What this deployment has already accepted, by idempotency key.
+     *
+     * The platform's own rule: the same key is honoured for an hour and a repeat is answered with
+     * the message it already accepted, so a send whose response was lost does not become a second
+     * message. Reproducing it here is what lets a case ask the only question that matters — how
+     * many cards did the reader actually get — rather than only whether an argument was passed.
+     * @type {Map<string, string>}
+     */
+    this.accepted = new Map()
     this.im = {
       message: {
         create: async (request) => {
+          const uuid = request.data?.uuid
+          if (uuid !== undefined && this.accepted.has(uuid)) {
+            observed.deduplicated += 1
+            return { data: { message_id: this.accepted.get(uuid) } }
+          }
           // A case can make the next delivery fail the way the platform refuses
           // an oversized card, which is the only way to exercise the retry.
           if (observed.failNextDelivery !== undefined) {
@@ -127,7 +156,15 @@ export class Client {
           observed.created.push(request)
           this.sent += 1
           const handle = `om_${this.sent}`
+          if (uuid !== undefined) this.accepted.set(uuid, handle)
           observed.delivered.push({ handle, request })
+          if (observed.loseNextAnswer === true) {
+            // Accepted, and the answer never arrives: the message exists on the platform and this
+            // side does not know it. This is the shape of failure a retry has to survive.
+            observed.loseNextAnswer = false
+            observed.lostAnswers += 1
+            throw new Error('the connection dropped after the platform accepted the card')
+          }
           return { data: { message_id: handle } }
         },
         patch: async (request) => {

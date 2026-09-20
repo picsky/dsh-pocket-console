@@ -857,7 +857,13 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       onAction = handler
       return () => { onAction = undefined }
     },
-    async deliver(view) {
+    /**
+     * Send one card.
+     * @param view - the channel-neutral view to render.
+     * @param options - the idempotency key the send should carry, when the caller has one.
+     * @returns the message the card lives in.
+     */
+    async deliver(view, { uuid } = {}) {
       // A pending device-authorization poll can outlive the request that started
       // it, so awaiting it here would hold a delivery for minutes. The core
       // treats a throw as "the desktop keeps this one" — which is the honest
@@ -870,6 +876,10 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
           receive_id: id,
           msg_type: 'interactive',
           content: JSON.stringify(renderCard(view, messages)),
+          // The platform holds the same key for an hour and answers a repeat with the message it
+          // already accepted, so a send whose response was lost is retried without the reader
+          // being notified a second time.
+          ...(uuid === undefined ? {} : { uuid }),
         },
       })
       return response?.data?.message_id
