@@ -27,6 +27,16 @@ import { randomUUID } from 'node:crypto'
 const INSTRUCTION_FIELD = 'value'
 
 /**
+ * Where on a sent card the result ends and the next-task offer begins.
+ *
+ * Carried on the view itself, because a card is rewritten after it is sent and the rewrite has to
+ * know which paragraphs were the answer. It is deliberately not derived from the copy: matching the
+ * sentence would break the day the wording changes, silently, and the failure mode is a card telling
+ * the reader to use a control that is no longer on it.
+ */
+const RESULT_ENDS = 'resultEnds'
+
+/**
  * Whether one Assistant message is a turn's answer.
  *
  * A message that both speaks and calls a tool is process, not answer — that is
@@ -386,8 +396,18 @@ export function createResultNotifier({
      * result is worth a message at all.
      */
     const offer = (base) => {
-      if (priority?.get?.() !== PRIORITY_PHONE) return base
-      return typeof nextTask?.mergeInto === 'function' ? nextTask.mergeInto(base, session) : base
+      // Where the **answer** ends. Everything the result card offers beyond the answer — the
+      // sentence pointing at the reply box, and the whole next-task block — is added at send time,
+      // so it all belongs to the same disposable layer. Recording the boundary at the answer is
+      // what lets a rewrite drop the controls and their words together, instead of leaving a card
+      // that tells the reader to reply to a box, or open a session with a form, that is not there.
+      //
+      // Derived from the body rather than from the copy: matching sentences would break silently the
+      // day the wording changes, and the failure is a card that lies about what it can do.
+      const ends = Math.max(1, base.body.length - 1)
+      if (priority?.get?.() !== PRIORITY_PHONE) return { ...base, [RESULT_ENDS]: ends }
+      const merged = typeof nextTask?.mergeInto === 'function' ? nextTask.mergeInto(base, session) : base
+      return { ...merged, [RESULT_ENDS]: ends }
     }
     /** Assemble the card once, so the marker, the fold and the offer cannot disagree. */
     const cardFor = (text) => {
@@ -607,7 +627,9 @@ export function createResultNotifier({
    * Where this side still holds the card as sent, the *result* is kept and only the controls go.
    * The first version replaced the whole face with the headline, which took away the answer and the
    * run fold — the two things the reader came back to the card for — and left a sentence about why
-   * the card no longer worked. A card whose reason is in doubt should still be readable.
+   * the card no longer worked. A card whose reason is in doubt should still be readable. The
+   * next-task offer goes with the controls for the same reason it does on a reply: its words without
+   * its box are an instruction the reader cannot follow.
    * @param handle - the message the press came from, as the channel reported it.
    * @param headline - what the card says instead.
    * @param workspace - the label the card was sent with, so the rewrite agrees with it.
@@ -617,7 +639,8 @@ export function createResultNotifier({
     const view = views.get(handle)
     const known = view !== undefined
     if (known) views.delete(handle)
-    const body = known ? [...view.body, headline] : [headline]
+    // With nothing appended, `RESULT_ENDS` is the end of the card and this keeps the whole face.
+    const body = known ? [...view.body.slice(0, view[RESULT_ENDS] ?? view.body.length), headline] : [headline]
     void Promise.resolve(channel.update(handle, {
       title: titleOf(`${settings().titlePrefix} ${messages().resultTitle}`, workspace),
       tone: 'muted',
@@ -826,16 +849,16 @@ export function createResultNotifier({
       // view here, and guessing one would replace a result nobody has a copy of with a sentence
       // about an instruction — the exact failure this branch exists to stop.
       if (notice.session !== undefined && views.has(notice.handle)) {
-        const base = views.get(notice.handle)
+        const sent = views.get(notice.handle)
         views.delete(notice.handle)
-        // The hint that pointed at the box goes with the box: left on, it would tell the reader to
-        // reply to a card that no longer has anywhere to type. Everything else — the answer and the
-        // run fold — is carried over untouched.
-        const body = base.body.includes(messages().replyHint)
-          ? base.body.filter(part => part !== messages().replyHint).concat(messages().received)
-          : [...base.body, messages().received]
+        // Everything the offer appended goes with the controls it came with. Keeping the sentence
+        // "或者，在新会话里开下一段" on a card whose box has just been removed is the same lie in a
+        // quieter form: it points at a control that is not there. What stays is the result — the
+        // answer and the run fold — and the line saying the instruction arrived.
+        const ends = sent[RESULT_ENDS] ?? sent.body.length
+        const body = [...sent.body.slice(0, ends), messages().received]
         await Promise.resolve(channel.update(notice.handle, {
-          ...base,
+          ...sent,
           title: titleOf(`${settings().titlePrefix} ${messages().resultTitle}`, notice.workspace),
           tone: 'success',
           body,

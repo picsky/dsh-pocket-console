@@ -210,6 +210,11 @@ test('using the offer closes it without taking the answer away', async () => {
   // The card is a result first. Closing it by replacing the face is the failure this case exists
   // for: the reader answers the offer, scrolls back, and the answer they were reading is gone.
   assert.match(JSON.stringify(after), /构建已经通过/, 'and the answer it was reporting is still there')
+  // The offer's words go with the form it just lost. Text pointing at a control that is not on the
+  // card is the same lie in a quieter form, and this is the second time this project has paid for it.
+  const words = after.body.elements.map(element => element.content ?? '').join('\n')
+  assert.equal(/开下一段|新会话里开/.test(words), false, 'and nothing still offers the form that is gone')
+  assert.equal(/回复这条消息/.test(words), false, 'nor points at the reply box it took with it')
 })
 
 test('a second press on the same card starts nothing', async () => {

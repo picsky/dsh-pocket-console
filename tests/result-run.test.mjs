@@ -213,11 +213,11 @@ test('replying keeps the answer and the run, and gives up only the box', async (
   assert.match(JSON.stringify(after), /已收到指令/, 'the card says the instruction arrived')
   assert.match(JSON.stringify(after), /测试也过了/, 'and the answer it was reporting is still on it')
   assert.equal(foldedRun(after), before, 'and the run it carried is unchanged')
-  // The hint pointed at a box that is no longer there, so it goes with it.
-  assert.equal(
-    after.body.elements.some(element => /回复这条消息/.test(element.content ?? '')),
-    false,
-    'and the sentence pointing at the gone box is gone too',
-  )
+  // Copy that points at a control which is no longer there is the same lie as dropping the answer,
+  // only quieter. The reply hint and the whole next-task block were added at send time, so they
+  // belong to the layer that was just disposed of and leave with it.
+  const words = after.body.elements.map(element => element.content ?? '').join('\n')
+  assert.equal(/回复这条消息/.test(words), false, 'and nothing points at the reply box that is gone')
+  assert.equal(/开下一段|新会话里开/.test(words), false, 'nor at the next-task form that is gone')
   assert.equal(followed.at(-1).content[0].text, '接着做下一步')
 })
