@@ -959,12 +959,18 @@ window.__ModuleLoader__.load({
        */
       const startMirror = () => {
         let stopped = false
-        // A decision is attempted once per page. An attempt that could not be
-        // applied is not retried on the next tick: the composer it was meant for
-        // is either gone or already settled, and repeating it would report the
-        // same failure every second for as long as the decision stays on offer.
+        // A decision that could not be applied is left *unattempted*, so the next
+        // tick tries again. Taking the first failure as final is what left a
+        // composer waiting forever: a page that has only just loaded has no
+        // composer mounted yet, and by the time one appears the decision had been
+        // written off. Trying again is free — answering a composer that already
+        // settled is a no-op — and it is the only way this page can recover.
         let attempted = null
+        // What was reported about the current decision, so a decision that cannot
+        // be applied reports once instead of every second — the retry is silent.
         let reported = null
+        // A decision whose window has passed is said once and then left alone.
+        let lapsed = null
         let inFlight = false
         const poll = async () => {
           // One poll at a time: two overlapping ticks could both read a decision
@@ -974,21 +980,32 @@ window.__ModuleLoader__.load({
           try {
             const sync = await readSync()
             if (stopped || sync === null || sync.id === attempted) return
+            // The window is gone and no browser collected it. Nothing here can
+            // close the composer any more, and the Host has no other way to learn
+            // that one decision ended that way; saying so is the whole point.
+            if (sync.expired === true) {
+              if (lapsed === sync.id) return
+              lapsed = sync.id
+              console.warn(`pocket-console: the phone's ${String(sync.kind)} decision lapsed before this page could mirror it`)
+              report('lapsed', 'the decision expired before this page collected it', sync.id)
+              return
+            }
             let reason
             try {
               reason = applySync(sync)
             } catch (error) {
               // A composer that answers by throwing — the already-settled case —
-              // is not a transport failure, and must not escape before `attempted`
-              // is set, which is what used to make this retry forever.
+              // is not a transport failure: it means this composer is done, so the
+              // decision is recorded as attempted and the throw is only reported.
               reason = String(error?.message ?? error)
             }
-            attempted = sync.id
             if (reason === null) {
+              attempted = sync.id
               console.info(`pocket-console: mirrored the phone's ${String(sync.kind)} decision`)
               report('applied', undefined, sync.id)
               return
             }
+            // Nothing was mounted for it yet; leave it unattempted and try again.
             if (reported !== sync.id) {
               reported = sync.id
               console.info(`pocket-console: mirror skipped — ${reason}`)

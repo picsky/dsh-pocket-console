@@ -332,6 +332,59 @@ test('the browser half loads through the module loader and registers its card', 
   assert.equal(answered.length, 1, 'a different request is left alone')
   assert.ok(reports.some(entry => entry.status === 'skipped' && entry.reason === 'no waiting composer'))
 
+  // A composer that arrives late is still closed. A page that has only just
+  // loaded has none mounted when the decision first arrives, and taking that
+  // first failure as final is what left a waiting composer behind for good — so
+  // the decision stays on offer here until one actually takes it.
+  const lateAnswers = []
+  served = { id: 'm2b', sessionId: 's_late', questions: [], answer: phoneAnswer }
+  await sleep(1100)
+  assert.equal(lateAnswers.length, 0, 'a decision with no composer is not applied')
+  const skippedOnce = reports.filter(entry => entry.syncId === 'm2b' && entry.status === 'skipped').length
+  assert.equal(skippedOnce, 1, `a decision still on offer is reported once, not every tick: ${skippedOnce}`)
+  uiSession.pendingInteractions.getSnapshot = () => new Map([
+    ['s_agent', pending],
+    ['s_late', { sessionId: 's_late', kind: 'approval', answer: async (answer) => { lateAnswers.push(answer) } }],
+  ])
+  await sleep(2500)
+  assert.deepEqual(lateAnswers, [phoneAnswer], 'the late composer is closed by the same decision')
+  assert.ok(
+    reports.some(entry => entry.status === 'applied' && entry.syncId === 'm2b'),
+    `and the apply is reported: ${JSON.stringify(reports.at(-1))}`,
+  )
+  uiSession.pendingInteractions.getSnapshot = () => new Map([['s_agent', pending]])
+
+  // The other half of that scenario: the page was already open and its timers
+  // were frozen — a sleeping machine, a background tab — so by the time a poll
+  // ran the window had gone. Nothing can be done for that composer any more, and
+  // this is the only side that can say it, so it is said rather than passed over.
+  const stalled = { id: 'm2c', sessionId: 's_agent', questions: ['x'], answer: phoneAnswer }
+  served = stalled
+  await sleep(1100)
+  stalled.expired = true
+  await sleep(1100)
+  assert.ok(
+    reports.some(entry => entry.status === 'lapsed' && entry.syncId === 'm2c'),
+    `a decision that lapsed after this page was open is reported: ${JSON.stringify(reports.slice(-3))}`,
+  )
+  const lapsedOnce = reports.filter(entry => entry.status === 'lapsed' && entry.syncId === 'm2c').length
+  await sleep(1100)
+  assert.equal(
+    reports.filter(entry => entry.status === 'lapsed' && entry.syncId === 'm2c').length,
+    lapsedOnce,
+    'and said once, not every tick',
+  )
+
+  // A decision whose window passed before this page saw it is said out loud: the
+  // host has no other way to learn that a composer was left waiting behind it.
+  served = { id: 'm2d', sessionId: 's_agent', questions: ['x'], answer: phoneAnswer, expired: true }
+  await sleep(1100)
+  assert.equal(lateAnswers.length, 1, 'an expired decision is not applied to a composer')
+  assert.ok(
+    reports.some(entry => entry.status === 'lapsed' && entry.syncId === 'm2d'),
+    `a lapsed decision is reported: ${JSON.stringify(reports.slice(-3))}`,
+  )
+
   // A page whose Session UI is absent says so instead of failing silently.
   uiSession.pendingInteractions.getSnapshot = () => undefined
   served = { id: 'm3', sessionId: 's_agent', questions: ['a', 'b'], answer: phoneAnswer }

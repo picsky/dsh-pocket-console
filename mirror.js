@@ -12,6 +12,13 @@
  * closed is only observable in the page: a mirror that is not landing says which
  * step it reached.
  *
+ * What that costs when nobody collects it is this module's second job. A browser
+ * whose timers were frozen — a sleeping machine, a background tab — can miss the
+ * whole window, and the composer it was meant to close then waits forever behind
+ * a card that has already been answered. A lapsed decision therefore keeps being
+ * offered, marked `expired`, so a late poll can say what happened instead of
+ * reading "nothing" and finding nothing wrong.
+ *
  * @module pocket-console/mirror
  */
 
@@ -28,6 +35,11 @@ export function createMirror({ log, settings, messages = () => ({}), now = () =>
   let decision = null
   /** What the browser half did with each decision, newest last. */
   const reports = []
+  /** The decision whose lapse has already been reported, so it is said once. */
+  let lapsed = null
+
+  /** Whether a decision was carried across the gap by some browser. */
+  const collected = (id) => reports.some(report => report.status === 'applied' && report.syncId === id)
 
   return {
     /**
@@ -71,14 +83,38 @@ export function createMirror({ log, settings, messages = () => ({}), now = () =>
     },
     /**
      * The mirror fields of the state route.
-     * @returns the decision while it is still current, and the recent reports.
+     *
+     * A decision inside its window is offered as it stands. One whose window has
+     * passed is offered once more, marked `expired`: the composer it should have
+     * closed is still waiting somewhere, and this is the only moment anything can
+     * learn that. It is dropped only once a browser has said it saw it — which for
+     * an expired decision is a report, not a mirror — so no reload can find it
+     * again, and quiet, because the answer the model received is already the
+     * phone's either way.
+     * @returns the decision, while it is offered, and the recent reports.
      */
     state() {
+      if (decision === null) return { sync: null, mirror: [...reports] }
       const ttl = settings().mirrorTtlSeconds * 1000
-      return {
-        sync: decision !== null && now() - decision.at <= ttl ? decision : null,
-        mirror: [...reports],
+
+      if (now() - decision.at <= ttl) {
+        return { sync: decision, mirror: [...reports] }
       }
+
+      // A browser already carried this one across, so there is nothing left to
+      // say about it and nothing left to offer.
+      if (collected(decision.id)) {
+        decision = null
+        return { sync: null, mirror: [...reports] }
+      }
+
+      if (lapsed !== decision.id) {
+        lapsed = decision.id
+        // The one event that was invisible: a decision the phone took that no
+        // browser ever came for, leaving a composer waiting behind it.
+        log.warn(messages().logMirrorLapsed ?? 'a phone decision lapsed before any browser collected it')
+      }
+      return { sync: { ...decision, expired: true }, mirror: [...reports] }
     },
   }
 }
