@@ -38,6 +38,16 @@ out when it does.
 
 ### Changed
 
+- **A finished run leaves a record on its card instead of looking live.** When the phone holds the
+  person, one card follows a run and is edited in place; when the turn ends the card freezes: the
+  status becomes `已结束`, the header goes grey, and the run's own process — what the person asked
+  for, what the run said, and the tools that failed — folds into a panel the channel renders
+  collapsed and the reader opens in place. A live card folds nothing, because a panel growing under
+  a reader's thumb is worse than no panel. The panel is capped: a hundred-step run keeps its end
+  rather than its beginning, since the end is what a reader is looking for. A view gains the optional
+  `details` field for it, which `providers/README.md` and its Chinese counterpart say a channel
+  should fold where it can and must not silently drop (`activity.js`, `providers/feishu.js`).
+
 - **A run in progress is visible from the phone, on a card that is edited rather than sent.**
   A long turn used to be silent: the phone heard from this plugin only when a request blocked or
   a turn ended, so the only way to know whether the machine was still working — and where it was

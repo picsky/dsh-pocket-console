@@ -103,6 +103,13 @@ const zh = {
   activityFailed: reason => `**失败**：${reason}`,
   activityNothingYet: '（这一步还没有文本输出）',
   activityTruncated: '输出达到上限而中断，任务没有做完。',
+  /** Label over the folded record of a finished run, on the frozen card. */
+  activityProcess: '本次执行过程',
+  /** One line on a frozen card when a newer card for the same session exists below it. */
+  activitySuperseded: '这张卡已经结束；这一轮后来的消息在下方更新的卡片上。',
+  activityFrozen: '已结束',
+  /** One failed tool call, in the folded record of a finished run. */
+  activityToolFailed: (name, reason) => `**工具失败**：\`${name}\`${reason === '' ? '' : ` — ${reason}`}`,
   activityTitle: '执行中',
   logActivitySent: '已为这次运行发出活动卡。',
   logActivitySendFailed: '活动卡发送失败',
@@ -224,6 +231,10 @@ const en = {
   activityFailed: reason => `**Failed**: ${reason}`,
   activityNothingYet: '(no text from this step yet)',
   activityTruncated: 'the output hit its ceiling and stopped, so the work did not finish.',
+  activityProcess: 'What this run did',
+  activitySuperseded: 'this card is finished; later messages for this run are on the newer card below.',
+  activityFrozen: 'Finished',
+  activityToolFailed: (name, reason) => `**Tool failed**: \`${name}\`${reason === '' ? '' : ` — ${reason}`}`,
   activityTitle: 'Running',
   logActivitySent: 'sent the activity card for this run.',
   logActivitySendFailed: 'sending the activity card failed',

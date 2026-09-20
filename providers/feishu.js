@@ -268,6 +268,18 @@ const button = (label, tone, payload) => ({
 function renderCard(view, messages) {
   const elements = view.body.map(content => ({ tag: 'markdown', content }))
 
+  // A folded record, where the view carries one. Collapsed by default and opened in place by the
+  // client: the reader who wants the whole of a finished run asks for it, and the reader who does
+  // not is not made to scroll past it.
+  if (view.details !== undefined) {
+    elements.push({
+      tag: 'collapsible_panel',
+      expanded: false,
+      header: { title: { tag: 'markdown', content: `**${view.details.title}**` } },
+      elements: view.details.blocks.map(content => ({ tag: 'markdown', content })),
+    })
+  }
+
   // One button per row: side by side halves every label, which cuts off the
   // option text the user is choosing between.
   for (const node of view.buttons) {

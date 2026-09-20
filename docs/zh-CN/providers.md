@@ -81,6 +81,10 @@ SDK 通常提供 `logger` 与 `loggerLevel`：把它的日志接进 `log.warn` /
   title: string,
   tone: 'warning' | 'info' | 'success' | 'danger' | 'muted',
   body: string[],            // 每项一个文本块
+  details?: {                // 可选的折叠记录；冻结的卡片上会有
+    title: string,           // 折叠面板上的标签
+    blocks: string[],        // 折叠里的内容，每项一个文本块
+  },
   buttons: [{ payload, label, tone: 'default' | 'primary' | 'danger' }],
   forms: [{
     payload,                 // 提交时原样回传
@@ -92,6 +96,8 @@ SDK 通常提供 `logger` 与 `loggerLevel`：把它的日志接进 `log.warn` /
   }],
 }
 ```
+
+`details` 是视图里**唯一一个"要被打开"而不是"被读到"**的部分。**通道应当在自己的平台上把它折叠**——飞书渲染为 `collapsible_panel`，默认收起、就地展开——平台不能折叠时就当普通文本渲染。**静默丢弃它的通道会丢掉一次已结束运行留下的记录**，而那是那份记录唯一存在的地方。
 
 **一个视图就是一条消息。** 一个请求可以携带多道题，而核心**一道题一个视图**：答完一题就把同
 一条消息改写为下一题——这正是桌面弹窗本来就在走的节奏。核心绝不会把两道题的控件放进同一个视

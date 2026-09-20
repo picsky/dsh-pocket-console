@@ -69,6 +69,15 @@ const CAPACITY = 64
 const RECENT_FRAGMENTS = 3
 
 /**
+ * How much of a finished run's process the folded record keeps.
+ *
+ * The panel is the only place a reader can see what a run did, so it is worth more room than the
+ * card face — but not unbounded: a run of a hundred steps would otherwise put a document into one
+ * message, and a card that cannot be delivered says nothing at all.
+ */
+const PROCESS_BUDGET = 8 * 1024
+
+/**
  * Create the activity card.
  * @param options - the logger, the channel, the settings, copy, priority, and the workspace
  *   registry every delivered card is remembered in.
@@ -124,6 +133,16 @@ export function createActivity({
       retryAt: undefined,
       /** The idempotency key this card is sent under, so a retry cannot become a second card. */
       uuid: undefined,
+      /**
+       * What this run has said and done, in the order it happened.
+       *
+       * Kept for the frozen card's folded record: it is what a reader opens when they want to
+       * know what a finished run actually did, and it is built while the run goes because there
+       * is nothing to re-read it from afterwards.
+       */
+      process: [],
+      /** Set once a newer card for this session exists, so a frozen card can say so. */
+      superseded: false,
       workspace: undefined,
       turn: undefined,
       step: undefined,
@@ -141,6 +160,25 @@ export function createActivity({
   const workspaceOf = (session) => workspaceLabel(ctx.get?.('agents')?.get?.(session)?.session?.header?.cwd)
 
   /**
+   * Add one thing the run did to the record the frozen card will carry.
+   *
+   * The oldest entries go first when the record is full: the end of a run is what a reader is
+   * looking for, and a record that stopped mid-way would be the least useful half of it.
+   * @param record - the session's record.
+   * @param line - one message's text, or one line about a failure.
+   */
+  const note = (record, line) => {
+    const text = String(line ?? '').trim()
+    if (text === '') return
+    record.process.push(text)
+    let size = record.process.reduce((total, entry) => total + Buffer.byteLength(entry, 'utf8'), 0)
+    while (size > PROCESS_BUDGET && record.process.length > 1) {
+      size -= Buffer.byteLength(record.process[0], 'utf8')
+      record.process.shift()
+    }
+  }
+
+  /**
    * What the run is doing, in one word.
    *
    * Read from the agent rather than derived from the log: the log is the record of what
@@ -153,9 +191,29 @@ export function createActivity({
     // A failure outranks the turn being over: every failed turn ends, and reporting the end
     // instead of the failure would hide the one thing the reader has to act on.
     if (record.failed !== undefined) return copy.activityError
-    if (record.settled) return copy.activityStopped
+    if (record.settled) return copy.activityFrozen
     if (record.tool !== undefined) return copy.activityWaiting
     return copy.activityRunning
+  }
+
+  /**
+   * The folded record of a finished run, when there is one to fold.
+   *
+   * Only a settled card carries it: while a run is going the live fragments are the point, and a
+   * panel that changed under the reader's thumb would be worse than no panel. A frozen card is
+   * the one place a reader goes looking for what actually happened.
+   * @param record - the session's record.
+   * @param copy - the copy table in force.
+   * @returns the panel, or undefined when the card is live or has nothing to show.
+   */
+  const detailsFor = (record, copy) => {
+    if (!record.settled || record.process.length === 0) return undefined
+    return {
+      title: copy.activityProcess,
+      // Folded content gets the whole card's room: nothing else has to fit beside it, and the
+      // reason to open it is to read what the run did.
+      blocks: [clipToBytes(record.process.join('\n\n'), copy.truncated)],
+    }
   }
 
   /**
@@ -183,10 +241,17 @@ export function createActivity({
     // actual answer is what the result notice is for.
     const text = record.fragments.join('')
     body.push(text === '' ? copy.activityNothingYet : clipToBytes(text, copy.truncated))
+    // A frozen card says a newer one exists, so a reader who scrolled back knows to look below
+    // rather than reply against a run that is over.
+    if (record.settled && record.superseded) body.push(copy.activitySuperseded)
+    const details = detailsFor(record, copy)
     return {
       title: titleOf(`${settings().titlePrefix} ${copy.activityTitle}`, record.workspace),
       tone: record.failed !== undefined ? 'danger' : record.settled ? 'muted' : 'info',
       body,
+      // The record of what the run did, folded where the channel can fold it. Absent while the
+      // run is live: a panel that grows under the reader's thumb is worse than no panel.
+      ...(details === undefined ? {} : { details }),
       // Nothing to press: this card exists to be looked at, and a control on it could meet an
       // edit while it is being used.
       buttons: [],
@@ -274,6 +339,19 @@ export function createActivity({
     armRefresh()
   }
 
+  /**
+   * Mark a finished card as one a newer card has replaced.
+   *
+   * The line goes on the card itself, and the card is not sent anywhere: it already exists, and a
+   * reader who scrolled back is the only one who needs to know.
+   * @param record - the finished record whose card is now the older one.
+   */
+  const markSuperseded = (record) => {
+    record.superseded = true
+    record.dirty = true
+    armRefresh()
+  }
+
   /** Keep the clock moving while nothing else changes. */
   const startClock = () => {
     if (clockTimer !== undefined) return
@@ -299,12 +377,17 @@ export function createActivity({
       // instead of opening a second card for it — the record is what the card is, and two
       // records for one turn would mean two messages about one thing.
       const record = recordOf(session.id)
+      // Whatever card this session already has is now the record of a finished run: a newer one
+      // is about to exist, so it says so rather than looking like the live one.
+      if (record.settled && record.handle !== undefined) markSuperseded(record)
       record.turn = event.data?.turn
       record.step = undefined
       record.tool = undefined
       record.fragments = []
+      record.process = []
       record.failed = undefined
       record.settled = false
+      record.superseded = false
       record.startedAt = now()
       if (record.workspace === undefined) record.workspace = workspaceOf(session.id)
       record.dirty = true
@@ -333,24 +416,44 @@ export function createActivity({
     }
     if (type === 'tool/result') {
       record.tool = undefined
+      // Only a failed tool earns a line in the record: what a run did is mostly its text, and a
+      // log of every successful call would bury the part a reader actually needs.
+      const failure = event.data?.error
+      const failed = event.data?.message?.content?.[0]?.isError === true || failure !== undefined
+      if (failed) {
+        const name = event.data?.name ?? event.data?.message?.content?.[0]?.toolCallId ?? ''
+        note(record, messages().activityToolFailed(name, failure?.message ?? failure?.name ?? ''))
+      }
       record.dirty = true
       if (phoneHasIt()) armRefresh()
       return
     }
-    if (type === 'assistant/message') {
-      if (event.data?.interrupted === true) record.failed = messages().activityInterrupted
-      // Only as a fallback: a deployment whose live frames never arrive still gets a card that
-      // says something. With frames arriving, they are the newer and truer text.
-      if (record.fragments.length === 0) {
-        const text = (event.data?.message?.content ?? [])
+    if (type === 'user/message') {
+      // What the person asked for belongs at the top of the record: it is the thing the rest of
+      // it is an answer to.
+      if (event.data?.source?.kind === 'user') {
+        note(record, (event.data?.content ?? [])
           .filter(block => block.type === 'text')
           .map(block => block.text)
-          .join('')
-        if (text !== '') {
-          record.fragments = [text]
-          record.dirty = true
-          if (phoneHasIt()) armRefresh()
-        }
+          .join(''))
+      }
+      return
+    }
+    if (type === 'assistant/message') {
+      if (event.data?.interrupted === true) record.failed = messages().activityInterrupted
+      const text = (event.data?.message?.content ?? [])
+        .filter(block => block.type === 'text')
+        .map(block => block.text)
+        .join('')
+      // Every committed message goes into the record, whether or not it also called a tool: the
+      // record is what the run said, and the reason to open it is to read that.
+      note(record, text)
+      // Only as a fallback: a deployment whose live frames never arrive still gets a card that
+      // says something. With frames arriving, they are the newer and truer text.
+      if (record.fragments.length === 0 && text !== '') {
+        record.fragments = [text]
+        record.dirty = true
+        if (phoneHasIt()) armRefresh()
       }
       return
     }
@@ -365,6 +468,13 @@ export function createActivity({
       // it look like one that did. It is the one end reason where the reader has a decision to
       // make — continue, or leave it — so the card says so.
       if (reason?.kind === 'max-tokens') record.failed = messages().activityTruncated
+      // The card face shows the newest fragments, so a run whose text arrived only as live frames
+      // would freeze with a record that never saw it. Closing on it is what the frozen card's
+      // folded process is for, and it costs nothing when the committed message already noted it.
+      const shown = record.fragments.join('')
+      if (shown !== '' && !record.process.some(entry => entry.includes(shown.slice(0, 40)))) {
+        note(record, shown)
+      }
       record.dirty = true
       if (phoneHasIt()) armRefresh()
     }

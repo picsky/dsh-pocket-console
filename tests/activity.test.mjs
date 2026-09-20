@@ -36,6 +36,20 @@ const settle = () => sleep(400)
 const ACTIVITY_TITLE = 'DSH 执行中'
 
 /**
+ * The folded record a card carries, as one string, or undefined when it has none.
+ *
+ * Read from the rendered card rather than the view: a view's `details` becomes the platform's own
+ * foldable element, and what a reader sees is what that element holds.
+ * @param card - the rendered card JSON.
+ * @returns the label and contents of the fold, or undefined.
+ */
+function foldedRecord(card) {
+  const panel = (card?.body?.elements ?? []).find(element => element.tag === 'collapsible_panel')
+  if (panel === undefined) return undefined
+  return JSON.stringify(panel)
+}
+
+/**
  * The activity card this deployment has sent, with the handle it lives in.
  * @returns the handle and current card, or undefined when none has been sent.
  */
@@ -67,7 +81,10 @@ async function takeOverFromThePhone(scaffolded) {
     () => Promise.withResolvers().promise,
   )
   await sleep(1100)
-  await clickCard(callbackValues(sentCard()).find(value => value.v === 'allowed-once'))
+  // The last card, not "the only card": a case may have caused others before this one, and
+  // `sentCard()` insists on exactly one delivery, which is not a property these cases have.
+  const card = cardFrom(lastDelivered())
+  await clickCard(callbackValues(card).find(value => value.v === 'allowed-once'))
 }
 
 /**
@@ -179,11 +196,14 @@ test('the card names the session it belongs to', async () => {
   assert.equal(card.header.title.content, 'DSH 执行中 · my-app', 'the title names the workspace')
 })
 
-test('the card says what the run is doing, and stops saying it when the turn ends', async () => {
+test('the card says what the run is doing, and freezes when the turn ends', async () => {
   const scaffolded = await phoneHoldsIt()
   const { handle } = await startRun(scaffolded, 's_1')
+  delta(scaffolded, 's_1', '先看一下')
+  await settle()
   assert.match(JSON.stringify(cardFrom(handle)), /处理中/, 'a running step says so')
   assert.equal(JSON.stringify(cardFrom(handle)).includes('undefined'), false, 'and nothing reads as undefined')
+  assert.equal(foldedRecord(cardFrom(handle)), undefined, 'a live card folds nothing')
 
   scaffolded.emitToAll('session/event', { id: 's_1' }, {
     type: 'tool/call',
@@ -198,8 +218,78 @@ test('the card says what the run is doing, and stops saying it when the turn end
     data: { turn: 2, reason: { kind: 'completed' } },
   })
   await settle()
-  assert.match(JSON.stringify(cardFrom(handle)), /已停止/, 'a finished turn stops claiming to run')
-  assert.equal(JSON.stringify(cardFrom(handle)).includes('npm test'), false, 'and stops naming the tool')
+  const frozen = cardFrom(handle)
+  assert.match(JSON.stringify(frozen), /已结束/, 'a finished turn stops claiming to run')
+  assert.equal(JSON.stringify(frozen).includes('npm test'), false, 'and stops naming the tool')
+  // Frozen is what tells a record from a live card when the reader scrolls back.
+  assert.equal(frozen.header.template, 'grey', 'and the card is muted')
+  assert.ok(foldedRecord(frozen), 'and it folds the record of what the run did')
+  assert.match(foldedRecord(frozen), /本次执行过程/, 'under a label that says what it is')
+  assert.deepEqual(callbackValues(frozen), [], 'with nothing left to press')
+})
+
+test('the folded record holds what the run said, and what failed', async () => {
+  const scaffolded = await phoneHoldsIt()
+  const { handle } = await startRun(scaffolded, 's_1')
+
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'user/message',
+    data: { source: { kind: 'user' }, content: [{ type: 'text', text: '把测试修好' }] },
+  })
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'assistant/message',
+    surfaceOp: 'append',
+    data: { turn: 2, message: { content: [{ type: 'text', text: '我先看失败的用例。' }] } },
+  })
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'tool/result',
+    data: {
+      turn: 2,
+      step: 1,
+      message: { content: [{ type: 'tool-result', toolCallId: 'c1', content: 'boom', isError: true }] },
+      error: { name: 'CommandFailed', message: 'exit 1' },
+    },
+  })
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'tool/result',
+    data: {
+      turn: 2,
+      step: 2,
+      message: { content: [{ type: 'tool-result', toolCallId: 'c2', content: 'ok' }] },
+    },
+  })
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'turn/end',
+    data: { turn: 2, reason: { kind: 'completed' } },
+  })
+  await settle()
+
+  const record = foldedRecord(cardFrom(handle))
+  assert.match(record, /把测试修好/, 'what the person asked for is in it')
+  assert.match(record, /我先看失败的用例/, 'and what the run said')
+  assert.match(record, /工具失败/, 'a failed tool earns a line')
+  assert.match(record, /exit 1/, 'with the reason')
+  assert.equal(record.includes('c2'), false, 'a tool that worked does not')
+})
+
+test('a session keeps one card across its turns, edited rather than re-sent', async () => {
+  const scaffolded = await phoneHoldsIt()
+  const first = await startRun(scaffolded, 's_1')
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'turn/end',
+    data: { turn: 2, reason: { kind: 'completed' } },
+  })
+  await settle()
+
+  // The next turn is the same card, rewritten. A session that sent a card per turn would notify
+  // the reader once per turn, which is the noise this whole design is built to avoid.
+  const messages = observed.created.length
+  scaffolded.emitToAll('session/event', { id: 's_1' }, { type: 'turn/start', data: { turn: 3 } })
+  await settle()
+
+  assert.equal(observed.created.length, messages, 'no new message was sent')
+  assert.match(JSON.stringify(cardFrom(first.handle)), /第 3 轮/, 'the same card shows the new turn')
+  assert.equal(foldedRecord(cardFrom(first.handle)), undefined, 'and a live card folds nothing again')
 })
 
 test('a turn that ends while its first send is in flight still gets rendered', async () => {

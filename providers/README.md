@@ -93,6 +93,10 @@ step, and the event dispatcher's ready line all go to `debug`; errors and warnin
   title: string,
   tone: 'warning' | 'info' | 'success' | 'danger' | 'muted',
   body: string[],            // one text block per entry
+  details?: {                // an optional folded record, present on a frozen card
+    title: string,           // the label over the fold
+    blocks: string[],        // what the fold holds, one text block per entry
+  },
   buttons: [{ payload, label, tone: 'default' | 'primary' | 'danger' }],
   forms: [{
     payload,                 // echoed back verbatim on submit
@@ -104,6 +108,11 @@ step, and the event dispatcher's ready line all go to `debug`; errors and warnin
   }],
 }
 ```
+
+`details` is the one part of a view a reader opens rather than reads. **A channel should fold it
+where its platform can** — Feishu renders a `collapsible_panel`, collapsed by default and opened
+in place — and render it as ordinary text where it cannot. A channel that drops it silently loses
+the record a finished run leaves behind, which is the only place that record exists.
 
 **A view is one message.** One request can carry several questions, and the core sends them
 **one per view**, rewriting the same message to the next question as each is answered — the
