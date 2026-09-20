@@ -14,6 +14,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
+import { shouldReturnHeadStart } from '../priority.js'
 import {
   sleep,
   clickCard,
@@ -23,7 +24,26 @@ import {
   controlNames,
   sentCard,
   observed,
+  lastDelivered,
+  cardFrom,
 } from './support/harness.mjs'
+
+/**
+ * Wait until the channel has delivered a given number of cards.
+ *
+ * `sentCard` asserts a total of one card, which the cases below deliberately exceed: they need
+ * the card from before a request and the card from after it, and reading "the newest delivery,
+ * whatever it is" would let an assertion pass against the wrong one.
+ * @param count - how many deliveries to wait for.
+ * @returns the handle of the newest one.
+ */
+async function cardsArrived(count) {
+  for (let attempt = 0; attempt < 60 && observed.created.length < count; attempt += 1) {
+    await sleep(50)
+  }
+  assert.equal(observed.created.length, count, `expected ${count} card deliveries`)
+  return lastDelivered()
+}
 
 /**
  * Drive one session to a finished turn, so a result notice is offered.
@@ -262,4 +282,140 @@ test('the side is written down when it moves, so a restart can find it', async (
     { kind: 'grant', payload: { side: 'phone' } },
     'the move is durable, not only in memory',
   )
+})
+
+/**
+ * Put the phone in charge, leaving the request that did it still open.
+ *
+ * The request that took the phone over keeps racing an unsettled desktop branch, because
+ * answering it at the desk would immediately hand the side back — which is what the case about
+ * coming back to the desk is for, and would spoil the others.
+ * @param approval - the `approval/request` listener.
+ * @param delaySeconds - the configured wait, short enough that the first card arrives.
+ */
+async function phoneHasIt(approval, delaySeconds = 1) {
+  void approval.handler(
+    { toolName: 'pwsh', signal: new AbortController().signal },
+    () => Promise.withResolvers().promise,
+  )
+  const handle = await cardsArrived(1)
+  await clickCard(callbackValues(cardFrom(handle)).find(value => value.v === 'allowed-once'))
+}
+
+test('a request that arrives while the phone has it skips the head start', async () => {
+  const { route, sections, state, listenerOf } = await scaffold({ delaySeconds: 1 })
+  await bind(route)
+  const approval = listenerOf('approval/request')
+  await phoneHasIt(approval)
+  assert.equal((await state()).priority, 'phone', 'the phone has it')
+
+  // The wait is put well out of reach, and the side is what has to override it — that is the
+  // promise, and the request below is what measures it. Its card goes out at once rather than
+  // after five minutes, because it skipped the head start instead of shortening it.
+  sections.get('pocket-console').change(layer => { layer.delaySeconds = 300 })
+  observed.created.length = 0
+  void approval.handler(
+    { toolName: 'pwsh', signal: new AbortController().signal },
+    () => Promise.withResolvers().promise,
+  )
+  await cardsArrived(1)
+})
+
+test('the desk return reaches only a request whose card never went out', () => {
+  // The rule, checked directly. The window it governs is milliseconds wide — a card that skipped
+  // the head start is committed as soon as the request arrives — so a case that had to slip a
+  // person's answer into that window would be testing the harness's timing, not the rule.
+  assert.equal(
+    shouldReturnHeadStart({ noHeadStart: true, delivered: false, triggered: false }),
+    true,
+    'a request that skipped the head start and has not sent its card is owed one back',
+  )
+  assert.equal(
+    shouldReturnHeadStart({ noHeadStart: false, delivered: false, triggered: false }),
+    false,
+    'one the desk actually let the clock run out on is the feature working, and keeps its card',
+  )
+  assert.equal(
+    shouldReturnHeadStart({ noHeadStart: true, delivered: true, triggered: true }),
+    false,
+    'a card already on the phone stays there — two cards would ask one question twice',
+  )
+  assert.equal(
+    shouldReturnHeadStart({ noHeadStart: true, delivered: false, triggered: true }),
+    false,
+    'and so does a card already on its way, which is neither delivered nor still waiting',
+  )
+})
+
+test('a request still waiting when the desk returns gets its head start back', async () => {
+  const { route, sections, state, listenerOf } = await scaffold({ delaySeconds: 1 })
+  await bind(route)
+  const approval = listenerOf('approval/request')
+
+  // The phone takes over from a race the desk never wins.
+  void approval.handler(
+    { toolName: 'pwsh', signal: new AbortController().signal },
+    () => Promise.withResolvers().promise,
+  )
+  await cardsArrived(1)
+  await clickCard(callbackValues(cardFrom(lastDelivered())).find(value => value.v === 'allowed-once'))
+  assert.equal((await state()).priority, 'phone', 'the phone has it')
+
+  // A long wait is configured, and a request arrives under phone priority — so its card is due to
+  // go out at once, having skipped the head start entirely.
+  sections.get('pocket-console').change(layer => { layer.delaySeconds = 300 })
+  observed.created.length = 0
+  void approval.handler(
+    { toolName: 'pwsh', signal: new AbortController().signal },
+    () => Promise.withResolvers().promise,
+  )
+
+  // Somebody is at the desk, and the answer arrives *within the same turn*: the zero-wait send has
+  // been scheduled but has not run yet. This is the whole window this behaviour governs — a person
+  // acting a second later is acting after the card is already committed — and it is why the rule is
+  // also asserted on its own, above.
+  const desktop = Promise.withResolvers()
+  const deskAnswer = approval.handler(
+    { toolName: 'pwsh', signal: new AbortController().signal },
+    () => desktop.promise,
+  )
+  desktop.resolve('rejected')
+  assert.equal(await deskAnswer, 'rejected', 'the desk answered its own request')
+  assert.equal((await state()).priority, 'desk', 'the head start is back in force')
+
+  // The phone's request had not gone out, so it is owed the head start — and now waits it out like
+  // any other request, instead of the card arriving at once as it would have under the phone.
+  await sleep(200)
+  assert.equal(observed.created.length, 0, 'the recovered request waits the head start out')
+})
+
+test('a request whose card already reached the phone is not disturbed', async () => {
+  const { route, listenerOf } = await scaffold({ delaySeconds: 1 })
+  await bind(route)
+  const approval = listenerOf('approval/request')
+
+  // Nobody answers at the desk, so the clock runs out and the card goes out with a real head
+  // start behind it. That is the feature working, not an artifact of where the person happened
+  // to be, so somebody coming back later must not mint a second card for the same request —
+  // which would put one question in front of two surfaces.
+  const waiting = Promise.withResolvers()
+  void approval.handler(
+    { toolName: 'pwsh', signal: new AbortController().signal },
+    () => waiting.promise,
+  )
+  const handle = await cardsArrived(1)
+
+  // The phone answers it, putting the phone in charge; then somebody answers a fresh request at
+  // the desk, putting the desk back. The settled request is out of the registry by then, so
+  // nothing can send a second card for it.
+  await clickCard(callbackValues(cardFrom(handle)).find(value => value.v === 'allowed-once'))
+  const desktop = Promise.withResolvers()
+  const deskAnswer = approval.handler(
+    { toolName: 'pwsh', signal: new AbortController().signal },
+    () => desktop.promise,
+  )
+  desktop.resolve('rejected')
+  await deskAnswer
+  await sleep(200)
+  assert.equal(observed.created.length, 1, 'no second card is minted for a settled request')
 })

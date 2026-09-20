@@ -15,7 +15,7 @@
 
 import { CARD_TEXT_BUDGET, clipToBytes, looksLikeSizeRefusal } from './budget.js'
 import { titleOf, workspaceLabel } from './identity.js'
-import { DESK, PHONE } from './priority.js'
+import { DESK, PHONE, shouldReturnHeadStart } from './priority.js'
 
 import { randomUUID } from 'node:crypto'
 
@@ -249,10 +249,26 @@ export function createEscalation({
       handle: undefined,
       delivered: false,
       timer: undefined,
+      /**
+       * Whether this request's card went out without the desk head start.
+       *
+       * A request that arrives while the phone holds the person skips the head start rather than
+       * shortening it: the wait is zero, so the card goes out at once. That is right while nobody
+       * is at the desk — but such a request never had a head start to lose, so it is the one that
+       * is still eligible for one if somebody comes back before its card lands. See
+       * {@link deskReturn}.
+       */
+      noHeadStart: false,
       /** When this request arrived, so a change to the wait keeps the time already spent. */
       startedAt: Date.now(),
-      /** Whether the card has been sent, so a re-armed timer knows what it is waiting for. */
-      armed: false,
+      /**
+       * Whether this record's current deadline has been reached and its card committed to.
+       *
+       * Distinct from `delivered`, which is only set once the platform answers: a send in flight is
+       * neither delivered nor still waiting, and treating it as waiting is how a re-time would
+       * order a second card for one question.
+       */
+      triggered: false,
       finished: false,
       answers: new Map(),
       settle: Promise.withResolvers(),
@@ -310,8 +326,14 @@ export function createEscalation({
     }
     request.signal?.addEventListener('abort', record.onAbort, { once: true })
 
-    /** Whether this record is still waiting for its card to go out. */
-    const pending = () => !record.finished && !record.delivered && !record.armed
+    /**
+     * Whether this record's card is still to be sent.
+     *
+     * Three things say no, and each is a different reason: the request was answered or dropped,
+     * its card is on the phone, or its card is on its way there. Only the last is transient — and
+     * it is what keeps a re-time from racing a send that has already been committed to.
+     */
+    const pending = () => !record.finished && !record.delivered && !record.triggered
 
     /**
      * Arm the wait, or re-arm it against a deadline counted from the request's arrival.
@@ -324,10 +346,25 @@ export function createEscalation({
      */
     const arm = () => {
       if (record.timer !== undefined) clearTimeout(record.timer)
-      const remaining = record.startedAt + effectiveDelay() * 1000 - Date.now()
+      // Read once, because the delay is asked for twice below and a move between the sides
+      // between the two reads would leave the record claiming a head start it did not get.
+      const delay = effectiveDelay()
+      // Whether this request skipped the desk's head start. A zero wait means its card goes
+      // straight out, so nothing about the desk was consulted for it — which is what makes it
+      // recoverable later, and what {@link deskReturn} looks for. It only ever becomes true:
+      // re-arming is *how* a head start is given back, so a later non-zero wait must not be read
+      // as the request having had one all along.
+      if (delay === 0) record.noHeadStart = true
+      // A new deadline means the card is to be sent again, so the send that was committed to is no
+      // longer the one this record is waiting on. This is what reopens the window {@link deskReturn}
+      // needs — without it, a request whose first card left at once could never be re-timed.
+      record.triggered = false
+      const remaining = record.startedAt + delay * 1000 - Date.now()
       record.timer = setTimeout(() => {
         record.timer = undefined
-        record.armed = true
+        // Set before the send, not after it resolves: from here the card is either on the phone or
+        // on its way, and a re-time must not treat either as "never sent".
+        record.triggered = true
         void deliverCard(record).then((handle) => {
           record.handle = handle
           record.delivered = true
@@ -427,6 +464,27 @@ export function createEscalation({
   /** Re-time every request that is still waiting for its card. */
   const rearmAll = () => {
     for (const record of [...open.values()]) record.rearm?.()
+  }
+
+  /**
+   * Somebody is at the desk again: give back the head start that phone priority took away.
+   *
+   * Phone priority sets the wait to zero, so every request that arrives while it holds skips the
+   * head start and its card goes out at once. If the person then comes back to the desk, those
+   * requests would otherwise stay on the phone for good: {@link rearmAll} cannot move them, because
+   * it only re-times a request whose card has not gone out, and these sent theirs the moment they
+   * arrived.
+   *
+   * Which of them are recoverable is {@link shouldReturnHeadStart}'s question — it leaves alone
+   * every card the desk let the clock run out on, and every card already on the phone. The wait
+   * given back is counted from the request's own arrival, exactly as it would have been had the
+   * person been at the desk when it came in.
+   */
+  const deskReturn = () => {
+    for (const record of [...open.values()]) {
+      if (!shouldReturnHeadStart(record)) continue
+      record.rearm?.()
+    }
   }
 
   /**
@@ -595,5 +653,13 @@ export function createEscalation({
     rearm() {
       rearmAll()
     },
+    /**
+     * Give the head start back to the requests that never had one.
+     *
+     * Called when somebody is provably at the desk again — they answered something there. See
+     * {@link deskReturn} for what that does and, more to the point, what it deliberately leaves
+     * alone.
+     */
+    deskReturn,
   }
 }

@@ -28,6 +28,33 @@ export const PHONE = 'phone'
 const KEY = credentialKey('pocket-console', 'priority')
 
 /**
+ * Whether one waiting request is owed its head start back.
+ *
+ * Phone priority sets the wait to zero, so a request that arrives while it holds skips the head
+ * start and its card goes out at once. If the person then comes back to the desk, that request
+ * would otherwise stay on the phone for good — so this is the rule that decides which ones are
+ * recoverable.
+ *
+ * It lives here, apart from the machine that acts on it, because the window it describes is
+ * milliseconds wide: a card that skipped the head start is committed as soon as the request
+ * arrives, so a test that had to slip a person's answer into that window would be testing timing
+ * rather than the rule.
+ * @param record - one waiting request's state: `noHeadStart`, `delivered`, `triggered`.
+ * @returns whether a return to the desk should re-time it.
+ */
+export function shouldReturnHeadStart(record) {
+  return (
+    // It skipped the head start, so it is the only kind that can be owed one.
+    record?.noHeadStart === true
+    // Its card is on the phone, and that is where it stays: taking it back would either leave two
+    // cards asking one question or ask somebody to answer something already in front of them.
+    && record.delivered !== true
+    // Its card is already on its way there, which is neither delivered nor still waiting.
+    && record.triggered !== true
+  )
+}
+
+/**
  * Create the priority state.
  * @param options - the host context, the logger, the effective settings thunk, and the copy.
  * @returns reading, moving, and resolving the wait from the current side.
