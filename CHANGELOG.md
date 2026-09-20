@@ -8,6 +8,8 @@ out when it does.
 
 ## Unreleased
 
+## 0.8.2
+
 ### Added
 
 - **A finished run can hand you the next task, from the phone.** Every other thing the phone does

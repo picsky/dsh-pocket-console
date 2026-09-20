@@ -1,6 +1,6 @@
 {
   "name": "dsh-pocket-console",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "Don't hand over the whole machine, just the decision blocking it: unattended DeepSeek Harness approvals and ask_user_question prompts reach your phone as Feishu cards, desktop first, outbound only.",
   "type": "module",
   "main": "index.js",
