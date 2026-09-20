@@ -194,8 +194,14 @@ test('the card names the session it belongs to', async () => {
   scaffolded.emitToAll('session/event', { id: 's_ws' }, { type: 'turn/start', data: { turn: 2 } })
   await settle()
 
-  assert.equal(activityCards(), 1, 'the activity card is what was sent')
-  assert.equal(latestCard().header.title.content, 'DSH 执行中 · my-app', 'and its title names the workspace')
+  assert.equal(activityCards(), 1, `the activity card is what was sent: ${JSON.stringify(observed.created.map((c) => JSON.parse(c.data.content).header.title.content))}`)
+  assert.equal(
+    latestCard().header.title.content,
+    'DSH 执行中 · my-app',
+    `and its title names the workspace: agent=${JSON.stringify(scaffolded.agents.get('s_ws'))} `
+    + `created=${JSON.stringify(observed.created.map((c) => JSON.parse(c.data.content).header.title.content))} `
+    + `patched=${JSON.stringify(observed.patched.map((p) => JSON.parse(p.data.content).header.title.content))}`,
+  )
 })
 
 test('the card says what the run is doing, and stops saying it when the turn ends', async () => {
