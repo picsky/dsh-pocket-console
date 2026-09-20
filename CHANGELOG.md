@@ -85,6 +85,22 @@ out when it does.
 - **`docs/README.md` no longer indexes them**, adds the Chinese README to the list of paired
   pages, and stops claiming nine decision records when there are thirteen.
 
+### Fixed
+
+- **A composer answered from the phone stayed waiting when the desk was asleep.** A forwarded
+  request is finished by a browser answering it, so the phone's answer reaches the model and
+  leaves the desktop composer open; the browser half is what closes it. That half gave up on a
+  decision after one attempt, so a page that had only just loaded — no composer mounted yet —
+  wrote the decision off, and the composer was stuck from then on with nothing able to close it.
+  A decision that could not be applied now stays on offer and is retried, and only an attempt
+  that actually moved a composer ends it (`client.js`). The other half of the same gap was
+  invisible: when the mirror window passed before any browser collected the decision, the Host
+  simply stopped offering it, so nothing anywhere recorded that one decision ended with a
+  composer left behind. A lapsed decision is now offered once more, marked `expired`, so a late
+  poll can see what happened, and the Host logs the lapse (`mirror.js`, `client.js`). The
+  deployment log gains one line, `logMirrorLapsed` / 有一条手机决定…过期了, and the browser half
+  gains one report, `lapsed`.
+
 ## 0.8.1
 
 **Nothing about the plugin changed.** This release exists so that the tag names the tree the

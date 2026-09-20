@@ -332,6 +332,45 @@ test('the browser half loads through the module loader and registers its card', 
   assert.equal(answered.length, 1, 'a different request is left alone')
   assert.ok(reports.some(entry => entry.status === 'skipped' && entry.reason === 'no waiting composer'))
 
+  // A composer that arrives late is still closed. A page that has only just
+  // loaded has none mounted when the decision first arrives, and taking that
+  // first failure as final is what left a waiting composer behind for good — so
+  // the decision stays on offer here until one actually takes it.
+  const lateAnswers = []
+  served = { id: 'm2b', sessionId: 's_late', questions: [], answer: phoneAnswer }
+  await sleep(1100)
+  assert.equal(lateAnswers.length, 0, 'a decision with no composer is not applied')
+  const skippedOnce = reports.filter(entry => entry.syncId === 'm2b' && entry.status === 'skipped').length
+  assert.equal(skippedOnce, 1, `a decision still on offer is reported once, not every tick: ${skippedOnce}`)
+  uiSession.pendingInteractions.getSnapshot = () => new Map([
+    ['s_agent', pending],
+    ['s_late', { sessionId: 's_late', kind: 'approval', answer: async (answer) => { lateAnswers.push(answer) } }],
+  ])
+  await sleep(2500)
+  assert.deepEqual(lateAnswers, [phoneAnswer], 'the late composer is closed by the same decision')
+  assert.ok(
+    reports.some(entry => entry.status === 'applied' && entry.syncId === 'm2b'),
+    `and the apply is reported: ${JSON.stringify(reports.at(-1))}`,
+  )
+  uiSession.pendingInteractions.getSnapshot = () => new Map([['s_agent', pending]])
+
+  // A decision whose window passed before this page saw it is said out loud: the
+  // host has no other way to learn that a composer was left waiting behind it.
+  served = { id: 'm2c', sessionId: 's_agent', questions: ['x'], answer: phoneAnswer, expired: true }
+  await sleep(1100)
+  assert.equal(lateAnswers.length, 1, 'an expired decision is not applied')
+  assert.ok(
+    reports.some(entry => entry.status === 'lapsed' && entry.syncId === 'm2c'),
+    `a lapsed decision is reported: ${JSON.stringify(reports.slice(-3))}`,
+  )
+  const lapsedReports = reports.filter(entry => entry.status === 'lapsed' && entry.syncId === 'm2c').length
+  await sleep(1100)
+  assert.equal(
+    reports.filter(entry => entry.status === 'lapsed' && entry.syncId === 'm2c').length,
+    lapsedReports,
+    'and said once, not every tick',
+  )
+
   // A page whose Session UI is absent says so instead of failing silently.
   uiSession.pendingInteractions.getSnapshot = () => undefined
   served = { id: 'm3', sessionId: 's_agent', questions: ['a', 'b'], answer: phoneAnswer }

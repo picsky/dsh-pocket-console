@@ -15,6 +15,7 @@ import {
   controlNames,
   sentCard,
   observed,
+  SAME_ORIGIN,
 } from './support/harness.mjs'
 
 test('answers a single-select question from its option button', async () => {
@@ -104,6 +105,71 @@ test('accumulates answers until every question is answered', async () => {
       { id: 'b', selected: ['b1'] },
     ],
   }, 'the mirror carries exactly the answer the request settled with')
+})
+
+
+test('a mirror window that passed with nobody collecting it is explained, not dropped', async () => {
+  // A one-second window reached by waiting is the honest way to get here: the
+  // window is a countdown, and a deployment that set it this short meets the same
+  // state a sleeping browser meets an hour later.
+  const { route, state, listenerOf, warnings } = await scaffold({ mirrorTtlSeconds: 1 })
+  await bind(route)
+  const questions = listenerOf('user-questions/request')
+
+  const desktop = Promise.withResolvers()
+  const result = questions.handler({
+    questions: [{ id: 'a', question: 'A?', options: [{ label: 'a1' }] }],
+    agent: { id: 's_agent' },
+    signal: new AbortController().signal,
+  }, () => desktop.promise)
+
+  await sleep(1200)
+  await clickCard(callbackValues(sentCard()).find(value => value.q === 'a'))
+  await result
+
+  const offered = (await state()).sync
+  assert.equal(offered.sessionId, 's_agent', 'the decision is offered while its window is open')
+  assert.equal(offered.expired, undefined, 'and says nothing about a window that has not passed')
+
+  await sleep(1100)
+  const sync = (await state()).sync
+  assert.equal(sync.sessionId, 's_agent', 'the decision is still offered')
+  assert.equal(sync.expired, true, 'and says its window has passed')
+  assert.deepEqual(
+    sync.answer,
+    { answers: [{ id: 'a', selected: ['a1'] }] },
+    'the answer is still there, because it is what the model received',
+  )
+  assert.ok(
+    warnings.some(line => /过期/.test(line)),
+    `the lapse is reported, because a composer was left waiting behind it: ${JSON.stringify(warnings)}`,
+  )
+
+  // A browser that did collect it is the other half: there is nothing left to
+  // explain, so the decision stops being offered and no lapse is claimed.
+  const collected = await scaffold({ mirrorTtlSeconds: 1 })
+  await bind(collected.route)
+  const asked = collected.listenerOf('user-questions/request')
+  const desktopAtDesk = Promise.withResolvers()
+  const pending = asked.handler({
+    questions: [{ id: 'a', question: 'A?', options: [{ label: 'a1' }] }],
+    agent: { id: 's_agent' },
+    signal: new AbortController().signal,
+  }, () => desktopAtDesk.promise)
+  await sleep(1200)
+  await clickCard(callbackValues(sentCard()).find(value => value.q === 'a'))
+  await pending
+  await sleep(1100)
+  // Read twice before the browser speaks: a state read is what raises the warning,
+  // and it must be raised once for the decision rather than once per read.
+  assert.equal((await collected.state()).sync.expired, true, 'this window had passed too')
+  assert.equal((await collected.state()).sync.expired, true, 'and is still offered')
+  const claimed = collected.warnings.filter(line => /过期/.test(line)).length
+  assert.equal(claimed, 1, `a lapse is stated once, not per read: ${JSON.stringify(collected.warnings)}`)
+  const lapsedId = (await collected.state()).sync.id
+  await collected.route('POST', '/__pocket/mirror', SAME_ORIGIN, { status: 'applied', syncId: lapsedId })
+  assert.equal((await collected.state()).sync, null, 'a decision a browser applied is not offered again')
+  desktopAtDesk.resolve('allowed-once')
 })
 
 
