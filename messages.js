@@ -63,9 +63,26 @@ const zh = {
   resultTitle: '结果',
   replyHint: '**回复这条消息**即可把下一步交给这个会话。',
   /** Label over the folded record of what this run did, on the result card. */
-  resultProcess: '这一段做了什么',
+  resultProcess: '思考过程',
   /** Placed between the two ends of a run whose middle did not fit, so a reader knows it is partial. */
   resultOmitted: bytes => `**……中间省略约 ${bytes} 字节……**`,
+  /**
+   * One tool call, named by its kind and never by its arguments.
+   *
+   * The phone question is how far along a run is, so a call is one line saying what sort of step it
+   * was. A tool with no kind is not guessed at: a wrong kind is worse than an unspecific one.
+   */
+  toolKind: (kind, name) => ({
+    read: '▸ 读取',
+    search: '▸ 搜索',
+    write: '▸ 写入文件',
+    edit: '▸ 改动文件',
+    command: '▸ 运行命令',
+    code: '▸ 执行代码',
+    other: `▸ 调用工具${name === undefined || name === '' ? '' : `：\`${name}\``}`,
+  })[kind] ?? `▸ 调用工具${name === undefined || name === '' ? '' : `：\`${name}\``}`,
+  /** The same line, once the run has collapsed repeated calls of one kind into it. */
+  toolKindRepeated: (label, count) => `${label} ×${count}`,
   sendToAgent: '发送给 agent',
   superseded: '**这条结果已被新的结果取代**，请用最新那条回复。',
   readerSpoke: '**该结果已有新消息**，这条通知不再接受回复。',
@@ -150,6 +167,12 @@ const zh = {
   logNoticeNoAgent: '结果未通知：该会话没有活跃 agent（本版本不恢复已回收的会话）。',
   logNoticeTooLarge: '通知被判定为超出体积上限，按一半长度重投一次。',
   logNoticeSent: '结果已发送到手机。',
+  /** Whether the result card carried the run, since a missing fold and an unrecorded run look alike. */
+  logRunFold: (session, entries, carried) => carried
+    ? `结果卡带上了这一段过程（${entries} 条）。`
+    : `这一段过程是空的（${entries} 条），结果卡上不会有折叠面板。`,
+  /** The shape of the view the result card was built from, for a report that cannot be seen. */
+  logResultView: shape => `结果卡视图：${shape}`,
   logNoticeSendFailed: '结果发送失败',
   logNoticeCardFailed: '结果卡片改写失败',
   logNoticeRetired: headline => `结果通知失效：${headline}`,
@@ -211,8 +234,21 @@ const en = {
   appDescription: 'DeepSeek Harness tool approvals and questions, delivered to Feishu',
   resultTitle: 'Result',
   replyHint: '**Reply to this message** to hand the next step to this session.',
-  resultProcess: 'What this run did',
+  resultProcess: 'Thinking',
   resultOmitted: bytes => `**…… about ${bytes} bytes left out in the middle ……**`,
+  /** One tool call, named by its kind and never by its arguments. See the Chinese copy for why. */
+  toolKind: (kind, name) => {
+    const labels = {
+      read: '▸ read',
+      search: '▸ search',
+      write: '▸ write file',
+      edit: '▸ edit file',
+      command: '▸ run command',
+      code: '▸ run code',
+    }
+    return labels[kind] ?? `▸ tool${name === undefined || name === '' ? '' : `: \`${name}\``}`
+  },
+  toolKindRepeated: (label, count) => `${label} ×${count}`,
   sendToAgent: 'Send to the agent',
   superseded: '**A newer result replaced this one** — reply to that message instead.',
   readerSpoke: '**This session has a newer message**, so this notice no longer accepts a reply.',
@@ -285,6 +321,12 @@ const en = {
   logNoticeNoAgent: 'no notice: this session has no live agent (this version does not revive a reclaimed session).',
   logNoticeTooLarge: 'the notice read as over the size limit; retrying once at half the text.',
   logNoticeSent: 'the result was sent to the phone.',
+  /** Whether the result card carried the run, since a missing fold and an unrecorded run look alike. */
+  logRunFold: (session, entries, carried) => carried
+    ? `the result card carried the run (${entries} entries).`
+    : `the run was empty (${entries} entries), so the card has no fold.`,
+  /** The shape of the view the result card was built from, for a report that cannot be seen. */
+  logResultView: shape => `result card view: ${shape}`,
   logNoticeSendFailed: 'sending the result failed',
   logNoticeCardFailed: 'rewriting the result card failed',
   logNoticeRetired: headline => `result notice retired: ${headline}`,

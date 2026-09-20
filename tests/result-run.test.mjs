@@ -106,7 +106,7 @@ test('the result card carries the plan the run opened with', async () => {
   assert.match(face, /测试也过了/, 'the card face still shows the answer')
   assert.equal(face.includes('## 方案'), false, 'and the plan is not on the face — the face is for glancing at')
 
-  assert.match(folded, /这一段做了什么/, 'the fold is labelled as the run')
+  assert.match(folded, /思考过程/, 'the fold is labelled as the run')
   assert.match(folded, /## 方案/, 'the plan is what a reader opens it for')
   assert.match(folded, /第1步/, 'including where the run set out from')
 })
