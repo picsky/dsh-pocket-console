@@ -97,7 +97,7 @@ These are honest gaps, not choices.
 
 - **Mirroring to the desktop needs the page open.** After a phone answer, the open page settles the way a click there would; with no page open the answer still reaches the model and the session log, but a page opened later will not replay it — the mirror is valid for one minute.
 - **One Feishu app serves one DSH instance.** Long-connection events are not broadcast, so two instances sharing one bot send approvals to a random side.
-- **Card text is limited by bytes, not characters.** A card request body caps at 30 KB and a CJK character costs 3, so text is held under 9 KB and truncated explicitly. A very long plan arrives as its opening section; the buttons still work.
+- **Card text is limited by bytes, not characters.** A card request body caps at 30 KB, and what the body carries is not the text's own size: the text is escaped into the card JSON and the card JSON is escaped again, where a quote or a backslash doubles each time — and tool output, JSON and code are full of them. Text is therefore held under 4.5 KB **as the request will count it**, which leaves a whole card inside the cap even if every byte of it escapes twice, and it is truncated explicitly when it does not fit. A very long plan arrives as its opening section — roughly 1,500 Chinese characters — and its buttons still work.
 
 ## Which of these is this?
 

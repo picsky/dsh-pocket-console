@@ -14,7 +14,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { LOCALES, messagesFor } from '../messages.js'
 import { isAnswer } from '../results.js'
-import { clipToBytes } from '../budget.js'
+import { clipToBytes, clipTailToBytes, bodyBytes } from '../budget.js'
 
 const source = readFileSync(new URL('../messages.js', import.meta.url), 'utf8')
 
@@ -72,25 +72,51 @@ test('clipping never exceeds the budget it was given', () => {
   const marker = '…（内容过长已截断）'
   const long = '汉'.repeat(200)
 
-  // The ordinary case: clipped, inside the bound, with the marker charged against it.
+  // The budget is denominated in what the text will cost in the request body, which is not its own
+  // size: `clipToBytes` promises this bound and nothing weaker.
   const clipped = clipToBytes(long, marker, 60)
-  assert.ok(
-    Buffer.byteLength(clipped, 'utf8') <= 60,
-    `clipped to ${Buffer.byteLength(clipped, 'utf8')} bytes`,
-  )
+  assert.ok(bodyBytes(clipped) <= 60, `clipped to ${bodyBytes(clipped)} body bytes`)
   assert.ok(clipped.endsWith(marker), 'and it says it was clipped')
 
   // Text that already fits is returned untouched.
   assert.equal(clipToBytes('short', marker, 60), 'short')
 
-  // The marker is wider than the budget. The bound still holds — the marker is what
-  // gets cut, because a caller who asked for 4 bytes must not receive 27.
-  const tiny = clipToBytes(long, marker, 4)
+  // A quote-dense string is the case the two metrics disagree on, and the reason the budget is
+  // counted this way: such a string is well inside the budget by its own size and far outside it
+  // once escaped, so a clip that honoured only the first would send a larger body than promised.
+  const dense = '\\"'.repeat(200)
+  const denseClipped = clipToBytes(dense, marker, 60)
   assert.ok(
-    Buffer.byteLength(tiny, 'utf8') <= 4,
-    `a budget smaller than the marker is still honoured (${Buffer.byteLength(tiny, 'utf8')} bytes)`,
+    bodyBytes(denseClipped) <= 60,
+    `escape-dense text is held to the same bound (${bodyBytes(denseClipped)} body bytes)`,
   )
+  assert.ok(denseClipped.endsWith(marker), 'and it says so too')
+
+  // The marker is wider than the budget. The bound still holds — the marker is the only thing left
+  // to cut, because a caller who asked for a bound must not receive text that breaks it. Here even
+  // one character of the marker costs more than the whole budget, so the honest answer is nothing.
+  const tiny = clipToBytes(long, marker, 4)
+  assert.ok(bodyBytes(tiny) <= 4, `a budget smaller than the marker is still honoured (${bodyBytes(tiny)} bytes)`)
 
   // A budget of zero yields nothing rather than the marker.
   assert.equal(clipToBytes(long, marker, 0), '')
+})
+
+test('clipping from the front keeps the end and still honours the budget', () => {
+  const marker = '（更早的内容已省略）…'
+  const long = '汉'.repeat(200)
+
+  const clipped = clipTailToBytes(long, marker, 60)
+  assert.ok(bodyBytes(clipped) <= 60, `the end is kept inside the budget (${bodyBytes(clipped)} bytes)`)
+  assert.ok(clipped.startsWith(marker), 'and the marker says what was dropped, at the front')
+  assert.equal(clipped.endsWith('汉'), true, 'with the text\'s own end still there')
+
+  // The same two edges the other direction has. A marker that cannot fit must not be returned
+  // whole, and the caller must not be sent something larger than the bound they asked for — the
+  // case where a single character is wider than the budget is what a recursive retry would spin on.
+  assert.ok(bodyBytes(clipTailToBytes(long, marker, 4)) <= 4, 'a budget under the marker is honoured')
+  assert.equal(clipTailToBytes(long, marker, 0), '')
+
+  // Text that already fits is returned untouched.
+  assert.equal(clipTailToBytes('short', marker, 60), 'short')
 })

@@ -19,6 +19,10 @@ Thumbs.db
 positioning.md
 competitive-analysis.md
 research/
+# The same goes for an audit's own report: it is an input to a fix, and what the
+# repository keeps is the fix — the changelog entry and the code say what was wrong.
+*-audit-report.md
+*-query-report.md
 
 # Logs
 *.log

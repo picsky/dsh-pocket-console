@@ -36,6 +36,45 @@ const settle = () => sleep(400)
 const ACTIVITY_TITLE = 'DSH 执行中'
 
 /**
+ * What one delivered card costs in the request body, which is the number the platform caps.
+ *
+ * Not a guess and not the text's own size: the card JSON is the request's `content` parameter, so
+ * it is escaped once more on the way out, and a case that measured anything less would pass while
+ * the platform refused the card. This is what the deployment actually puts on the wire.
+ * @param content - the card JSON as the channel sent it.
+ * @returns its size in the request body.
+ */
+const bodySize = (content) => Buffer.byteLength(JSON.stringify(content), 'utf8')
+
+/**
+ * Every card body this case has delivered, so a case can assert the cap over all of them.
+ * @returns the delivered card JSON strings.
+ */
+const deliveredBodies = () => [
+  ...observed.created.map(request => request.data.content),
+  ...observed.patched.map(request => request.data.content),
+]
+
+/**
+ * The folded record a card carries, as one string, or undefined when it has none.
+ *
+ * Read from the rendered card rather than the view: a view's `details` becomes the platform's own
+ * foldable element, and what a reader sees is what that element holds — its label first, then the
+ * text. The element's other markup is left out, so a case can measure the text against the card's
+ * own budget without counting the fixed cost the budget deliberately leaves room for.
+ * @param card - the rendered card JSON.
+ * @returns the label and text the fold holds, or undefined when the card does not fold.
+ */
+function foldedRecord(card) {
+  const panel = (card?.body?.elements ?? []).find(element => element.tag === 'collapsible_panel')
+  if (panel === undefined) return undefined
+  return [
+    panel.header?.title?.content,
+    ...(panel.elements ?? []).map(element => element.content),
+  ].filter(part => part !== undefined).join('\n')
+}
+
+/**
  * The activity card this deployment has sent, with the handle it lives in.
  * @returns the handle and current card, or undefined when none has been sent.
  */
@@ -57,6 +96,19 @@ function delta(scaffolded, session, text) {
 }
 
 /**
+ * Open a step on the live stream, the way the loop does before its first chunk.
+ *
+ * The `start` frame is the only one that carries the step number, so a case that streams deltas
+ * without it is a case where the card cannot tell which step its text belongs to.
+ * @param scaffolded - the scaffold result.
+ * @param session - session id.
+ * @param step - the step number.
+ */
+function startStep(scaffolded, session, step) {
+  scaffolded.emitFrame(session, { type: 'start', turn: 2, step })
+}
+
+/**
  * Put the phone in charge by answering a card, which is what takes the head start away.
  * @param scaffolded - the scaffold result.
  */
@@ -67,7 +119,10 @@ async function takeOverFromThePhone(scaffolded) {
     () => Promise.withResolvers().promise,
   )
   await sleep(1100)
-  await clickCard(callbackValues(sentCard()).find(value => value.v === 'allowed-once'))
+  // The last card, not "the only card": a case may have caused others before this one, and
+  // `sentCard()` insists on exactly one delivery, which is not a property these cases have.
+  const card = cardFrom(lastDelivered())
+  await clickCard(callbackValues(card).find(value => value.v === 'allowed-once'))
 }
 
 /**
@@ -179,11 +234,14 @@ test('the card names the session it belongs to', async () => {
   assert.equal(card.header.title.content, 'DSH 执行中 · my-app', 'the title names the workspace')
 })
 
-test('the card says what the run is doing, and stops saying it when the turn ends', async () => {
+test('the card says what the run is doing, and freezes when the turn ends', async () => {
   const scaffolded = await phoneHoldsIt()
   const { handle } = await startRun(scaffolded, 's_1')
+  delta(scaffolded, 's_1', '先看一下')
+  await settle()
   assert.match(JSON.stringify(cardFrom(handle)), /处理中/, 'a running step says so')
   assert.equal(JSON.stringify(cardFrom(handle)).includes('undefined'), false, 'and nothing reads as undefined')
+  assert.equal(foldedRecord(cardFrom(handle)), undefined, 'a live card folds nothing')
 
   scaffolded.emitToAll('session/event', { id: 's_1' }, {
     type: 'tool/call',
@@ -198,8 +256,455 @@ test('the card says what the run is doing, and stops saying it when the turn end
     data: { turn: 2, reason: { kind: 'completed' } },
   })
   await settle()
-  assert.match(JSON.stringify(cardFrom(handle)), /已停止/, 'a finished turn stops claiming to run')
-  assert.equal(JSON.stringify(cardFrom(handle)).includes('npm test'), false, 'and stops naming the tool')
+  const frozen = cardFrom(handle)
+  assert.match(JSON.stringify(frozen), /已结束/, 'a finished turn stops claiming to run')
+  assert.equal(JSON.stringify(frozen).includes('npm test'), false, 'and stops naming the tool')
+  // Frozen is what tells a record from a live card when the reader scrolls back.
+  assert.equal(frozen.header.template, 'grey', 'and the card is muted')
+  assert.ok(foldedRecord(frozen), 'and it folds the record of what the run did')
+  assert.match(foldedRecord(frozen), /本次执行过程/, 'under a label that says what it is')
+  assert.deepEqual(callbackValues(frozen), [], 'with nothing left to press')
+})
+
+test('the folded record holds what the run said, and what failed', async () => {
+  const scaffolded = await phoneHoldsIt()
+  const { handle } = await startRun(scaffolded, 's_1')
+
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'user/message',
+    data: { source: { kind: 'user' }, content: [{ type: 'text', text: '把测试修好' }] },
+  })
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'assistant/message',
+    surfaceOp: 'append',
+    data: { turn: 2, message: { content: [{ type: 'text', text: '我先看失败的用例。' }] } },
+  })
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'tool/call',
+    data: { turn: 2, step: 1, callId: 'c1', name: 'pwsh' },
+  })
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'tool/result',
+    surfaceOp: 'append',
+    // The shape the session actually records: `error` carries a kind and a code, the prose is the
+    // result's own content blocks, and the block names only the call id — so the tool's name can
+    // only come from the `tool/call` before it. A fixture with `error.message` and a string
+    // `content` would certify a shape that never reaches this code, which is exactly how a line
+    // that renders `[object Object]` instead of the reason stays unnoticed.
+    data: {
+      turn: 2,
+      step: 1,
+      message: {
+        content: [{
+          type: 'tool-result',
+          toolCallId: 'c1',
+          isError: true,
+          content: [{ type: 'text', text: 'Command failed with exit code 1' }],
+        }],
+      },
+      error: { name: 'ToolExecutionError', code: 'EXIT_1' },
+    },
+  })
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'tool/result',
+    surfaceOp: 'append',
+    data: {
+      turn: 2,
+      step: 2,
+      message: {
+        content: [{
+          type: 'tool-result',
+          toolCallId: 'c2',
+          content: [{ type: 'text', text: 'ok' }],
+        }],
+      },
+    },
+  })
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'turn/end',
+    data: { turn: 2, reason: { kind: 'completed' } },
+  })
+  await settle()
+
+  const record = foldedRecord(cardFrom(handle))
+  assert.match(record, /把测试修好/, 'what the person asked for is in it')
+  assert.match(record, /我先看失败的用例/, 'and what the run said')
+  assert.match(record, /工具失败/, 'a failed tool earns a line')
+  assert.match(record, /pwsh/, 'naming the tool that failed')
+  assert.match(record, /exit code 1/, 'with the reason a reader can act on')
+  assert.equal(record.includes('c2'), false, 'and a tool that worked is not in it')
+})
+
+test('a long run folds a bounded record, keeping its end', async () => {
+  const scaffolded = await phoneHoldsIt()
+  const { handle } = await startRun(scaffolded, 's_1')
+
+  // Two hundred messages, each long enough that the whole of them could not fit in one card. A
+  // card the platform refuses says nothing at all, so the record has to be bounded — and what a
+  // reader wants from a finished run is how it ended, not how it began.
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'assistant/message',
+    surfaceOp: 'append',
+    data: { turn: 2, message: { content: [{ type: 'text', text: `开头标记 ${'x'.repeat(200)}` }] } },
+  })
+  for (let index = 0; index < 200; index += 1) {
+    scaffolded.emitToAll('session/event', { id: 's_1' }, {
+      type: 'assistant/message',
+      surfaceOp: 'append',
+      data: { turn: 2, message: { content: [{ type: 'text', text: `第${index}段 ${'x'.repeat(200)}` }] } },
+    })
+  }
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'assistant/message',
+    surfaceOp: 'append',
+    data: { turn: 2, message: { content: [{ type: 'text', text: `结尾标记 ${'y'.repeat(200)}` }] } },
+  })
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'turn/end',
+    data: { turn: 2, reason: { kind: 'completed' } },
+  })
+  await settle()
+
+  const record = foldedRecord(cardFrom(handle))
+  assert.ok(record, 'the record is there')
+  // The bound is the point: two hundred messages would be a document inside one message, and a
+  // card the platform refuses says nothing at all. The record is bounded as it is built, which is
+  // what keeps its fold inside the card the platform will accept.
+  assert.ok(
+    record.length < 20_000,
+    `the fold is bounded, not the whole run: ${record.length} characters`,
+  )
+  for (const body of deliveredBodies()) {
+    assert.ok(bodySize(body) < 30 * 1024, `the card stays inside the cap: ${bodySize(body)} bytes`)
+  }
+  assert.match(record, /结尾标记/, 'and it holds the end of the run')
+})
+
+test('a step whose text both streamed and settled is folded once', async () => {
+  const scaffolded = await phoneHoldsIt()
+  const { handle } = await startRun(scaffolded, 's_1')
+
+  // The ordinary shape of a run: the text arrives live, and then the same text commits as the
+  // step's message. Folding both would put every word on the card twice.
+  startStep(scaffolded, 's_1', 1)
+  delta(scaffolded, 's_1', '这一句话会从两条路过来。')
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'assistant/message',
+    surfaceOp: 'append',
+    data: {
+      turn: 2,
+      step: 1,
+      message: { content: [{ type: 'text', text: '这一句话会从两条路过来。' }] },
+    },
+  })
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'turn/end',
+    data: { turn: 2, reason: { kind: 'completed' } },
+  })
+  await settle()
+
+  const record = foldedRecord(cardFrom(handle))
+  const appearances = record.split('这一句话会从两条路过来。').length - 1
+  assert.equal(appearances, 1, `the text is in the record once, not twice: ${appearances}`)
+})
+
+test('a step that only streamed is still folded', async () => {
+  const scaffolded = await phoneHoldsIt()
+  const { handle } = await startRun(scaffolded, 's_1')
+
+  // The other half of the same rule: text that arrived only as live frames has no committed
+  // message to have folded it, so the end of the turn is the last chance to keep it.
+  startStep(scaffolded, 's_1', 1)
+  delta(scaffolded, 's_1', '只有实时片段的一段话。')
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'turn/end',
+    data: { turn: 2, reason: { kind: 'completed' } },
+  })
+  await settle()
+
+  assert.match(foldedRecord(cardFrom(handle)), /只有实时片段的一段话/, 'the frames reached the record')
+})
+
+test('a settled card with nothing to show folds nothing', async () => {
+  const scaffolded = await phoneHoldsIt()
+  const { handle } = await startRun(scaffolded, 's_1')
+
+  // A turn can end without ever saying anything: cancelled before the first token, or failed
+  // outright. An empty fold would offer the reader a panel that opens onto nothing.
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'turn/end',
+    data: { turn: 2, reason: { kind: 'completed' } },
+  })
+  await settle()
+
+  const card = cardFrom(handle)
+  assert.equal(foldedRecord(card), undefined, 'there is no fold to open')
+  assert.match(JSON.stringify(card), /已结束/, 'but the card still says the run is over')
+})
+
+test('a settled card is not rewritten by the turn it already closed', async () => {
+  const scaffolded = await phoneHoldsIt()
+  const { handle } = await startRun(scaffolded, 's_1')
+
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'turn/end',
+    data: { turn: 2, reason: { kind: 'completed' } },
+  })
+  await settle()
+  const frozen = JSON.stringify(cardFrom(handle))
+
+  // A late event from the turn that just ended. The log is append-ordered, so this is the
+  // boundary arriving twice rather than a reordering — and folding it would put text into a
+  // record that claims to be the finished run.
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'assistant/message',
+    surfaceOp: 'append',
+    data: { turn: 2, step: 1, message: { content: [{ type: 'text', text: '迟到的内容' }] } },
+  })
+  await settle()
+
+  assert.equal(JSON.stringify(cardFrom(handle)), frozen, 'the frozen card is left alone')
+})
+
+test('an event from a turn the card has left does not reach the new turn', async () => {
+  const scaffolded = await phoneHoldsIt()
+  const { handle } = await startRun(scaffolded, 's_1')
+
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'assistant/message',
+    surfaceOp: 'append',
+    data: { turn: 2, step: 1, message: { content: [{ type: 'text', text: '第二轮说的话' }] } },
+  })
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'turn/end',
+    data: { turn: 2, reason: { kind: 'completed' } },
+  })
+  await settle()
+
+  // A third turn opens, and then an event arrives that belongs to the second. Folding it would
+  // present an older run's text as something the new run just said.
+  scaffolded.emitToAll('session/event', { id: 's_1' }, { type: 'turn/start', data: { turn: 3 } })
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'assistant/message',
+    surfaceOp: 'append',
+    data: { turn: 2, step: 1, message: { content: [{ type: 'text', text: '属于旧轮次的内容' }] } },
+  })
+  await settle()
+
+  const card = JSON.stringify(cardFrom(handle))
+  assert.match(card, /第 3 轮/, 'the card is showing the new turn')
+  assert.equal(card.includes('属于旧轮次的内容'), false, 'and none of the old turn leaked into it')
+})
+
+test('the record is bounded while a run goes, not only when it ends', async () => {
+  const scaffolded = await phoneHoldsIt()
+  const { handle } = await startRun(scaffolded, 's_1')
+
+  // A long run must not accumulate its whole transcript in memory: the record is bounded as it is
+  // built, which is what keeps a hundred-step run costing the same as a one-step run. The first
+  // entry is the one to watch — if the bound is not applied as the record grows, it is still
+  // there at the end.
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'assistant/message',
+    surfaceOp: 'append',
+    data: {
+      turn: 2,
+      step: 1,
+      message: { content: [{ type: 'text', text: `最早的一句话 ${'x'.repeat(300)}` }] },
+    },
+  })
+  // Enough to be over the record's bound several times over: 60 messages of 300 characters is
+  // about four times the budget, so the earliest are the ones that have to go.
+  for (let index = 0; index < 60; index += 1) {
+    scaffolded.emitToAll('session/event', { id: 's_1' }, {
+      type: 'assistant/message',
+      surfaceOp: 'append',
+      data: {
+        turn: 2,
+        step: 1,
+        message: { content: [{ type: 'text', text: `第${index}段 ${'x'.repeat(300)}` }] },
+      },
+    })
+  }
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'turn/end',
+    data: { turn: 2, reason: { kind: 'completed' } },
+  })
+  await settle()
+
+  const record = foldedRecord(cardFrom(handle))
+  assert.equal(record.includes('最早的一句话'), false, 'the oldest entries were dropped as it grew')
+  assert.match(record, /第59段/, 'and the newest are what is left')
+})
+
+test('the card body stays inside the platform cap when the text is escape-dense', async () => {
+  const scaffolded = await phoneHoldsIt()
+  await startRun(scaffolded, 's_1')
+
+  // Thirty kilobytes caps the request body, and the body is not the text: the text is escaped into
+  // the card JSON and the card JSON is escaped again as the request's `content`. Text made of
+  // quotes and backslashes — tool output, JSON, code, which is much of what a run says — doubles at
+  // each layer, so a budget counted in the text's own bytes produces a body over the cap. This is
+  // the case the budget has to hold for, and it is the one that was measured above the cap.
+  observed.created.length = 0
+  observed.patched.length = 0
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'assistant/message',
+    surfaceOp: 'append',
+    data: {
+      turn: 2,
+      step: 1,
+      message: { content: [{ type: 'text', text: '\\"'.repeat(15_000) }] },
+    },
+  })
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'turn/end',
+    data: { turn: 2, reason: { kind: 'completed' } },
+  })
+  await settle()
+
+  const written = deliveredBodies()
+  assert.ok(written.length > 0, 'the card was written')
+  for (const content of written) {
+    // The one number that matters: what the request body costs once the card JSON is the value of
+    // a form parameter, which is exactly how the deployment sends it.
+    assert.ok(
+      bodySize(content) < 30 * 1024,
+      `the body stays inside the platform cap: ${bodySize(content)} bytes`,
+    )
+  }
+})
+
+test('the card body stays inside the platform cap when the text is Chinese', async () => {
+  const scaffolded = await phoneHoldsIt()
+  await startRun(scaffolded, 's_1')
+
+  // The other shape of text that costs more than one byte per character. It is the easier of the
+  // two, but a budget that holds only for one of them does not hold.
+  observed.created.length = 0
+  observed.patched.length = 0
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'assistant/message',
+    surfaceOp: 'append',
+    data: {
+      turn: 2,
+      step: 1,
+      message: { content: [{ type: 'text', text: '中'.repeat(20_000) }] },
+    },
+  })
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'turn/end',
+    data: { turn: 2, reason: { kind: 'completed' } },
+  })
+  await settle()
+
+  const written = deliveredBodies()
+  assert.ok(written.length > 0, 'the card was written')
+  for (const content of written) {
+    assert.ok(
+      bodySize(content) < 30 * 1024,
+      `the body stays inside the platform cap: ${bodySize(content)} bytes`,
+    )
+  }
+})
+
+test('a card the platform refuses for size is retried smaller', async () => {
+  const scaffolded = await phoneHoldsIt()
+
+  // The budget keeps cards well inside the documented limit, but the real ceiling is documented
+  // outside this repository. Without a retry the send would repeat the same view forever and the
+  // reader would get no card at all.
+  observed.failNextDelivery = 'invalid request: card content is too large'
+  await startRun(scaffolded, 's_1')
+
+  assert.equal(observed.deliveryFailures, 1, 'the first attempt was refused')
+  const sent = observed.created.at(-1)
+  assert.ok(sent, 'and the retry arrived')
+  assert.ok(
+    Buffer.byteLength(sent.data.content, 'utf8') < 30 * 1024,
+    'as a smaller card',
+  )
+  assert.equal(
+    scaffolded.debugs.some(line => line.includes('体积上限')),
+    true,
+    'and the retry is said out loud in the log, so a refused card is not silent',
+  )
+})
+
+test('an edit the platform refuses for size is retried smaller', async () => {
+  const scaffolded = await phoneHoldsIt()
+  const { handle } = await startRun(scaffolded, 's_1')
+
+  // A refusal on an edit used to be logged and dropped, which left the card showing an old state
+  // for good — the reader's only view of the run, frozen on something that is no longer true.
+  observed.failNextPatch = 'invalid request: card content is too large'
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'assistant/message',
+    surfaceOp: 'append',
+    data: {
+      turn: 2,
+      step: 1,
+      message: { content: [{ type: 'text', text: '中'.repeat(20_000) }] },
+    },
+  })
+  await settle()
+
+  const edits = observed.patched.filter(entry => entry.path?.message_id === handle)
+  assert.equal(observed.patchFailures, 1, 'the first edit was refused')
+  assert.ok(edits.length >= 1, `the retry reached the same message: ${edits.length} edits`)
+  for (const edit of edits) {
+    assert.ok(
+      Buffer.byteLength(edit.data.content, 'utf8') < 30 * 1024,
+      `every edit stays inside the platform cap: ${Buffer.byteLength(edit.data.content, 'utf8')}`,
+    )
+  }
+})
+
+test('a step that streams more than the record can hold keeps its end', async () => {
+  const scaffolded = await phoneHoldsIt()
+  const { handle } = await startRun(scaffolded, 's_1')
+  startStep(scaffolded, 's_1', 1)
+
+  // A step's deltas are not bounded by anything: a model writing a long answer produces thousands
+  // of them. Holding all of them would mean the card keeps an entire answer in memory, and the
+  // fold would then be clipped from the wrong end.
+  for (let index = 0; index < 100; index += 1) {
+    delta(scaffolded, 's_1', `第${index}段${'中'.repeat(100)}`)
+  }
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'turn/end',
+    data: { turn: 2, reason: { kind: 'completed' } },
+  })
+  await settle()
+
+  const record = foldedRecord(cardFrom(handle))
+  // The stream is kept bounded as the deltas arrive, so the fold is the end of the step rather
+  // than the whole of it — and the end is what a reader opens the fold to find.
+  assert.match(record, /第9\d段/, 'the end of the stream is what it keeps')
+  assert.equal(record.includes('第0段'), false, 'with the beginning dropped first')
+  for (const body of deliveredBodies()) {
+    assert.ok(bodySize(body) < 30 * 1024, `the card stays inside the cap: ${bodySize(body)} bytes`)
+  }
+})
+
+test('a session keeps one card across its turns, edited rather than re-sent', async () => {
+  const scaffolded = await phoneHoldsIt()
+  const first = await startRun(scaffolded, 's_1')
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'turn/end',
+    data: { turn: 2, reason: { kind: 'completed' } },
+  })
+  await settle()
+
+  // The next turn is the same card, rewritten. A session that sent a card per turn would notify
+  // the reader once per turn, which is the noise this whole design is built to avoid.
+  const messages = observed.created.length
+  scaffolded.emitToAll('session/event', { id: 's_1' }, { type: 'turn/start', data: { turn: 3 } })
+  await settle()
+
+  assert.equal(observed.created.length, messages, 'no new message was sent')
+  assert.match(JSON.stringify(cardFrom(first.handle)), /第 3 轮/, 'the same card shows the new turn')
+  assert.equal(foldedRecord(cardFrom(first.handle)), undefined, 'and a live card folds nothing again')
 })
 
 test('a turn that ends while its first send is in flight still gets rendered', async () => {

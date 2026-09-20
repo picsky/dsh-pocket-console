@@ -17,6 +17,8 @@
 const zh = {
   /** Appended by `clip` when a long reason or detail was cut. */
   truncated: '…（内容过长已截断）',
+  /** Prepended when the *end* of a folded record was kept and its beginning dropped. */
+  truncatedOlder: '（更早的内容已省略）…\n\n',
   toolLabel: tool => `**工具**：\`${tool}\``,
   callIdLabel: id => `**调用 ID**：\`${id}\``,
   reasonLabel: reason => `**原因**：${reason}`,
@@ -103,6 +105,11 @@ const zh = {
   activityFailed: reason => `**失败**：${reason}`,
   activityNothingYet: '（这一步还没有文本输出）',
   activityTruncated: '输出达到上限而中断，任务没有做完。',
+  /** Label over the folded record of a finished run, on the frozen card. */
+  activityProcess: '本次执行过程',
+  activityFrozen: '已结束',
+  /** One failed tool call, in the folded record of a finished run. */
+  activityToolFailed: (name, reason) => `**工具失败**：\`${name}\`${reason === '' ? '' : ` — ${reason}`}`,
   activityTitle: '执行中',
   logActivitySent: '已为这次运行发出活动卡。',
   logActivitySendFailed: '活动卡发送失败',
@@ -151,6 +158,7 @@ const zh = {
 /** English copy. Same keys, and the same functions for the varying parts. */
 const en = {
   truncated: '… (truncated)',
+  truncatedOlder: '(earlier content omitted)…\n\n',
   toolLabel: tool => `**Tool**: \`${tool}\``,
   callIdLabel: id => `**Call id**: \`${id}\``,
   reasonLabel: reason => `**Reason**: ${reason}`,
@@ -224,6 +232,9 @@ const en = {
   activityFailed: reason => `**Failed**: ${reason}`,
   activityNothingYet: '(no text from this step yet)',
   activityTruncated: 'the output hit its ceiling and stopped, so the work did not finish.',
+  activityProcess: 'What this run did',
+  activityFrozen: 'Finished',
+  activityToolFailed: (name, reason) => `**Tool failed**: \`${name}\`${reason === '' ? '' : ` — ${reason}`}`,
   activityTitle: 'Running',
   logActivitySent: 'sent the activity card for this run.',
   logActivitySendFailed: 'sending the activity card failed',

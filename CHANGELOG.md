@@ -38,6 +38,16 @@ out when it does.
 
 ### Changed
 
+- **A finished run leaves a record on its card instead of looking live.** When the phone holds the
+  person, one card follows a run and is edited in place; when the turn ends the card freezes: the
+  status becomes `已结束`, the header goes grey, and the run's own process — what the person asked
+  for, what the run said, and the tools that failed — folds into a panel the channel renders
+  collapsed and the reader opens in place. A live card folds nothing, because a panel growing under
+  a reader's thumb is worse than no panel. The panel is capped: a hundred-step run keeps its end
+  rather than its beginning, since the end is what a reader is looking for. A view gains the optional
+  `details` field for it, which `providers/README.md` and its Chinese counterpart say a channel
+  should fold where it can and must not silently drop (`activity.js`, `providers/feishu.js`).
+
 - **A run in progress is visible from the phone, on a card that is edited rather than sent.**
   A long turn used to be silent: the phone heard from this plugin only when a request blocked or
   a turn ended, so the only way to know whether the machine was still working — and where it was
@@ -131,6 +141,40 @@ out when it does.
   pages, and stops claiming nine decision records when there are thirteen.
 
 ### Fixed
+
+- **A card the platform refused as too large now arrives anyway, and the size budget measures the
+  right thing.** Two separate faults, one visible as no message at all. The budget was counted in
+  the text's own UTF-8 bytes, but the text is escaped into the card JSON and the card JSON is
+  escaped again to become the request body, and each escape doubles a quote or a backslash — so
+  text dense in those, which is what tool output, JSON and code are made of, measured inside the
+  budget and left as a 55 KB body against a 30 KB cap. The budget is now counted the way the body
+  counts it, and is small enough that a whole card stays inside the cap even if every byte escapes
+  twice; it costs length in the ordinary case, about 1,500 Chinese characters rather than 2,700. A
+  delivery the platform still refuses for size is retried once at half the text rather than
+  repeating an identical attempt forever. An *edit* refused for size was dropped with a log line,
+  which left a card showing a stale state for good; it is retried the same way (`budget.js`,
+  `activity.js`, `README.md`).
+
+- **A frozen card said everything twice, or lost the end of the run.** A step's text arrives by two
+  routes — live stream fragments while it runs, and one committed message when it settles — and the
+  record folded both, so the reader got the same words twice; the guard meant to prevent it compared
+  the first 40 characters of the text, which could neither tell a repeated opening phrase from the
+  same message nor survive either shape changing. Whether the text is already folded is now decided
+  by the step numbers the events carry, which is exact. Folding also took the card face's newest
+  three fragments rather than the step's whole stream, so a streamed run's beginning was dropped and
+  a long sentence could be cut off mid-way; the whole step is folded now. And a card that had frozen
+  was still being rewritten by late events from the turn it had closed; it stays frozen now, with a
+  queued prompt the one exception, since that opens the *next* turn (`activity.js`).
+
+- **The folded record was unbounded, and a failed tool named the wrong thing.** The running total
+  that bounds the record was never initialized, so it was `NaN` from the first entry, every
+  comparison against the budget was false, and the record grew with the run — the bound existed only
+  on paper. The text folded back in from the live stream is now bounded as it arrives for the same
+  reason. Separately, a failed tool's line read its reason from `error.message` and its subject from
+  a field that does not exist: `error` carries a name and a code, the prose is in the result's own
+  content blocks — which are blocks, not a string — and a result block names only the call id, so
+  the tool's name can only come from the call that preceded it. The line could show an error class
+  and `[object Object]` where the reason belonged (`activity.js`, `tests/activity.test.mjs`).
 
 - **A retried card can no longer become a second notification.** A send the platform accepted but
   whose answer never came back is the one way one card becomes two messages: this side cannot tell

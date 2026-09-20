@@ -26,6 +26,10 @@ export const observed = {
   registerAppCalls: [],
   /** Set to make the next delivery fail with that message. */
   failNextDelivery: undefined,
+  /** Set to make the next card edit fail with that message. */
+  failNextPatch: undefined,
+  /** How many card edits the platform refused. */
+  patchFailures: 0,
   /**
    * Set to make the next delivery be accepted and then fail.
    *
@@ -73,6 +77,8 @@ export function resetObserved() {
   observed.closed = 0
   observed.registerAppCalls.length = 0
   observed.failNextDelivery = undefined
+  observed.failNextPatch = undefined
+  observed.patchFailures = 0
   observed.loseNextAnswer = false
   observed.deliveryFailures = 0
   observed.deduplicated = 0
@@ -168,6 +174,14 @@ export class Client {
           return { data: { message_id: handle } }
         },
         patch: async (request) => {
+          // A card edit can be refused the same way a send can — most importantly for size, which
+          // is the refusal a caller has to recover from rather than log and forget.
+          if (observed.failNextPatch !== undefined) {
+            const message = observed.failNextPatch
+            observed.failNextPatch = undefined
+            observed.patchFailures += 1
+            throw new Error(message)
+          }
           observed.patched.push(request)
           return { data: {} }
         },
