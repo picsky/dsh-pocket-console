@@ -43,6 +43,24 @@ export const CARD_TEXT_BUDGET = 32 * 1024
 export const CARD_ELEMENT_BUDGET = 120
 
 /**
+ * Bytes of the whole request body one card may cost.
+ *
+ * The other two budgets bound a card part by part: each string on its own, and how many elements
+ * there may be. Neither bounds the body, and the body is what the platform refuses — so between them
+ * they leave a hole big enough to matter. Measured rather than reasoned: {@link CARD_ELEMENT_BUDGET}
+ * elements each holding a string at the full {@link CARD_TEXT_BUDGET} extrapolates to roughly **11
+ * MB**, against a measured refusal at **164 KB**. Nothing a caller builds today comes close — the
+ * suite's real cards weigh 0.7–10 KB — so this is not a live bug; it is the ceiling the per-part
+ * budgets do not rule out, bounded on purpose instead of by luck.
+ *
+ * Set at 96 KB: comfortably under the **131 KB** this tenant accepted, with 42% of room below the
+ * **164 KB** it refused, and about ten times the largest card ever observed. A budget closer to the
+ * ceiling would buy nothing, because the content that would use it does not exist; one further below
+ * would start clipping cards that arrive fine today.
+ */
+export const CARD_BODY_BUDGET = 96 * 1024
+
+/**
  * What one string costs in the request body that ultimately carries it.
  *
  * The text's own bytes, plus one extra byte for each character the card's JSON has to escape and

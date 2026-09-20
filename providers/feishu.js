@@ -16,6 +16,7 @@
 
 import * as Lark from '@larksuiteoapi/node-sdk'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import { CARD_BODY_BUDGET, bodyBytes, clipToBytes } from '../budget.js'
 
 /** Channel name used in diagnostics. */
 export const name = 'feishu'
@@ -262,10 +263,17 @@ const button = (label, tone, payload) => ({
 
 /**
  * Render one channel-neutral view as a card JSON 2.0 document.
+ *
+ * Exported because the body budget is a property of this function and is only checkable by handing it
+ * the worst view the core's own budgets permit — a shape no deployment produces, so it cannot be
+ * reached through a scenario. Nothing outside this file calls it.
+ *
  * @param view - the view built by the core.
+ * @param messages - the copy for the controls the view declares.
+ * @param onFit - told the weight of a card that had to be brought inside the body budget.
  * @returns the card document.
  */
-function renderCard(view, messages) {
+export function renderCard(view, messages, onFit = () => {}) {
   const elements = view.body.map(content => ({ tag: 'markdown', content }))
 
   // A folded record, where the view carries one. Collapsed by default and opened in place by the
@@ -344,12 +352,77 @@ function renderCard(view, messages) {
     })
   }
 
-  return {
+  const card = {
     schema: '2.0',
     // A shared card is required for the post-decision rewrite.
     config: { update_multi: true },
     header: { template: TEMPLATES[view.tone] ?? 'blue', title: plainText(view.title) },
     body: { elements },
+  }
+  return fitCard(card, onFit)
+}
+
+/**
+ * Bytes the platform actually receives for one whole request body.
+ *
+ * The card JSON is the `content` field of that body, so it is escaped a second time on its way out —
+ * which is why this is measured on the request rather than on the card. The `uuid` is deliberately
+ * left out: it is the caller's, it is small, and a card does not get to depend on it.
+ * @param card - the rendered card document.
+ * @returns the bytes the whole request will cost.
+ */
+function requestBytes(card) {
+  return Buffer.byteLength(JSON.stringify({
+    params: { receive_id_type: 'open_id' },
+    data: { receive_id: 'ou_x', msg_type: 'interactive', content: JSON.stringify(card) },
+  }), 'utf8')
+}
+
+/**
+ * Bring one rendered card inside {@link CARD_BODY_BUDGET}, or give up its fold trying.
+ *
+ * Two moves, in the order of what a reader loses by each. The fold goes first because it is the one
+ * part a card can lose whole without becoming a different card — it is a record beside the answer,
+ * and the answer is still there. Only if that is not enough does the text itself come down, and then
+ * proportionally, so every block keeps its share instead of the first one taking the entire cut.
+ *
+ * This is a safety net, not the working budget: a real card weighs 0.7–10 KB against a 96 KB bound,
+ * so a card that reaches here was built by something that is not this core. It never silently
+ * produces an empty card — the structure survives whatever the text does — and it never loops: one
+ * halving of the overage, then whatever it is, minus the fold if there is one.
+ *
+ * @param card - the rendered card document, as built.
+ * @param onFit - told the weight of a card that did not fit, so the deployment log can say a fold
+ *   was given up. Passed in rather than reached for: this is a module-level renderer and the logger
+ *   belongs to one channel instance.
+ * @returns the card to send.
+ */
+function fitCard(card, onFit) {
+  if (requestBytes(card) <= CARD_BODY_BUDGET) return card
+  onFit?.(requestBytes(card))
+  const withoutFold = (() => {
+    const elements = card.body.elements
+    const at = elements.findIndex(element => element.tag === 'collapsible_panel')
+    if (at === -1) return undefined
+    return { ...card, body: { elements: elements.filter((_, index) => index !== at) } }
+  })()
+  if (withoutFold !== undefined && requestBytes(withoutFold) <= CARD_BODY_BUDGET) return withoutFold
+
+  const base = withoutFold ?? card
+  const over = requestBytes(base) - CARD_BODY_BUDGET
+  const texts = base.body.elements.filter(element => typeof element.content === 'string')
+  const total = texts.reduce((sum, element) => sum + bodyBytes(element.content), 0)
+  // Nothing to cut, or the structure alone is over: send what there is rather than an empty card.
+  if (total === 0 || over >= total) return base
+  const keep = (total - over) / total
+  const shrink = (value) => clipToBytes(value, '', Math.max(1, Math.floor(bodyBytes(value) * keep)))
+  return {
+    ...base,
+    body: {
+      elements: base.body.elements.map(element => (
+        typeof element.content === 'string' ? { ...element, content: shrink(element.content) } : element
+      )),
+    },
   }
 }
 
@@ -862,6 +935,17 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
     return { id, type: config.receiveIdType }
   }
 
+  /**
+   * Say that a card had to be brought inside the body budget.
+   *
+   * Worth a line because it is the one thing this renderer gives up on its own: the fold is dropped
+   * before any text is, and a reader who expected a record beside the answer should be able to find
+   * out from the deployment log that it was not sent. In practice nothing reaches here — real cards
+   * weigh a tenth of the budget — so a line appearing at all is news.
+   * @param bytes - what the card weighed before it was brought down.
+   */
+  const onOverBudget = (bytes) => { log.warn(messages().logCardOverBodyBudget(bytes, CARD_BODY_BUDGET)) }
+
   return {
     // Forms need a checker/input component; the SDK and cards support them.
     supportsForms: true,
@@ -909,7 +993,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
         data: {
           receive_id: id,
           msg_type: 'interactive',
-          content: JSON.stringify(renderCard(view, messages)),
+          content: JSON.stringify(renderCard(view, messages, onOverBudget)),
           // The platform holds the same key for an hour and answers a repeat with the message it
           // already accepted, so a send whose response was lost is retried without the reader
           // being notified a second time.
@@ -922,7 +1006,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       if (handle === undefined) return
       await transport?.client.im.message.patch({
         path: { message_id: handle },
-        data: { content: JSON.stringify(renderCard(view, messages)) },
+        data: { content: JSON.stringify(renderCard(view, messages, onOverBudget)) },
       })
     },
     close() {
