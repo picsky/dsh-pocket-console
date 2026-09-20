@@ -16,8 +16,6 @@
  * @module pocket-console/identity
  */
 
-import { basename } from 'node:path'
-
 /** Characters of a workspace name a title keeps before it is clipped. */
 const WORKSPACE_LIMIT = 40
 
@@ -26,6 +24,13 @@ const WORKSPACE_LIMIT = 40
  *
  * The name only; a session without one, or with one that names nothing (a filesystem
  * root), is left unnamed rather than labelled with something invented for it.
+ *
+ * Both separators are honoured on every platform, and deliberately: the Host can run on
+ * either, and a session's `cwd` arrives in the spelling of the machine that created it.
+ * `path.basename` is platform-bound — on POSIX a backslash is an ordinary filename
+ * character — so a workspace reached through a Windows-shaped path would be named by its
+ * whole path on one platform and by its last segment on the other. For a label a person
+ * reads, the name is the name wherever the Host happens to be running.
  * @param cwd - the session's absolute working directory, as its header carries it.
  * @returns the label, or undefined when there is nothing to show.
  */
@@ -33,10 +38,12 @@ export function workspaceLabel(cwd) {
   if (typeof cwd !== 'string') return undefined
   const path = cwd.trim()
   if (path === '') return undefined
-  // Cross-platform on purpose: the Host can be started on either, and `cwd` arrives
-  // in that platform's spelling. A root has no trailing name, and is nothing to show.
-  const name = basename(path)
-  if (name === '' || name === path) return undefined
+  const segments = path.replaceAll('\\', '/').split('/').filter(segment => segment !== '' && segment !== '.')
+  // A filesystem root has no final segment; a drive on its own is a root, not a name;
+  // and a reference to a parent directory names nothing this session is. None of the
+  // three is something to put on a card.
+  const name = segments.at(-1)
+  if (name === undefined || name === '..' || /^[A-Za-z]:$/.test(name)) return undefined
   return name.length <= WORKSPACE_LIMIT ? name : name.slice(0, WORKSPACE_LIMIT)
 }
 

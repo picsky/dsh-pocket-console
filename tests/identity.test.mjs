@@ -9,9 +9,17 @@ import assert from 'node:assert/strict'
 import { titleOf, workspaceLabel } from '../identity.js'
 
 test('a workspace label names the directory a session runs in', () => {
+  // Every case is written as a literal and expected to hold on any platform. The first
+  // version of this used `path.basename`, which on POSIX treats a backslash as an
+  // ordinary filename character — so the Windows cases passed on the author's machine
+  // and failed on CI, and a Windows-shaped workspace would have been nameless there.
   assert.equal(workspaceLabel('/Users/ann/work/my-app'), 'my-app', 'a POSIX path')
   assert.equal(workspaceLabel('C:\\Users\\ann\\work\\my-app'), 'my-app', 'a Windows path')
+  assert.equal(workspaceLabel('\\\\server\\share\\proj'), 'proj', 'a UNC path')
+  assert.equal(workspaceLabel('//server/share/proj'), 'proj', 'a UNC path in POSIX spelling')
   assert.equal(workspaceLabel('/Users/ann/work/my-app/'), 'my-app', 'a trailing separator')
+  assert.equal(workspaceLabel('/Users/ann//work///my-app'), 'my-app', 'repeated separators')
+  assert.equal(workspaceLabel('/Users/ann/work/./my-app'), 'my-app', 'a current-directory segment')
   assert.equal(workspaceLabel('/Users/ann/work/my app'), 'my app', 'a name with a space')
   assert.equal(workspaceLabel('/Users/ann/工作区'), '工作区', 'a name that is not Latin')
 })
@@ -25,6 +33,8 @@ test('a session with nothing to name stays unnamed', () => {
   assert.equal(workspaceLabel('   '), undefined, 'whitespace alone')
   assert.equal(workspaceLabel('/'), undefined, 'a POSIX root, which has no name')
   assert.equal(workspaceLabel('C:\\'), undefined, 'a Windows drive root, which has no name')
+  assert.equal(workspaceLabel('\\\\\\\\'), undefined, 'separators alone')
+  assert.equal(workspaceLabel('/tmp/..'), undefined, 'a reference to a parent directory names nothing this session is')
 })
 
 test('a long workspace name is clipped so one title cannot crowd out a card', () => {
