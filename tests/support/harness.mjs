@@ -213,7 +213,7 @@ function disposePrevious() {
  *   medium survives from the previous scaffold (a restart), and whether the
  *   storage medium is held shut so a case can press a card before it answers.
  */async function scaffold(configOverrides = {}, {
-  services = ['settings', 'webServer', 'storageDomain', 'sessionQuery'],
+  services = ['settings', 'webServer', 'storageDomain', 'sessionQuery', 'sessionController'],
   stored = {},
   refuseWrites = false,
   tenantToken,
@@ -271,6 +271,29 @@ function disposePrevious() {
       return await inner(spec)
     }
   }
+  /**
+   * The session controller, as far as this plugin uses it: creating a session.
+   *
+   * A stub that records what it was asked to create, so a case can assert the workspace a new
+   * session inherited rather than only that some session exists. It creates the agent too, because
+   * the plugin sends the first prompt through the agent rather than through `prompt()` — the
+   * controller's `prompt()` stamps a gateway request id onto the message, which the deployment
+   * reads as somebody typing at the desk, and a task started from the phone must not look like one.
+   */
+  const sessionController = {
+    /** Every session created here, with the request it was created from. */
+    created: [],
+    async create(request) {
+      const id = `session-${sessionController.created.length + 1}`
+      sessionController.created.push({ id, request })
+      // What `ensureSession` does in the Host: the session exists and has an agent, so the first
+      // prompt has somewhere to go. The recorded follow-ups are what a case inspects.
+      const agent = { status: 'idle', followed: [], followup: (message) => { agent.followed.push(message) } }
+      agents.set(id, agent)
+      return { sessionId: id }
+    },
+  }
+
   /** The session log as the query service reports it; durable, so declared above. */
   const sessionQuery = {
     /**
@@ -440,6 +463,7 @@ function disposePrevious() {
       if (name === 'settings') return settings
       if (name === 'storageDomain') return storageDomain
       if (name === 'sessionQuery') return sessionQuery
+      if (name === 'sessionController') return sessionController
       // The browser surface's trust fence: present in a GUI deployment, and the
       // routes must ask it before answering anything.
       if (name === 'connection') return { requestRejection: () => rejection }
@@ -529,7 +553,7 @@ function disposePrevious() {
     config, ctx, listeners, disposers, warnings, infos, debugs, values, records,
     routes, sections, route, json, state, listenerOf, compose, agents, emitToAll, emitFrame,
     lastDelivered, cardFrom, cardsSent, cardTitled,
-    sessionQuery, storageDomain,
+    sessionQuery, storageDomain, sessionController,
     /** Let a held medium answer, so the pending open and restore can finish. */
     releaseStorage: () => { storageGate?.resolve() },
   }

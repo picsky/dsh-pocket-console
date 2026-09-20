@@ -15,6 +15,7 @@
     "client.js",
     "results.js",
     "activity.js",
+    "work.js",
     "identity.js",
     "priority.js",
     "workspaces.js",

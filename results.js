@@ -43,8 +43,12 @@ const TRACK_CAPACITY = 256
 
 /**
  * Watch root sessions, then offer each stopped session's answer to the channel.
+ * @param options - the host context, the logger, the channel, the settings, the copy, the workspace
+ *   registry, the priority state, and what to offer once a notice has gone out.
  */
-export function createResultNotifier({ ctx, log, channel, settings, messages, workspaces, priority, now = () => Date.now() }) {
+export function createResultNotifier({
+  ctx, log, channel, settings, messages, workspaces, priority, onSent, now = () => Date.now(),
+}) {
   /** Per-session observation: the newest turn, its last message, and when we last spoke. */
   const tracks = new Map()
   /** Notices whose rid is still live, keyed by that rid. */
@@ -223,6 +227,12 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, wo
       // still be told which session the card belonged to.
       workspaces?.record(handle, workspace)
       log.info(messages().logNoticeSent)
+      // The card is delivered, a press can find it, and this is the moment the phone has the
+      // person's attention — so it is the moment to offer the one thing a result cannot: the next
+      // shard, in a session of its own. A hook rather than a call into that module, because what
+      // the phone does about a finished run is not this notifier's business, and a deployment
+      // composed without it must still deliver results.
+      if (typeof onSent === 'function') await onSent(session)
       // Remembered only now: a card that never arrived has nothing to put back, and the
       // session's last seq is what a later run compares against to see whether the
       // session moved on while this process was not there to notice.

@@ -10,6 +10,18 @@ out when it does.
 
 ### Added
 
+- **A finished run can hand you the next task, from the phone.** Every other thing the phone does
+  decides something the desk started. A plan needs one more: when a long shard finishes while the
+  person is away, the next thing that has to happen is "start the next shard", and nobody is at the
+  desk to start it. So a result notice sent while the phone holds the person now comes with a card
+  offering a new session, prompted with whatever they type. It is the narrowest form of starting
+  work — the workspace is the one the result's session already uses and cannot be chosen, the model
+  is the deployment's, and the offer appears only while the phone holds the person, the same rule the
+  activity card follows. **The blast radius of a lost phone is therefore no longer one answer**, and
+  the README and SECURITY.md now say so rather than keeping a sentence that no longer holds
+  (`work.js`, `results.js`, `workspaces.js`,
+  [0016](docs/decisions/0016-the-phone-can-start-the-next-task.md)).
+
 - **The development process is written down, and the repository now enforces it.** A
   contributor-facing *How a change lands* section in `CONTRIBUTING.md` (issue first, branch,
   one topic per pull request, squash merge, the four checks and what each one proves), a pull
