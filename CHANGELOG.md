@@ -38,6 +38,21 @@ out when it does.
 
 ### Changed
 
+- **A run in progress is visible from the phone, on a card that is edited rather than sent.**
+  A long turn used to be silent: the phone heard from this plugin only when a request blocked or
+  a turn ended, so the only way to know whether the machine was still working — and where it was
+  — was to go and look at the desk. One card per session now shows the status, the turn and step,
+  how long it has been running, the tool it is waiting on, and the newest of the live stream. It
+  is sent once and edited after that, because a bot cannot send without notifying and an edit is
+  silent; and it carries no controls at all, because a card being interacted with cannot be
+  updated and being updated is its whole job. Edits are limited to one per 250 ms, with the text
+  deltas accumulated behind them: a long answer produces hundreds of deltas and Feishu allows
+  five edits per second to one message, so following every delta would be throttled into being
+  permanently behind. The card is minted only once the phone holds the person — while the desk
+  does, the run is visible where they already are — and the newest three fragments of the current
+  stream are what it carries, since the turn's actual answer is what the result notice is for
+  (`activity.js`).
+
 - **The desktop head start now follows the person.** The wait was a constant: the configured
   number of seconds of desk-only time before the channel was used, whatever the person was
   doing. An answer from a phone card is the evidence that nobody is at the desk — the person is
