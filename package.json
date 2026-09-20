@@ -14,6 +14,8 @@
     "index.js",
     "client.js",
     "results.js",
+    "identity.js",
+    "workspaces.js",
     "notice-store.js",
     "routes.js",
     "mirror.js",

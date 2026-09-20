@@ -103,6 +103,14 @@ export function createNoticeStore({ ctx, log, messages }) {
             handle: z.string().optional(),
             /** The session's last event when the card went out, when readable. */
             seq: z.number().optional(),
+            /**
+             * The workspace the card was titled with, when the session had one.
+             *
+             * Kept so a card rewritten after a restart — retired because its session
+             * moved on, or because the reader answered it elsewhere — still says which
+             * session it belonged to.
+             */
+            workspace: z.string().optional(),
             /** When the card went out, for ordering and for the restore cap. */
             sentAt: z.number(),
           })),
@@ -147,7 +155,8 @@ export function createNoticeStore({ ctx, log, messages }) {
     },
     /**
      * Remember one live notice, so a later run can put it back.
-     * @param notice - the rid, its session, the message, the session seq, and when.
+     * @param notice - the rid, its session, the message, the workspace it was titled
+     *   with, the session seq, and when.
      */
     async put(notice) {
       if (!await ensureOpen()) return
@@ -156,6 +165,7 @@ export function createNoticeStore({ ctx, log, messages }) {
           session: String(notice.session),
           ...(notice.handle === undefined ? {} : { handle: String(notice.handle) }),
           ...(notice.seq === undefined ? {} : { seq: notice.seq }),
+          ...(notice.workspace === undefined ? {} : { workspace: String(notice.workspace) }),
           sentAt: notice.sentAt,
         })
       } catch (error) {

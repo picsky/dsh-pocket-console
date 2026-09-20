@@ -245,6 +245,117 @@ test('a long result is clipped so the notice still arrives', async () => {
   )
 })
 
+test('a notice names the workspace of the session it reports on', async () => {
+  const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle' })
+  await bind(route)
+  // The result notice reads the workspace through the live agent it is watching, which
+  // is the one path that works for a session that is running right now.
+  agents.set('s_ws', {
+    status: 'idle',
+    followup: () => {},
+    session: { header: { cwd: 'C:\\work\\my-app' } },
+  })
+  const emit = listenerOf('session/event').handler
+
+  runTurn(emit, 's_ws', '构建通过了。')
+  await sleep(1100)
+  assert.equal(sentCard().header.title.content, 'DSH 结果 · my-app', 'the title names the workspace')
+})
+
+test('a notice with no workspace to name keeps the title it always had', async () => {
+  const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle' })
+  await bind(route)
+  // A session whose header carries no working directory. That is real — a session can
+  // be created outside any workspace — and it must not leave a bare separator on the
+  // card or invent a name for one.
+  agents.set('s_bare', { status: 'idle', followup: () => {}, session: { header: {} } })
+  const emit = listenerOf('session/event').handler
+
+  runTurn(emit, 's_bare', '构建通过了。')
+  await sleep(1100)
+  assert.equal(sentCard().header.title.content, 'DSH 结果', 'the title is exactly what it was before')
+})
+
+test('a notice retired as stale still says which session it was about', async () => {
+  const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle' })
+  await bind(route)
+  agents.set('s_ws', {
+    status: 'idle',
+    followup: () => {},
+    session: { header: { cwd: '/work/my-app' } },
+  })
+  const emit = listenerOf('session/event').handler
+
+  runTurn(emit, 's_ws', '构建通过了。')
+  await sleep(1100)
+  const card = sentCard()
+  // The notice is retired from this side when somebody speaks in the session, which is
+  // the same rewrite a press after a restart meets: the card is rewritten where it lies.
+  assert.ok(callbackValues(card).some(value => value.submit === true), 'the card took a reply first')
+  emit({ id: 's_ws' }, { type: 'user/message', data: { source: { kind: 'user' } } })
+  await sleep(20)
+  const retired = JSON.parse(observed.patched.at(-1).data.content)
+
+  assert.equal(retired.header.title.content, 'DSH 结果 · my-app', 'the retirement keeps the workspace')
+  assert.match(JSON.stringify(retired), /已有新消息/, 'and still says why it stopped taking replies')
+})
+
+test('a card the phone presses after its notice is gone is still named', async () => {
+  const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle' })
+  await bind(route)
+  agents.set('s_ws', {
+    status: 'idle',
+    followup: () => {},
+    session: { header: { cwd: '/work/my-app' } },
+  })
+  const emit = listenerOf('session/event').handler
+
+  runTurn(emit, 's_ws', '构建通过了。')
+  await sleep(1100)
+  const card = sentCard()
+  const submit = callbackValues(card).find(value => value.submit === true)
+  const [answer] = controlNames(card)
+
+  // The press arrives after this side stopped holding the notice — a restart, or a
+  // supersession — so there is no record to read a workspace from, and the message the
+  // press carries is the only thing that can name the card.
+  emit({ id: 's_ws' }, { type: 'user/message', data: { source: { kind: 'user' } } })
+  await sleep(20)
+  observed.patched.length = 0
+  const refused = await clickCard(submit, { [answer]: '接着补文档' })
+  assert.equal(refused.toast.content, '该结果已过期', 'the press is refused')
+
+  const stale = JSON.parse(observed.patched.at(-1).data.content)
+  assert.equal(stale.header.title.content, 'DSH 结果 · my-app', 'and the stale card is still named')
+  assert.match(JSON.stringify(stale), /不再有效/, 'while saying only what this side knows')
+})
+
+test('a notice rewritten when the reader replies keeps the workspace', async () => {
+  const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle' })
+  await bind(route)
+  agents.set('s_ws', {
+    status: 'idle',
+    followup: () => {},
+    session: { header: { cwd: '/work/my-app' } },
+  })
+  const emit = listenerOf('session/event').handler
+
+  runTurn(emit, 's_ws', '构建通过了。')
+  await sleep(1100)
+  const card = sentCard()
+  const submit = callbackValues(card).find(value => value.submit === true)
+  const [answer] = controlNames(card)
+
+  const settled = await clickCard(submit, { [answer]: '接着补文档' })
+  assert.equal(settled.toast.content, '已发送给 agent')
+  await sleep(20)
+
+  // The rewrite is what the reader is left looking at, so it has to agree with the
+  // card it replaces rather than becoming anonymous the moment it is answered.
+  const rewritten = JSON.parse(observed.patched.at(-1).data.content)
+  assert.equal(rewritten.header.title.content, 'DSH 结果 · my-app', 'the confirmation keeps the workspace')
+})
+
 test('the notice copy follows the deployment language', async () => {
   const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle', locale: 'en' })
   await bind(route, { openId: 'ou_scanner' })

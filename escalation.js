@@ -14,6 +14,7 @@
  */
 
 import { CARD_TEXT_BUDGET, clipToBytes, looksLikeSizeRefusal } from './budget.js'
+import { titleOf, workspaceLabel } from './identity.js'
 
 import { randomUUID } from 'node:crypto'
 
@@ -27,12 +28,24 @@ const FORM_VALUE_FIELD = 'value'
 const FORM_CUSTOM_FIELD = 'custom'
 
 /**
+ * What one card title calls the request it belongs to.
+ *
+ * The kind alone was enough while one card was on screen at a time; with several
+ * sessions running it is not, so the session's workspace is named beside it. See
+ * {@link workspaceLabel} for what counts as a name.
+ * @param settings - the effective settings.
+ * @param workspace - the session's label, when it has one.
+ * @param kind - what this card is asking for.
+ * @returns the title for the channel.
+ */
+const titleFor = (settings, workspace, kind) => titleOf(`${settings.titlePrefix} ${kind}`, workspace)
+/**
  * Create the escalation state machine.
  * @param options - the logger, the channel, the settings, mirror, and copy
  *   thunks, and whether the channel is closed for new work.
  * @returns the answerer, the action router, the pending report, and disposal.
  */
-export function createEscalation({ log, channel, settings, mirror, messages, isClosed = () => false }) {
+export function createEscalation({ log, channel, settings, mirror, messages, workspaces, isClosed = () => false }) {
   /** Live escalations keyed by the opaque id embedded in their action payloads. */
   const open = new Map()
   /** Set by close(): an escalation started after disposal must not arm a timer. */
@@ -75,7 +88,7 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
         ? copy.approvalLive
         : copy.approvalUpgraded(settings().delaySeconds))
       return {
-        title: `${settings().titlePrefix} ${copy.approvalTitle}`,
+        title: titleFor(settings(), record.workspace, copy.approvalTitle),
         tone: 'warning',
         body,
         buttons: [
@@ -173,8 +186,8 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
       // Which question this is, so a card that has moved on says where the reader
       // is. One question needs no position: the title would only repeat itself.
       title: questions.length > 1
-        ? `${settings().titlePrefix} ${copy.questionOf(position, questions.length)}`
-        : `${settings().titlePrefix} ${copy.questionTitle}`,
+        ? titleFor(settings(), record.workspace, copy.questionOf(position, questions.length))
+        : titleFor(settings(), record.workspace, copy.questionTitle),
       tone: 'info',
       body,
       buttons,
@@ -184,7 +197,11 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
 
   /** The terminal view shown once a request has been decided. */
   const settledView = (record, headline, tone) => ({
-    title: `${settings().titlePrefix} ${record.kind === 'approval' ? messages().approvalTitle : messages().questionTitle}`,
+    title: titleFor(
+      settings(),
+      record.workspace,
+      record.kind === 'approval' ? messages().approvalTitle : messages().questionTitle,
+    ),
     tone,
     body: [headline],
     buttons: [],
@@ -209,6 +226,15 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
       id: randomUUID().replaceAll('-', '').slice(0, 20),
       kind,
       request,
+      /**
+       * The workspace this request belongs to, resolved once and carried on the record.
+       *
+       * A card is rewritten several times as its request is answered, and re-reading
+       * the session each time would make the name vanish from a later rewrite whenever
+       * the session had been reclaimed in between. What the card says about itself
+       * stays what it said when it was sent.
+       */
+      workspace: workspaceLabel(request.agent?.session?.header?.cwd),
       handle: undefined,
       delivered: false,
       timer: undefined,
@@ -293,6 +319,10 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
         void deliverCard(record).then((handle) => {
           record.handle = handle
           record.delivered = true
+          // Remembered against the message, not only on the record: a press that arrives
+          // after a restart finds no record, and rewriting that card must still be able
+          // to name the session it belonged to.
+          workspaces?.record(handle, record.workspace)
         }).catch((error) => {
           log.warn(messages().logDeliveryFailed, error)
           // The card never arrived, so there is no phone decision to wait for.
@@ -369,7 +399,9 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
     if (handle === undefined || typeof channel.update !== 'function') return
     const copy = messages()
     void Promise.resolve(channel.update(handle, {
-      title: `${settings().titlePrefix} ${copy.requestGoneTitle}`,
+      // The record this card belonged to is gone, so the workspace comes from what was
+      // remembered against the message; a card that cannot be named is still retired.
+      title: titleFor(settings(), workspaces?.lookup(handle), copy.requestGoneTitle),
       tone: 'muted',
       body: [copy.requestGone],
       buttons: [],

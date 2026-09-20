@@ -473,11 +473,14 @@ test('accepts a free-text form submission when the question offers no options', 
 
 
 test('rejects an unknown request id and a forged option label', async () => {
-  const { route, listenerOf } = await scaffold()
+  const { route, listenerOf, agents } = await scaffold()
   await bind(route)
+  const agent = { status: 'idle', session: { header: { cwd: '/work/my-app' } } }
+  agents.set('s_q', agent)
   const questions = listenerOf('user-questions/request')
   void questions.handler({
     questions: [{ id: 'q', question: 'Q?', options: [{ label: 'ok' }] }],
+    agent,
     signal: new AbortController().signal,
   }, () => Promise.withResolvers().promise)
   await sleep(1200)
@@ -487,6 +490,10 @@ test('rejects an unknown request id and a forged option label', async () => {
   assert.equal(expired.toast.type, 'warning')
   const retired = observed.patched.length
   assert.equal(retired, 1, 'the card the press came from is retired, since its request is not here')
+  // The press names the message and nothing else, so this rewrite has no record to read a
+  // workspace from — only what was remembered against that message when the card went out.
+  const dead = JSON.parse(observed.patched.at(-1).data.content)
+  assert.equal(dead.header.title.content, 'DSH 请求已结束 · my-app', 'and the retired card can still be named')
 
   const forged = await clickCard({ rid, q: 'q', v: '模型没提供过的选项' })
   assert.equal(forged.toast.type, 'warning', 'an answer no option offered must be refused')
@@ -521,5 +528,38 @@ test('a card whose request is gone stops looking answerable', async () => {
   assert.match(JSON.stringify(dead), /请求已结束/, 'the card is rewritten to say the request is over')
   assert.deepEqual(callbackValues(dead), [], 'and offers nothing left to press')
   assert.equal(JSON.stringify(dead).includes('ok'), false, 'the option went with the controls')
+  // A card is never left untitled: the retirement keeps the prefix even though the
+  // workspace it was sent with is not recoverable here — see the in-process retirement
+  // above for the case where the message is one this process remembers.
+  assert.equal(dead.header.title.content, 'DSH 请求已结束', 'and the retired card keeps its title')
 })
 
+
+test('a question card names the workspace, and steps it as the answer advances', async () => {
+  const { route, listenerOf, agents } = await scaffold()
+  await bind(route)
+  const agent = { status: 'idle', session: { header: { cwd: '/work/my-app' } } }
+  agents.set('s_q', agent)
+  const questions = listenerOf('user-questions/request')
+
+  void questions.handler({
+    questions: [
+      { id: 'a', header: '发布', question: '现在发布吗？', options: [{ label: '发布' }] },
+      { id: 'b', header: '通知', question: '要通知团队吗？', options: [{ label: '通知' }] },
+    ],
+    agent,
+    signal: new AbortController().signal,
+  }, () => Promise.withResolvers().promise)
+  await sleep(1200)
+
+  const card = sentCard()
+  assert.equal(card.header.title.content, 'DSH 提问 · 第 1/2 题 · my-app', 'the first question names the workspace')
+
+  // Answering rewrites the same card to the next question, and the rewrite is the only
+  // thing on screen — a title that dropped the workspace here would leave the reader
+  // unable to tell which session the second question belongs to.
+  await clickCard(callbackValues(card).find(value => value.q === 'a'))
+  await sleep(20)
+  const next = JSON.parse(observed.patched.at(-1).data.content)
+  assert.equal(next.header.title.content, 'DSH 提问 · 第 2/2 题 · my-app', 'and so does the next one')
+})

@@ -151,6 +151,7 @@ test('a delivery the platform refuses for size is retried once, smaller', async 
   const desktop = Promise.withResolvers()
   const result = escalation.escalate({
     toolName: 'pwsh',
+    agent: { status: 'idle', session: { header: { cwd: '/work/my-app' } } },
     // Past the card's own byte budget, so the first attempt is clipped and the
     // retry, at half the budget, genuinely carries less.
     reason: 'x'.repeat(12000),
@@ -162,6 +163,10 @@ test('a delivery the platform refuses for size is retried once, smaller', async 
   const retryBody = delivered[1].body.join('\n')
   const firstBody = delivered[0].body.join('\n')
   assert.ok(retryBody.length < firstBody.length, `the retry carries less text (${retryBody.length} < ${firstBody.length})`)
+  // The retry rebuilds the whole view, so it is the one place a title could quietly be
+  // assembled from something other than the record — and it would be the card the reader
+  // actually receives.
+  assert.equal(delivered[1].title, 'DSH Tool approval · my-app', 'the retried card keeps the workspace')
 
   desktop.resolve('rejected')
   assert.equal(await result, 'rejected')

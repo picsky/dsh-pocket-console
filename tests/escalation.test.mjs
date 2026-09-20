@@ -209,4 +209,100 @@ test('the card copy follows the deployment language', async () => {
   assert.equal(await result, 'allowed-once')
 })
 
+test('a card names the workspace of the session it belongs to', async () => {
+  const { route, listenerOf, agents } = await scaffold()
+  await bind(route)
+  const agent = { status: 'idle', session: { header: { cwd: '/work/my-app' } } }
+  agents.set('s_ws', agent)
+
+  const approval = listenerOf('approval/request')
+  const desktop = Promise.withResolvers()
+  void approval.handler(
+    { toolName: 'pwsh', agent, signal: new AbortController().signal },
+    () => desktop.promise,
+  )
+  await sleep(1200)
+
+  const card = sentCard()
+  assert.equal(card.header.title.content, 'DSH 工具审批 · my-app', 'the title names the workspace')
+  desktop.resolve('rejected')
+})
+
+test('a request with no workspace to name still gets the title it always had', async () => {
+  const { route, listenerOf, agents } = await scaffold()
+  await bind(route)
+  // A live agent whose session carries no working directory: real, and the case that
+  // must not turn into a bare separator or an invented name on the card.
+  const agent = { status: 'idle', session: { header: {} } }
+  agents.set('s_bare', agent)
+
+  const approval = listenerOf('approval/request')
+  const desktop = Promise.withResolvers()
+  void approval.handler(
+    { toolName: 'pwsh', agent, signal: new AbortController().signal },
+    () => desktop.promise,
+  )
+  await sleep(1200)
+
+  assert.equal(sentCard().header.title.content, 'DSH 工具审批', 'the title is exactly what it was before')
+  desktop.resolve('rejected')
+})
+
+test('a card carries its workspace rather than re-reading the session', async () => {
+  const { route, listenerOf, agents } = await scaffold()
+  await bind(route)
+  const agent = { status: 'idle', session: { header: { cwd: '/work/my-app' } } }
+  agents.set('s_ws', agent)
+
+  const approval = listenerOf('approval/request')
+  const desktop = Promise.withResolvers()
+  void approval.handler(
+    { toolName: 'pwsh', agent, signal: new AbortController().signal },
+    () => desktop.promise,
+  )
+  await sleep(1200)
+  assert.equal(sentCard().header.title.content, 'DSH 工具审批 · my-app', 'the card went out named')
+
+  // The session is reclaimed before the reader answers — the case the design exists for.
+  // A rewrite that looked the workspace up again would come back with nothing, and the
+  // card would turn anonymous at the moment it is answered.
+  agent.session.header = {}
+  agents.delete('s_ws')
+  const settled = await clickCard(callbackValues(sentCard()).find(value => value.v === 'allowed-once'))
+  assert.equal(settled.toast.content, '已批准（仅本次）')
+  await sleep(20)
+
+  const rewritten = JSON.parse(observed.patched.at(-1).data.content)
+  assert.equal(
+    rewritten.header.title.content,
+    'DSH 工具审批 · my-app',
+    'the settlement is named from what the card already knew, not from a session that is gone',
+  )
+})
+
+test('a card rewritten once the request is answered keeps the workspace', async () => {
+  const { route, listenerOf, agents } = await scaffold()
+  await bind(route)
+  const agent = { status: 'idle', session: { header: { cwd: '/work/my-app' } } }
+  agents.set('s_ws', agent)
+
+  const approval = listenerOf('approval/request')
+  const desktop = Promise.withResolvers()
+  void approval.handler(
+    { toolName: 'pwsh', agent, signal: new AbortController().signal },
+    () => desktop.promise,
+  )
+  await sleep(1200)
+
+  const settled = await clickCard(callbackValues(sentCard()).find(value => value.v === 'allowed-once'))
+  assert.equal(settled.toast.content, '已批准（仅本次）')
+  await sleep(20)
+
+  // The rewrite is the last thing the reader sees, so it has to agree with the card
+  // it replaces — a title that loses the workspace here would make the card that was
+  // just identified become anonymous again.
+  const rewritten = JSON.parse(observed.patched.at(-1).data.content)
+  assert.equal(rewritten.header.title.content, 'DSH 工具审批 · my-app', 'the settlement keeps the workspace')
+})
+
 
