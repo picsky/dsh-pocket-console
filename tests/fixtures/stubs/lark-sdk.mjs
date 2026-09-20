@@ -8,6 +8,15 @@
 export const observed = {
   created: [],
   patched: [],
+  /**
+   * Every message this stub accepted, in the order it accepted them.
+   *
+   * The handle the platform returned travels with the request that produced it. Without that
+   * pairing a case has to guess which entry of {@link observed.created} a handle names, and a
+   * guess that is off by one reads a different card — which looks exactly like a real failure.
+   * @type {{ handle: string, request: unknown }[]}
+   */
+  delivered: [],
   /** The dispatcher the channel registered its handlers on. */
   dispatcher: undefined,
   /** The options the dispatcher was built with, including its log routing. */
@@ -46,6 +55,7 @@ export const observed = {
 export function resetObserved() {
   observed.created.length = 0
   observed.patched.length = 0
+  observed.delivered.length = 0
   observed.dispatcher = undefined
   observed.dispatcherOptions = undefined
   observed.started = 0
@@ -94,6 +104,15 @@ export class Client {
     // there: an origin, rather than the enum that was passed in.
     this.domain = ORIGINS[config.domain] ?? config.domain
     this.tokenManager = { domain: this.domain }
+    /**
+     * Messages this deployment has sent.
+     *
+     * Counted per client rather than from the shared observation log, so a message id means the
+     * same thing on both sides: a case reads a card back by the id the deployment was given, and
+     * a global counter would have that id disagree with the log the next case starts from.
+     * @type {number}
+     */
+    this.sent = 0
     this.im = {
       message: {
         create: async (request) => {
@@ -106,7 +125,10 @@ export class Client {
             throw new Error(message)
           }
           observed.created.push(request)
-          return { data: { message_id: `om_stub_${observed.created.length}` } }
+          this.sent += 1
+          const handle = `om_${this.sent}`
+          observed.delivered.push({ handle, request })
+          return { data: { message_id: handle } }
         },
         patch: async (request) => {
           observed.patched.push(request)
