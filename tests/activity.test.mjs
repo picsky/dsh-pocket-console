@@ -36,6 +36,16 @@ const settle = () => sleep(400)
 const ACTIVITY_TITLE = 'DSH 执行中'
 
 /**
+ * What the platform refused, measured on the real tenant rather than read from its documentation.
+ *
+ * The documentation says 30 KB. A 131 KB body was **accepted** and a 164 KB one was refused with
+ * `230025`; `patch` accepted 98 KB. These cases assert against the measured refusal with room under
+ * it, because a limit copied from a document is what made every long history truncate: the budget was
+ * built to a third of a ceiling the platform does not have.
+ */
+const PLATFORM_BODY_CEILING = 150 * 1024
+
+/**
  * What one delivered card costs in the request body, which is the number the platform caps.
  *
  * Not a guess and not the text's own size: the card JSON is the request's `content` parameter, so
@@ -375,7 +385,7 @@ test('a long run folds a bounded record, keeping its end', async () => {
     `the fold is bounded, not the whole run: ${record.length} characters`,
   )
   for (const body of deliveredBodies()) {
-    assert.ok(bodySize(body) < 30 * 1024, `the card stays inside the cap: ${bodySize(body)} bytes`)
+    assert.ok(bodySize(body) < PLATFORM_BODY_CEILING, `the card stays inside the cap: ${bodySize(body)} bytes`)
   }
   assert.match(record, /结尾标记/, 'and it holds the end of the run')
 })
@@ -554,7 +564,7 @@ test('the card body stays inside the platform cap when the text is escape-dense'
     data: {
       turn: 2,
       step: 1,
-      message: { content: [{ type: 'text', text: '\\"'.repeat(15_000) }] },
+      message: { content: [{ type: 'text', text: '\\"'.repeat(60_000) }] },
     },
   })
   scaffolded.emitToAll('session/event', { id: 's_1' }, {
@@ -569,7 +579,7 @@ test('the card body stays inside the platform cap when the text is escape-dense'
     // The one number that matters: what the request body costs once the card JSON is the value of
     // a form parameter, which is exactly how the deployment sends it.
     assert.ok(
-      bodySize(content) < 30 * 1024,
+      bodySize(content) < PLATFORM_BODY_CEILING,
       `the body stays inside the platform cap: ${bodySize(content)} bytes`,
     )
   }
@@ -589,7 +599,7 @@ test('the card body stays inside the platform cap when the text is Chinese', asy
     data: {
       turn: 2,
       step: 1,
-      message: { content: [{ type: 'text', text: '中'.repeat(20_000) }] },
+      message: { content: [{ type: 'text', text: '中'.repeat(60_000) }] },
     },
   })
   scaffolded.emitToAll('session/event', { id: 's_1' }, {
@@ -602,7 +612,7 @@ test('the card body stays inside the platform cap when the text is Chinese', asy
   assert.ok(written.length > 0, 'the card was written')
   for (const content of written) {
     assert.ok(
-      bodySize(content) < 30 * 1024,
+      bodySize(content) < PLATFORM_BODY_CEILING,
       `the body stays inside the platform cap: ${bodySize(content)} bytes`,
     )
   }
@@ -621,7 +631,7 @@ test('a card the platform refuses for size is retried smaller', async () => {
   const sent = observed.created.at(-1)
   assert.ok(sent, 'and the retry arrived')
   assert.ok(
-    Buffer.byteLength(sent.data.content, 'utf8') < 30 * 1024,
+    Buffer.byteLength(sent.data.content, 'utf8') < PLATFORM_BODY_CEILING,
     'as a smaller card',
   )
   assert.equal(
@@ -644,7 +654,7 @@ test('an edit the platform refuses for size is retried smaller', async () => {
     data: {
       turn: 2,
       step: 1,
-      message: { content: [{ type: 'text', text: '中'.repeat(20_000) }] },
+      message: { content: [{ type: 'text', text: '中'.repeat(60_000) }] },
     },
   })
   await settle()
@@ -654,7 +664,7 @@ test('an edit the platform refuses for size is retried smaller', async () => {
   assert.ok(edits.length >= 1, `the retry reached the same message: ${edits.length} edits`)
   for (const edit of edits) {
     assert.ok(
-      Buffer.byteLength(edit.data.content, 'utf8') < 30 * 1024,
+      Buffer.byteLength(edit.data.content, 'utf8') < PLATFORM_BODY_CEILING,
       `every edit stays inside the platform cap: ${Buffer.byteLength(edit.data.content, 'utf8')}`,
     )
   }
@@ -683,7 +693,7 @@ test('a step that streams more than the record can hold keeps its end', async ()
   assert.match(record, /第9\d段/, 'the end of the stream is what it keeps')
   assert.equal(record.includes('第0段'), false, 'with the beginning dropped first')
   for (const body of deliveredBodies()) {
-    assert.ok(bodySize(body) < 30 * 1024, `the card stays inside the cap: ${bodySize(body)} bytes`)
+    assert.ok(bodySize(body) < PLATFORM_BODY_CEILING, `the card stays inside the cap: ${bodySize(body)} bytes`)
   }
 })
 

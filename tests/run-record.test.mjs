@@ -43,6 +43,18 @@ const toolFailed = (reason, { turn = 1, step = 1 } = {}) => ({
 })
 const turnEnded = (turn = 1) => ({ type: 'turn/end', data: { turn, reason: { kind: 'completed' } } })
 
+/**
+ * One run's entries as plain lines.
+ *
+ * The record keeps what each entry *is* alongside its text, because a card that cannot show a whole
+ * run has to give up its least useful part. These cases are about the lines themselves, so they read
+ * the text and leave the kind to the cases that are about kinds.
+ * @param runs - the record.
+ * @param session - the session id.
+ * @returns the run's lines.
+ */
+const lines = (runs, session) => runs.readRun(session).entries.map(entry => entry.text)
+
 test('a run starts at the last thing a person said', () => {
   const runs = record()
   const session = { id: 's_1' }
@@ -54,7 +66,7 @@ test('a run starts at the last thing a person said', () => {
   feed(humanSaid('第二件事', 2))
   feed(modelSaid('第二件事的答案', { turn: 2 }))
 
-  const { entries } = runs.readRun('s_1')
+  const entries = lines(runs, 's_1')
   // What came before the last human message is not what they are asking about, and dropping it is
   // also what bounds this store without an arbitrary cap.
   assert.deepEqual(entries, ['第二件事', '第二件事的答案'], 'only the run the person last started')
@@ -71,7 +83,7 @@ test('a run holds what a person said, what the model said, and what it ran', () 
   runs.observe(session, toolFailed('Command failed with exit code 1'))
   runs.observe(session, turnEnded())
 
-  const { entries } = runs.read('s_1')
+  const entries = lines(runs, 's_1')
   assert.deepEqual(entries, [
     '把测试修好',
     '我先看失败的用例。',
@@ -90,7 +102,7 @@ test('a tool with no known kind is named, not guessed at', () => {
   runs.observe(session, toolCalled('some_plugin_tool'))
   runs.observe(session, turnEnded())
 
-  assert.deepEqual(runs.readRun('s_1').entries, ['用那个插件', '▸ 调用工具：`some_plugin_tool`'])
+  assert.deepEqual(lines(runs, 's_1'), ['用那个插件', '▸ 调用工具：`some_plugin_tool`'])
 })
 
 test('consecutive calls of one kind collapse into a counted line', () => {
@@ -105,7 +117,7 @@ test('consecutive calls of one kind collapse into a counted line', () => {
 
   // Five reads and one read say the same thing to a reader deciding what to do next, and the
   // nineteenth line of `读取` only costs the budget the prose needs.
-  assert.deepEqual(runs.readRun('s_1').entries, [
+  assert.deepEqual(lines(runs, 's_1'), [
     '读几个文件',
     '▸ 读取 ×5',
     '▸ 改动文件',
@@ -124,7 +136,7 @@ test('a failure ends the run of a kind', () => {
 
   // The line before the failure carries it; counting a later call into that same line would hide
   // which invocation failed.
-  assert.deepEqual(runs.readRun('s_1').entries, [
+  assert.deepEqual(lines(runs, 's_1'), [
     '跑一下',
     '▸ 运行命令',
     '**工具失败**：`pwsh` — boom',
@@ -146,7 +158,7 @@ test('injected context does not anchor a run', () => {
   })
   runs.observe(session, turnEnded())
 
-  assert.deepEqual(runs.read('s_1').entries, ['问题', '回答'], 'the run is still the one the person started')
+  assert.deepEqual(lines(runs, 's_1'), ['问题', '回答'], 'the run is still the one the person started')
 })
 
 test('a run is recorded whether or not a card was ever sent for it', () => {
@@ -158,7 +170,7 @@ test('a run is recorded whether or not a card was ever sent for it', () => {
   runs.observe({ id: 'never-carded' }, turnEnded())
 
   assert.equal(runs.has('never-carded'), true, 'the session is recorded on its own account')
-  assert.deepEqual(runs.read('never-carded').entries, ['在桌面跑的一轮', '做完了。'])
+  assert.deepEqual(lines(runs, 'never-carded'), ['在桌面跑的一轮', '做完了。'])
 })
 
 test('the live stream is what fills a run whose message never came', () => {
@@ -172,7 +184,7 @@ test('the live stream is what fills a run whose message never came', () => {
 
   // The live frames are the only copy of that text until the step settles, and a run that streamed
   // everything and committed nothing would otherwise close empty.
-  assert.equal(runs.read('s_1').entries.includes('只有实时片段'), true, 'the streamed step reached the run')
+  assert.equal(lines(runs, 's_1').includes('只有实时片段'), true, 'the streamed step reached the run')
 })
 
 test('a step whose text both streamed and settled is recorded once', () => {
@@ -184,7 +196,7 @@ test('a step whose text both streamed and settled is recorded once', () => {
   runs.observe(session, modelSaid('同一句话'))
   runs.observe(session, turnEnded())
 
-  const { entries } = runs.read('s_1')
+  const entries = lines(runs, 's_1')
   const appearances = entries.filter(entry => entry.includes('同一句话')).length
   assert.equal(appearances, 1, `the text is recorded once, not twice: ${appearances}`)
 })
@@ -199,12 +211,13 @@ test('what the bound leaves out is counted, not silently lost', () => {
   }
   runs.observe(session, turnEnded())
 
-  const { entries, dropped } = runs.read('s_1')
+  const { dropped } = runs.read('s_1')
+  const kept = lines(runs, 's_1')
   // A card that had to leave something out has to be able to say so: a reader who is not told cannot
   // tell a short run from a truncated one.
   assert.ok(dropped > 0, `the excess is counted: ${dropped}`)
-  assert.equal(entries.includes('很长的开头'), false, 'and the oldest went first')
-  assert.match(entries[entries.length - 1], /第39段/, 'keeping the end, which is what a reader wants')
+  assert.equal(kept.includes('很长的开头'), false, 'and the oldest went first')
+  assert.match(kept[kept.length - 1], /第39段/, 'keeping the end, which is what a reader wants')
 })
 
 test('the record is bounded, and forgets the coldest session first', () => {

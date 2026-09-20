@@ -181,11 +181,16 @@ export function createRunRecord({ messages }) {
    * What is kept of an over-long entry depends on what the entry *is*: a message a person or the
    * model wrote is read from the top, so its head is kept; text folded back in from the live stream
    * is the run's own ending, so its tail is.
+   *
+   * Each entry carries what it *is*, because a card that cannot show the whole run has to be able to
+   * give up its least useful part: a tool line says how far along a run got, and the prose says what
+   * it concluded. Only the record knows which is which once the text is a line.
    * @param record - the session's record.
    * @param line - one message's text, or one line about a failure.
+   * @param kind - what the entry is: `human`, `model`, `tool`, or `failure`.
    * @param keep - which end of an over-long entry survives.
    */
-  const note = (record, line, keep = 'head') => {
+  const note = (record, line, kind, keep = 'head') => {
     const text = String(line ?? '').trim()
     if (text === '') return
     const copy = messages()
@@ -195,13 +200,13 @@ export function createRunRecord({ messages }) {
     // The entry was clipped on its own way in, and that is a loss a reader should hear about too:
     // it is part of this run's text that the card will not show.
     if (bounded !== text) record.dropped += rawBytes(text) - rawBytes(bounded)
-    record.process.push(bounded)
+    record.process.push({ text: bounded, kind })
     record.processSize += rawBytes(bounded)
     // Oldest first, because the end of a run is what a reader is looking for.
     while (record.processSize > RUN_BUDGET && record.process.length > 1) {
-      record.dropped += rawBytes(record.process[0])
+      record.dropped += rawBytes(record.process[0].text)
       record.runEntriesLost += 1
-      record.processSize -= rawBytes(record.process[0])
+      record.processSize -= rawBytes(record.process[0].text)
       record.process.shift()
     }
   }
@@ -223,14 +228,14 @@ export function createRunRecord({ messages }) {
       const counted = copy.toolKindRepeated(label, record.lastKindCount)
       // Replaced in place: the line it supersedes is removed from the running total, so a counted
       // line costs the budget once rather than growing with every call.
-      const previous = record.process[record.process.length - 1]
+      const previous = record.process[record.process.length - 1].text
       record.processSize += rawBytes(counted) - rawBytes(previous)
-      record.process[record.process.length - 1] = counted
+      record.process[record.process.length - 1] = { text: counted, kind: 'tool' }
       return
     }
     record.lastKind = kind
     record.lastKindCount = 1
-    note(record, label)
+    note(record, label, 'tool')
   }
 
   /** Move the run being followed into the finished list and start a fresh one. */
@@ -239,7 +244,7 @@ export function createRunRecord({ messages }) {
       record.turns.push(record.process)
       while (record.turns.length > TURN_HISTORY) {
         const gone = record.turns.shift()
-        for (const entry of gone) record.dropped += rawBytes(entry)
+        for (const entry of gone) record.dropped += rawBytes(entry.text)
       }
     }
     record.process = []
@@ -283,16 +288,21 @@ export function createRunRecord({ messages }) {
       const record = recordOf(session.id)
 
       if (type === 'turn/start') {
-        // A turn that ended before this one is a finished run; it stays in the list so a frozen card
-        // keeps the sequence it always had.
-        if (record.process.length > 0 || record.turns.length > 0) closeTurn(record)
-        // A new turn belongs to whatever the run is already about, so the anchor is left alone: the
-        // run started when somebody last spoke, not when the loop opened a turn.
+        // A **new** turn is a finished run, and it stays in the list so a frozen card keeps the
+        // sequence it always had. Compared by turn number rather than by "is anything in the run":
+        // a person's message arrives *before* the turn that claims it opens, so closing on content
+        // archived the very anchor the run is measured from, and the human's own words disappeared
+        // from the record of what they asked for.
+        const starting = event.data?.turn
+        if (typeof starting === 'number' && typeof record.turn === 'number' && starting !== record.turn) {
+          closeTurn(record)
+        }
+        if (typeof starting === 'number') record.turn = starting
         return
       }
 
       const turn = event.data?.turn
-      if (typeof turn === 'number') record.turn = turn
+      if (typeof turn === 'number' && record.turn === undefined) record.turn = turn
 
       if (type === 'step/start') {
         record.streamed = []
@@ -324,7 +334,7 @@ export function createRunRecord({ messages }) {
           note(record, messages().activityToolFailed(
             record.lastTool ?? '',
             clipToBytes(reason, messages().truncated, 300),
-          ))
+          ), 'failure')
           // A failure ends the run of a kind, so the next call starts its own line rather than being
           // counted into one that already carries a failure.
           record.lastKind = undefined
@@ -342,14 +352,14 @@ export function createRunRecord({ messages }) {
         // `dropped` is deliberately *not* reset: it counts what the whole fold has lost, and a fold
         // that reported only its newest run's losses would under-report what a reader is missing.
         if (record.process.length > 0) closeTurn(record)
-        note(record, textOf(event.data?.content))
+        note(record, textOf(event.data?.content), 'human')
         return
       }
       if (type === 'assistant/message') {
         // Only a message appended to the surface is new text; compaction rewrites earlier nodes.
         if (event.surfaceOp !== 'append') return
         const step = event.data?.step
-        note(record, textOf(event.data?.message?.content))
+        note(record, textOf(event.data?.message?.content), 'model')
         // Remembered so `turn/end` can tell that this step's text is already in the record. The live
         // frames carry the same words, and only one of the two routes may fold them.
         if (step !== undefined) record.committedStep = step
@@ -362,7 +372,7 @@ export function createRunRecord({ messages }) {
         const shown = record.streamed.join('')
         const alreadyFolded = record.streamedStep !== undefined
           && record.streamedStep === record.committedStep
-        if (shown !== '' && !alreadyFolded) note(record, shown, 'tail')
+        if (shown !== '' && !alreadyFolded) note(record, shown, 'model', 'tail')
       }
     },
 
@@ -411,6 +421,29 @@ export function createRunRecord({ messages }) {
         dropped: record.dropped,
         entriesLost: record.runEntriesLost,
       }
+    },
+
+    /**
+     * One run's entries as text, with adjacent entries of the same kind joined by one newline.
+     *
+     * This is what a card renders, and joining by kind is what keeps a long run from spending an
+     * element per tool line: the platform refuses a card over 200 elements, and a run with a hundred
+     * steps would reach that with the tools alone. Adjacent-only, because a tool line that moved the
+     * reader's cursor backward past prose would read as though the prose came after it.
+     * @param entries - the run's entries, as {@link readRun} returns them.
+     * @returns one string per contiguous group.
+     */
+    mergeByKind(entries) {
+      const groups = []
+      for (const entry of entries) {
+        const last = groups[groups.length - 1]
+        if (last !== undefined && last.kind === entry.kind) {
+          last.text += `\n${entry.text}`
+          continue
+        }
+        groups.push({ kind: entry.kind, text: entry.text })
+      }
+      return groups
     },
 
     /**

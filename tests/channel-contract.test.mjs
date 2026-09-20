@@ -153,8 +153,10 @@ test('a delivery the platform refuses for size is retried once, smaller', async 
     toolName: 'pwsh',
     agent: { status: 'idle', session: { header: { cwd: '/work/my-app' } } },
     // Past the card's own byte budget, so the first attempt is clipped and the
-    // retry, at half the budget, genuinely carries less.
-    reason: 'x'.repeat(12000),
+    // retry, at half the budget, genuinely carries less. Sized against the budget
+    // the deployment actually uses: a fixture that fits is retried identically,
+    // and the assertion below cannot tell the retry from the first attempt.
+    reason: 'x'.repeat(60_000),
     signal: new AbortController().signal,
   }, () => desktop.promise, 'approval')
 

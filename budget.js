@@ -1,28 +1,46 @@
 /**
- * How much text one card may carry.
+ * How much text one card may carry, and how many elements it may hold.
  *
- * Feishu caps a card message's request body at 30 KB, and the body is larger than the text it
- * carries. The text is escaped once into the card JSON — a quote or a backslash doubles, a control
- * character costs six bytes — and the card JSON is then escaped again to become the request's
- * `content` parameter, doubling whatever was already doubled. Measured here: 4,600 characters of
- * `\"` is a 4.6 KB string, a 9.2 KB card, and an 18.5 KB body. Text dense in those characters is
- * not exotic; it is tool output, JSON, and code, which is much of what a run says.
+ * The documentation says a card is capped at 30 KB. **It is not**, and building to that number is
+ * what made every long history truncated: measured against the real tenant with this deployment's own
+ * app, `im.message.create` accepted a **131 KB** body and `im.message.patch` accepted 98 KB, both far
+ * past the documented figure. What the platform does enforce is measured here as well, and there are
+ * two ceilings rather than one:
  *
- * The budget is counted once through {@link bodyBytes}, and what makes that sufficient is the
- * headroom left underneath it: the worst text this admits becomes about 9 KB of card JSON, which
- * is 18 KB of body even if every byte of it doubles again. Thirty is the cap. Counting twice over
- * instead would charge a Chinese character six bytes for a doubling that never happens to it —
- * `JSON.stringify` leaves non-ASCII alone — and would halve what every card can say to buy room
- * that is already there.
+ * | Limit | Accepted | Refused | Code |
+ * |---|---|---|---|
+ * | Elements in a card | 180 | 200 | `230099`, `element exceeds the limit` |
+ * | Plain text, Chinese | 51,000 chars | 51,300 | `230025` |
+ * | Plain text, Latin | 120,000 chars | 200,000 | `230025` |
+ * | Plain text, emoji | 20,000 | 40,000 | `230025` |
+ * | Request body as sent | 131 KB | 164 KB | `230025` |
  *
- * The cost is length in the ordinary case: about 1,500 Chinese characters, or 4,600 of Latin text.
- * A truncated card still says that it truncated, and still carries its buttons.
+ * The text limits are counted by the platform on the content it decodes, not on the escaped body —
+ * which is why Latin reaches five times what Chinese does. No single figure fits all four, so the
+ * budget is set **below the lowest measured refusal** with room to spare, and {@link bodyBytes}
+ * counts UTF-8 bytes, which is above the Latin cost and below the Chinese one.
+ *
+ * `CARD_TEXT_BUDGET` is therefore 32 KB: about 4.8× the smallest measured refusal when read as
+ * Chinese text, and 3.7× the largest measured refusal when read as bytes. `CARD_ELEMENT_BUDGET` is
+ * 120 against a measured 180, because a card that renders everything and is refused says nothing at
+ * all — and the refusal is silent to a reader, who only sees no card.
+ *
+ * Both are budgets for **one card**, structure included: the title, the rule, the fold, the reply
+ * form and the buttons come out of the same element count.
  *
  * @module pocket-console/budget
  */
 
 /** Bytes of card text one message may carry, counted the way {@link bodyBytes} counts. */
-export const CARD_TEXT_BUDGET = 4_608
+export const CARD_TEXT_BUDGET = 32 * 1024
+
+/**
+ * How many elements one card may hold, across its whole body.
+ *
+ * Set below the platform's own ceiling so that a card which needs its full text still has somewhere
+ * to put its structure: title, rule, fold, form and buttons share this count with the text.
+ */
+export const CARD_ELEMENT_BUDGET = 120
 
 /**
  * What one string costs in the request body that ultimately carries it.
