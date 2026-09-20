@@ -50,10 +50,11 @@ const COPY = {
 
 /**
  * A deployment with one asking session, driven directly.
- * @param options - how the workspace registry and the controller behave.
+ * @param options - how the workspace registry and the controller behave; `askedCwd` replaces the
+ *   asking session's directory, which is how a case makes its workspace unresolvable.
  * @returns the work module, what the controller was asked for, and what it was told afterwards.
  */
-function build({ resolve, create } = {}) {
+function build({ resolve, create, askedCwd = CWD } = {}) {
   /** Every request handed to `sessionController.create`, in order. */
   const requests = []
   /** Every message handed to a created session, in order. */
@@ -62,7 +63,7 @@ function build({ resolve, create } = {}) {
   const warnings = []
   let created = 0
 
-  const asked = { status: 'idle', session: { header: { cwd: CWD } } }
+  const asked = { status: 'idle', session: { header: { cwd: askedCwd } } }
   const agents = {
     get: (id) => {
       if (id === 'asked') return asked
@@ -95,7 +96,7 @@ function build({ resolve, create } = {}) {
     ? undefined
     : {
       async resolveByPath(path) {
-        assert.equal(path, CWD, 'resolution is asked about the directory the session inherited')
+        assert.equal(path, askedCwd, 'resolution is asked about the directory the session inherited')
         return await resolve()
       },
     }
@@ -125,8 +126,24 @@ function build({ resolve, create } = {}) {
     messageId: 'om_1',
   })
 
-  return { press, requests, followed, warnings }
+  return { press, requests, followed, warnings, work }
 }
+
+test('merging the offer never rewrites the card\'s title', async () => {
+  // The card's title names the workspace once, when the card is built, and a rewrite inherits it.
+  // This module used to recompute it from the session, which *re-read* the session for a label the
+  // card already carried — and a session reclaimed in between names nothing, so the label would
+  // vanish from the card at exactly the wrong moment. `identity.js` says never to re-read for a
+  // rewrite; this is where that rule was broken.
+  const { work } = build({ askedCwd: 'C:\\nowhere\\gone' })
+
+  const merged = work.mergeInto({ title: 'DSH 结果 · my-app', body: ['answer'], forms: [] }, 'asked')
+  assert.equal(merged.title, 'DSH 结果 · my-app', 'the title the caller built is the title that stays')
+
+  // And the aftermath pass, which is handed the card as it was sent, does the same.
+  const closed = work.mergeInto(merged, 'asked', '已开新会话')
+  assert.equal(closed.title, 'DSH 结果 · my-app', 'and closing the offer does not touch it either')
+})
 
 test('a phone-started session is created through its workspace, not a bare directory', async () => {
   const { press, requests, followed } = build({
