@@ -27,6 +27,62 @@ const SAME_ORIGIN = { origin: `http://${HOST}` }
 const bound = { recipient: 'ou_bound' }
 
 /**
+ * The message handle this deployment was last given, which is what a press carries.
+ * @returns the handle, or a placeholder when nothing has been sent yet.
+ */
+function lastDelivered() {
+  return observed.delivered.at(-1)?.handle ?? 'om_0'
+}
+
+/**
+ * The card that lives in one message, as it stands now.
+ *
+ * The newest edit of that message if it has been edited, and the message it was sent as
+ * otherwise — located by the handle the platform returned, which is the only thing that ties an
+ * edit to its card.
+ * @param handle - the message handle a delivery was given.
+ * @returns the rendered card JSON, or undefined when no such message was accepted.
+ */
+function cardFrom(handle) {
+  const delivered = observed.delivered.find(entry => entry.handle === handle)
+  if (delivered === undefined) return undefined
+  const edited = observed.patched.findLast(entry => entry.path?.message_id === handle)
+  try {
+    return JSON.parse((edited ?? delivered.request).data.content)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Every card this deployment has sent, in order, as `{ handle, card }`.
+ * @returns one entry per accepted delivery.
+ */
+function cardsSent() {
+  return observed.delivered.map(entry => ({ handle: entry.handle, card: cardFrom(entry.handle) }))
+}
+
+/**
+ * The first card whose title starts with one prefix, with the handle it lives in.
+ *
+ * Titles are how a case names the card it means without depending on delivery order: several
+ * machines in this plugin send cards, and which one goes first is a property of the deployment
+ * rather than of the behaviour under test.
+ * @param prefix - the start of the card title.
+ * @returns the handle and card, or undefined when no card has that title.
+ */
+function cardTitled(prefix) {
+  for (const entry of observed.delivered) {
+    const card = cardFrom(entry.handle)
+    if (typeof card?.header?.title?.content === 'string'
+      && card.header.title.content.startsWith(prefix)) {
+      return { handle: entry.handle, card }
+    }
+  }
+  return undefined
+}
+
+/**
  * Click one button the way the long connection delivers it: through the
  * dispatcher, inside the v2 envelope whose `event` the SDK flattens before the
  * handler sees it.
@@ -35,14 +91,17 @@ const bound = { recipient: 'ou_bound' }
  * @param options - the pressing identity, defaulting to whoever is bound.
  * @returns the channel's response, whose toast reports the outcome.
  */
-async function clickCard(value, formValue, { operator = bound.recipient } = {}) {
+async function clickCard(value, formValue, { operator = bound.recipient, messageId } = {}) {
   return await observed.dispatcher.invoke({
     schema: '2.0',
     header: { event_type: 'card.action.trigger' },
     event: {
       action: { value, ...(formValue === undefined ? {} : { form_value: formValue }) },
       operator: { open_id: operator },
-      context: { open_message_id: 'om_stub_1' },
+      // The press carries the message it came from, which is what a rewrite of "the card the
+      // press came from" is addressed by. Defaulting to the last message this deployment was
+      // given keeps that name true for the cards a case has actually caused.
+      context: { open_message_id: messageId ?? lastDelivered() },
     },
   })
 }
@@ -116,6 +175,34 @@ function makeResponse() {
 const corpus = new Map()
 
 /**
+ * The disposers of the deployment currently loaded, so the next case can shut it down.
+ *
+ * One deployment exists at a time in a test process, and leaving one loaded is what puts a
+ * stale card edit into the next case's log.
+ */
+let openDeployment = []
+
+/**
+ * Shut down the deployment a previous case left loaded.
+ *
+ * Called before a new one is built rather than after the old case ends, because a case cannot be
+ * relied on to clean up: it may have failed its last assertion, and a leaked timer would then
+ * corrupt whatever ran next. What matters is that its timers are cleared and its listeners
+ * removed — not that it exits well, so a disposer that throws is swallowed here.
+ */
+function disposePrevious() {
+  const closing = openDeployment
+  openDeployment = []
+  for (const dispose of closing) {
+    try {
+      dispose()
+    } catch {
+      // The deployment's own business; the next case is what this protects.
+    }
+  }
+}
+
+/**
  * Build a fake Host context with in-memory credentials, records, a captured
  * route table, and a captured settings section; apply the plugin.
  * @param configOverrides - plugin config overrides.
@@ -133,6 +220,14 @@ const corpus = new Map()
   keepDurable = false,
   holdStorage = false,
 } = {}) {
+  // The previous deployment is shut down before anything of this one exists.
+  //
+  // A deployment that is still loaded keeps working: a throttled card edit sits on a timer, a
+  // channel holds a long connection, a notice waits out its quiet window. Those timers fire
+  // after the case that created them has finished, and a call they make lands in *this* case's
+  // observation log — a stale write attributed to the wrong case, which reads exactly like a
+  // real failure. Disposing first makes the log a record of one deployment's behaviour.
+  disposePrevious()
   resetObserved()
   // The durable medium — the storage hub and the session logs — is what a restart does
   // not take with it, so a case modelling one keeps it and every other case starts clean.
@@ -149,6 +244,10 @@ const corpus = new Map()
   })
   const listeners = new Map()
   const disposers = []
+  // Published as the deployment's own, so the next case shuts this one down before it starts:
+  // a machine still loaded edits its card on a timer, and that edit would land in the next
+  // case's log.
+  openDeployment = disposers
   const warnings = []
   const infos = []
   const debugs = []
@@ -394,6 +493,32 @@ const corpus = new Map()
     assert.ok(list?.length, `expected a listener for ${event}`)
     return list[0]
   }
+  /**
+   * Feed one event to every listener registered for it.
+   *
+   * An event may have more than one listener — several machines in this plugin follow the
+   * session feed — and a case about the second one has to reach it. Cordis dispatches to all
+   * of them, so a case that only called the first would be testing something the deployment
+   * does not do.
+   *
+   * A frame event is delivered as Cordis delivers it: an agent-scoped listener is called with
+   * **one** argument, the payload `{ agent, frame }`. Handing it the frame beside the payload
+   * would let a case pass against a call convention the deployment never produces — which is
+   * how the live-stream listener once shipped reading a second argument that never arrived.
+   * @param event - the event name.
+   * @param args - the arguments every listener receives.
+   */
+  const emitToAll = (event, ...args) => {
+    for (const entry of [...(listeners.get(event) ?? [])]) entry.handler(...args)
+  }
+  /**
+   * Feed one live stream frame to every listener, the way Cordis does.
+   * @param agentId - the session the attempt belongs to.
+   * @param frame - the start, chunk or end publication.
+   */
+  const emitFrame = (agentId, frame) => {
+    emitToAll('agent/assistant-stream', { agent: { id: agentId }, frame })
+  }
   /** Compose one more optional service, the way a later bundle layer would. */
   const compose = (name) => {
     composed.add(name)
@@ -402,7 +527,8 @@ const corpus = new Map()
   return {
     bound, setRejection: (status) => { rejection = status },
     config, ctx, listeners, disposers, warnings, infos, debugs, values, records,
-    routes, sections, route, json, state, listenerOf, compose, agents,
+    routes, sections, route, json, state, listenerOf, compose, agents, emitToAll, emitFrame,
+    lastDelivered, cardFrom, cardsSent, cardTitled,
     sessionQuery, storageDomain,
     /** Let a held medium answer, so the pending open and restore can finish. */
     releaseStorage: () => { storageGate?.resolve() },
@@ -503,5 +629,9 @@ export {
   sentCard,
   observed,
   resetObserved,
+  lastDelivered,
+  cardFrom,
+  cardsSent,
+  cardTitled,
   Plugin,
 }
