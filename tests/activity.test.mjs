@@ -200,7 +200,7 @@ test('the card names the session it belongs to', async () => {
     'DSH 执行中 · my-app',
     `and its title names the workspace: agent=${JSON.stringify(scaffolded.agents.get('s_ws'))} `
     + `created=${JSON.stringify(observed.created.map((c) => JSON.parse(c.data.content).header.title.content))} `
-    + `patched=${JSON.stringify(observed.patched.map((p) => JSON.parse(p.data.content).header.title.content))}`,
+    + `patchedFull=${JSON.stringify(observed.patched.map((p) => p.data.content))}`,
   )
 })
 

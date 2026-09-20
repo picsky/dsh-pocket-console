@@ -136,6 +136,7 @@ export function createActivity({
    */
   const buildView = (record) => {
     const copy = messages()
+    console.warn(`DEBUG buildView session=${String(record.session)} ws=${String(record.workspace)} handle=${String(record.handle)} settled=${record.settled}`)
     const parts = [statusOf(record, copy)]
     // The step is named only once it is known: a turn that has started but whose first step
     // has not been announced yet has no step number, and printing one would print `undefined`.
