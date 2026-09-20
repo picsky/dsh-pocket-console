@@ -8,6 +8,25 @@ out when it does.
 
 ## Unreleased
 
+### Changed
+
+- **A card may carry twenty times what it was carrying, because the limit it was built to does not
+  exist.** Every long history was truncated, and the reason was a number copied from the platform's
+  documentation: 30 KB. Measured against the real tenant with this deployment's own app, a card body
+  of **131 KB is accepted** and 164 KB is refused — and what the platform does enforce is two other
+  ceilings, found the same way: **200 elements** per card (180 accepted) and roughly **51,000 Chinese
+  characters** of text (120,000 of Latin, 20,000 emoji). The text budget moves from 4.6 KB to 32 KB
+  and a new element budget joins it at 120, so a run a reader could actually want to read now arrives
+  whole instead of trimmed to a fifth (\udget.js\, \esults.js\).
+
+- **When a run does not fit, whole kinds of content are given up before any text is.** The old rule
+  kept both ends and cut the middle out, which loses the one thing a reader came for whenever the
+  plan is long and the answer is long. Now the fold degrades in the order a reader would choose:
+  merge the tool lines into one block (same information, one element instead of many), then drop the
+  tool lines, then the person's own message, and only then the oldest prose — because the newest
+  output is what a reader is deciding on. Whatever goes is named with a byte count
+  (\esults.js\).
+
 ### Added
 
 - **The result card now carries what the run did, not only the last thing said.** A turn that ends

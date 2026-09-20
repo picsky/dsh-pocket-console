@@ -16,7 +16,7 @@
  * @module pocket-console/results
  */
 
-import { CARD_TEXT_BUDGET, clipTailToBytes, clipToBytes, looksLikeSizeRefusal } from './budget.js'
+import { CARD_ELEMENT_BUDGET, CARD_TEXT_BUDGET, clipTailToBytes, clipToBytes, looksLikeSizeRefusal } from './budget.js'
 import { titleOf, workspaceLabel } from './identity.js'
 import { PHONE as PRIORITY_PHONE, DESK as PRIORITY_DESK } from './priority.js'
 import { RESTORE_LIMIT, createNoticeStore } from './notice-store.js'
@@ -45,95 +45,104 @@ const TRACK_CAPACITY = 256
 const rawBytes = (value) => Buffer.byteLength(String(value ?? ''), 'utf8')
 
 /**
- * What this run did, as one block of text, keeping both ends and naming what it left out.
+ * What this run did, as the groups a card renders, giving up the least useful thing first.
  *
- * Why both ends rather than a prefix: the two things a person decides on are **what the run set out
- * to do** and **where it stopped**, and in a long run those are the first and last parts of it. A
- * prefix keeps the plan and loses the ending; a suffix keeps the ending and loses the plan. Neither
- * alone answers "what happened", so the middle is what gives way — and it is named, because a reader
- * who is not told cannot tell a short run from a truncated one.
+ * A history that is always truncated is not a history. So the text is not trimmed to fit: **whole
+ * kinds of content are given up, in order of what a reader can most afford to lose**, and only when
+ * none of that is left does the oldest prose go. Each step is a decision a reader would make
+ * themselves, and the order follows the judgement every card here uses — would this change what you
+ * write next?
  *
- * `dropped` is the record's own count of what its bound discarded; the space this has to split is
- * whatever the marker and the card's budget leave, so a run that already lost its middle upstream
- * does not lose a second middle here silently.
- * @param entries - the run's entries, in order.
+ * 1. **All of it.** Prose, the person's own message, and one line per tool step.
+ * 2. **Tools merged into one group.** Adjacent tool lines join into one block, costing one element
+ *    instead of one each. Nothing is lost but line breaks — and the platform refuses a card over 200
+ *    elements, which a hundred-step run reaches with its tool lines alone.
+ * 3. **Tools dropped.** How far along a run got matters less than what it said.
+ * 4. **The person's message dropped.** It is the context the run answers, which the reader usually
+ *    remembers, and it is one long message that buys a lot of prose.
+ * 5. **The oldest prose dropped.** Only now is text actually lost, and what goes is the oldest,
+ *    because the newest output is the part a reader is deciding on.
+ *
+ * Whatever is given up is named with a byte count: a reader who is not told cannot tell a short run
+ * from a truncated one.
+ * @param entries - the run's entries, each carrying its kind.
  * @param dropped - bytes the record itself left out, if any.
  * @param copy - the copy table in force.
  * @param budget - the byte budget for this block.
- * @returns the text, or an empty string when there is nothing to show.
+ * @param maxGroups - how many elements this block may cost.
+ * @returns the groups to render, or an empty array when there is nothing to show.
  */
-function runBlock(entries, dropped, copy, budget) {
-  const shown = entries.filter(entry => entry !== '')
-  if (shown.length === 0 && dropped === 0) return ''
-  const whole = shown.join('\n\n')
-  // The record's own loss is part of what the reader is missing, so it is charged before anything
-  // else: a card that says nothing about it would present a partial run as a complete one.
-  const carried = dropped > 0 ? copy.resultOmitted(dropped) : ''
-  if (rawBytes(whole) + rawBytes(carried) <= budget) {
-    return [whole, carried].filter(part => part !== '').join('\n\n')
+function runGroups(entries, dropped, copy, budget, maxGroups) {
+  const all = entries.filter(entry => entry.text !== '')
+  if (all.length === 0 && dropped === 0) return []
+
+  /** Bytes of the run a level leaves out, by comparing what it kept against everything. */
+  const lostBytes = (kept) => {
+    const keptText = new Set(kept.map(entry => entry.text))
+    return all
+      .filter(entry => !keptText.has(entry.text))
+      .reduce((total, entry) => total + rawBytes(entry.text) + 2, 0)
   }
 
-  const marker = copy.resultOmitted(0)
-  const room = budget - rawBytes(carried) - rawBytes(marker)
-  if (room <= 0) return carried
-  // Halved: one end of the room for the head, one for the tail, so a long run shows both.
-  const perEnd = Math.floor(room / 2)
+  /** Adjacent tool lines, joined; every other kind left as it is. */
+  const mergeTools = (kept) => {
+    const out = []
+    for (const entry of kept) {
+      const last = out[out.length - 1]
+      if (last !== undefined && last.kind === 'tool' && entry.kind === 'tool') {
+        last.text += `\n${entry.text}`
+        continue
+      }
+      out.push({ kind: entry.kind, text: entry.text })
+    }
+    return out
+  }
 
   /**
-   * One end of the run, taking entries until its half is used.
-   *
-   * The **first** entry is taken whatever it costs. A plan is a single message and it is routinely
-   * longer than half of what the marker leaves, so a rule that took only what fit would drop the head
-   * every time a run had a plan in it — the one thing this exists to show. It is clipped to the room
-   * that remains instead, so the bound still holds.
-   * @param entries - the run's entries, this end first.
-   * @param limit - the bytes this end may use.
-   * @param keep - which end of an entry too long for this end survives.
-   * @returns the rendered lines, and the bytes of the run's *original* text they account for.
+   * The run at one level of detail, or nothing when either budget refuses it.
+   * @param kept - the entries this level keeps.
+   * @param merge - whether adjacent tool lines are joined into one group.
+   * @returns the groups, or undefined when it does not fit.
    */
-  const takeEnd = (entries, limit, keep) => {
-    const lines = []
-    let used = 0
-    let accounted = 0
-    for (const entry of entries) {
-      const size = rawBytes(entry) + 2
-      if (lines.length === 0 && size > limit) {
-        const roomLeft = Math.max(1, limit)
-        // Which end is kept is the honest one for where this text sits: the start of a run should
-        // keep its opening, the end of one should keep its conclusion.
-        const clipped = keep === 'tail'
-          ? clipToBytes(entry, copy.truncated, roomLeft)
-          : clipTailToBytes(entry, copy.truncated, roomLeft)
-        lines.push(clipped)
-        // Accounted for as the original, because the reader is not missing this entry — only part of
-        // it. What they *are* missing is what the marker is for, and it is counted below as the
-        // difference, which is the only count that stays true when an entry is clipped rather than
-        // dropped whole.
-        accounted += size
-        used += rawBytes(clipped) + 2
-        break
-      }
-      if (used + size > limit) break
-      lines.push(entry)
-      used += size
-      accounted += size
-    }
-    return { lines, accounted }
+  const shape = (kept, merge) => {
+    const grouped = merge ? mergeTools(kept) : kept
+    const omitted = dropped + lostBytes(kept)
+    const text = grouped.map(group => group.text).join('\n\n')
+    const body = omitted > 0 ? `${text}\n\n${copy.resultOmitted(omitted)}` : text
+    if (rawBytes(body) > budget) return undefined
+    if (grouped.length + (omitted > 0 ? 1 : 0) > maxGroups) return undefined
+    return grouped.map(group => group.text).concat(omitted > 0 ? [copy.resultOmitted(omitted)] : [])
   }
 
-  const head = takeEnd(shown, perEnd, 'tail')
-  // The tail draws only from what the head did not take, so an entry is never shown twice.
-  const remaining = shown.slice(head.lines.length)
-  const tail = takeEnd([...remaining].reverse(), perEnd, 'head')
-  // What the two ends account for, against the whole run: the difference is what the reader cannot
-  // see, and it includes a clipped entry's tail as well as every entry no end had room for.
-  const total = shown.reduce((sum, entry) => sum + rawBytes(entry) + 2, 0)
-  const lost = Math.max(0, total - head.accounted - tail.accounted) + dropped
-  return [
-    head.lines.join('\n\n'),
-    copy.resultOmitted(lost),
-    [...tail.lines].reverse().join('\n\n'),
-  ].filter(part => part !== '').join('\n\n')
+  const prose = all.filter(entry => entry.kind !== 'tool' && entry.kind !== 'failure')
+  const proseOnly = prose.filter(entry => entry.kind !== 'human')
+  // Each attempt keeps strictly less than the one before, so the first that fits is the most a
+  // reader can be shown.
+  for (const attempt of [
+    () => shape(all, false),
+    () => shape(all, true),
+    () => shape(prose, true),
+    () => shape(proseOnly, true),
+  ]) {
+    const shaped = attempt()
+    if (shaped !== undefined) return shaped
+  }
+
+  // The last resort, and the only one that loses text: the newest prose, oldest first out.
+  for (let from = 1; from <= proseOnly.length; from += 1) {
+    const kept = proseOnly.slice(from - 1)
+    const omitted = dropped + lostBytes(kept)
+    const marker = copy.resultOmitted(omitted)
+    const text = kept.map(entry => entry.text).join('\n\n')
+    if (rawBytes(`${text}\n\n${marker}`) <= budget && kept.length + 1 <= maxGroups) return [text, marker]
+    // Even one message can be too long on its own, and then its end is what a reader wants: it is
+    // the message the run is on.
+    if (kept.length === 1) {
+      const clipped = clipTailToBytes(kept[0].text, copy.truncated, Math.max(1, budget - rawBytes(marker)))
+      return [clipped, marker]
+    }
+  }
+  return []
 }
 
 /**
@@ -315,25 +324,28 @@ export function createResultNotifier({
     // which the channel renders as a panel the reader opens in place. Nothing is sent for it: the
     // message count per run does not change, which is the promise that makes this card acceptable.
     const run = runRecord?.readRun?.(session) ?? { entries: [], dropped: 0 }
-    const details = (() => {
-      const blocks = runBlock(run.entries, run.dropped, messages(), Math.floor(CARD_TEXT_BUDGET / 2))
-      return blocks === '' ? undefined : { title: messages().resultProcess, blocks: [blocks] }
-    })()
-    if (details !== undefined) view.details = details
+    const groups = runGroups(
+      run.entries,
+      run.dropped,
+      messages(),
+      CARD_TEXT_BUDGET,
+      CARD_ELEMENT_BUDGET,
+    )
+    if (groups.length > 0) view.details = { title: messages().resultProcess, blocks: groups }
     // Said out loud, because the two ways this ends up absent look identical on the phone: a card
     // with no fold is what a run the record never saw produces too. The count is what tells them
     // apart, and a reader who reports "there is no panel" is otherwise unanswerable. The shape of
     // the view goes with it, so a report can be checked against what was actually sent rather than
-    // against what the reporter could see on a phone.
-    log.debug(messages().logRunFold(session, run.entries.length, details !== undefined))
+    // against what the reporter could see on a phone — including how much the layering gave up.
+    log.debug(messages().logRunFold(session, run.entries.length, groups.length > 0))
     log.debug(messages().logResultView(JSON.stringify({
-      elements: view.body.length,
-      details: view.details === undefined ? null : {
-        title: view.details.title,
-        blocks: view.details.blocks.length,
-        first: String(view.details.blocks[0] ?? '').slice(0, 160),
-      },
-      body: view.body.map(part => String(part).slice(0, 60)),
+      body: view.body.length,
+      entries: run.entries.length,
+      // How many elements the fold costs, and how many groups it kept: the element count is a
+      // platform limit of its own, and a fold that fits by size can still be refused by it.
+      blocks: groups.length,
+      dropped: run.dropped,
+      first: String(groups[0] ?? '').slice(0, 160),
     })))
     try {
       const handle = await channel.deliver(view).catch(async (error) => {

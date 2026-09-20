@@ -228,15 +228,15 @@ test('a long result is clipped so the notice still arrives', async () => {
   agents.set('s_big', { status: 'idle', followup: () => {} })
   const emit = listenerOf('session/event').handler
 
-  runTurn(emit, 's_big', '结'.repeat(20000))
+  runTurn(emit, 's_big', '结'.repeat(60_000))
   await sleep(1100)
 
   // A result too large for a card would be refused, and the reader would get no
   // notice at all — worse than a clipped one that says it clipped.
   const content = observed.created[0].data.content
   assert.ok(
-    Buffer.byteLength(content, 'utf8') < 12 * 1024,
-    `the notice stays well inside the platform limit: ${Buffer.byteLength(content, 'utf8')} bytes`,
+    Buffer.byteLength(content, 'utf8') < 150 * 1024,
+    `the notice stays inside the platform limit: ${Buffer.byteLength(content, 'utf8')} bytes`,
   )
   assert.match(content, /内容过长已截断/)
   assert.ok(

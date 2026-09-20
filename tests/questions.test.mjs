@@ -395,7 +395,7 @@ test('a card the platform refuses for size is retried smaller', async () => {
     questions: [{
       id: 'plan',
       question: '这份计划可以吗？',
-      detail: '细'.repeat(3000),
+      detail: '细'.repeat(20_000),
       options: [{ label: '批准' }],
     }],
     signal: new AbortController().signal,
@@ -425,19 +425,21 @@ test('a long detail is clipped to the card budget instead of being refused', asy
     questions: [{
       id: 'big',
       question: '很长的一份计划，需要你决定？',
-      detail: '细'.repeat(20000),
+      detail: '细'.repeat(60_000),
       options: [{ label: '批准' }],
     }],
     signal: new AbortController().signal,
   }, () => desktop.promise)
   await sleep(120)
 
-  // Feishu refuses a card body over 30 KB, so an unbounded plan would arrive as
-  // no card at all. The clip keeps the message deliverable and says it clipped.
+  // An unbounded plan would be refused by the platform and arrive as no card at all, so the clip
+  // keeps the message deliverable and says it clipped. Measured against what the platform actually
+  // refuses (150 KB with room under the 164 KB that was rejected) and not against the 30 KB its
+  // documentation claims: a budget built to the documented figure clipped a third of what fits.
   const content = observed.created[0].data.content
   assert.ok(
-    Buffer.byteLength(content, 'utf8') < 12 * 1024,
-    `the card stays well inside the platform limit: ${Buffer.byteLength(content, 'utf8')} bytes`,
+    Buffer.byteLength(content, 'utf8') < 150 * 1024,
+    `the card stays inside the platform limit: ${Buffer.byteLength(content, 'utf8')} bytes`,
   )
   assert.match(content, /内容过长已截断/, 'and it says so')
   assert.ok(callbackValues(JSON.parse(content)).length > 0, 'while the decision stays available')

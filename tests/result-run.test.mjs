@@ -111,16 +111,34 @@ test('the result card carries the plan the run opened with', async () => {
   assert.match(folded, /第1步/, 'including where the run set out from')
 })
 
-test('a run too long to show keeps both ends and says what it left out', async () => {
+test('a long run is shown whole, not trimmed to fit', async () => {
   const { result } = await afterARun()
   const folded = foldedRun(result.card)
 
-  // Both ends, because those are the two things a decision needs: what it set out to do, and where
-  // it stopped. A prefix would keep the plan and lose the ending; a suffix the reverse.
-  assert.match(folded, /## 方案/, 'the beginning survives')
-  assert.match(folded, /测试也过了/, 'and so does the end')
-  // Named rather than implied: a reader who is not told cannot tell a short run from a truncated one.
-  assert.match(folded, /省略/, 'and the omission is stated')
+  // The point of the budget being measured rather than copied: a run of this length **fits**, and a
+  // reader deciding what to do next gets all of it. Trimming here was the old behaviour, and it is
+  // what made "we keep history so you can read it" self-defeating.
+  assert.match(folded, /## 方案/, 'the plan is there')
+  assert.match(folded, /第1步/, 'from where the run set out')
+  assert.match(folded, /第60步/, 'through every step it planned')
+  assert.match(folded, /测试也过了/, 'to where it stopped')
+  // Nothing was given up, so nothing may claim to have been.
+  assert.equal(/省略/.test(folded), false, 'and nothing is claimed to be missing')
+})
+
+test('a run past the budget gives up whole kinds of content before it drops text', async () => {
+  // Past 32 KB of text, so no level can show all of it: the layering has to start giving things up.
+  const huge = ['## 方案', ...Array.from({ length: 400 }, (_, i) => `${i + 1}. 第${i + 1}步：把模块改好并补上测试。`)].join('\n')
+  const { result } = await afterARun(huge)
+  const folded = foldedRun(result.card)
+
+  // The newest prose is what a reader is deciding on, so it survives; what goes is older material.
+  assert.match(folded, /测试也过了/, 'the end of the run survives')
+  assert.match(folded, /省略/, 'and what was given up is named rather than implied')
+  // The fold is one element per group plus the marker, nowhere near the platform's 200-element
+  // ceiling: a hundred-step run would reach it with one element per tool line.
+  const panel = result.card.body.elements.find(element => element.tag === 'collapsible_panel')
+  assert.ok(panel.elements.length <= 121, `the fold stays inside the element budget: ${panel.elements.length}`)
 })
 
 test('a short run is shown whole, with nothing claimed to be missing', async () => {
