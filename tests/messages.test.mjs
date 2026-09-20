@@ -14,7 +14,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { LOCALES, messagesFor } from '../messages.js'
 import { isAnswer } from '../results.js'
-import { clipToBytes, bodyBytes } from '../budget.js'
+import { clipToBytes, clipTailToBytes, bodyBytes } from '../budget.js'
 
 const source = readFileSync(new URL('../messages.js', import.meta.url), 'utf8')
 
@@ -100,4 +100,23 @@ test('clipping never exceeds the budget it was given', () => {
 
   // A budget of zero yields nothing rather than the marker.
   assert.equal(clipToBytes(long, marker, 0), '')
+})
+
+test('clipping from the front keeps the end and still honours the budget', () => {
+  const marker = '（更早的内容已省略）…'
+  const long = '汉'.repeat(200)
+
+  const clipped = clipTailToBytes(long, marker, 60)
+  assert.ok(bodyBytes(clipped) <= 60, `the end is kept inside the budget (${bodyBytes(clipped)} bytes)`)
+  assert.ok(clipped.startsWith(marker), 'and the marker says what was dropped, at the front')
+  assert.equal(clipped.endsWith('汉'), true, 'with the text\'s own end still there')
+
+  // The same two edges the other direction has. A marker that cannot fit must not be returned
+  // whole, and the caller must not be sent something larger than the bound they asked for — the
+  // case where a single character is wider than the budget is what a recursive retry would spin on.
+  assert.ok(bodyBytes(clipTailToBytes(long, marker, 4)) <= 4, 'a budget under the marker is honoured')
+  assert.equal(clipTailToBytes(long, marker, 0), '')
+
+  // Text that already fits is returned untouched.
+  assert.equal(clipTailToBytes('short', marker, 60), 'short')
 })
