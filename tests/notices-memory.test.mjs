@@ -25,6 +25,15 @@ const COPY = {
 const SESSIONS = 900
 
 /**
+ * The cap the module's own constant declares.
+ *
+ * Restated here rather than imported, because the point of the case is to notice the constant moving:
+ * asserting `held <= TRACK_CAPACITY` with the constant imported would keep passing if the constant
+ * itself were raised to a number that is not a bound in practice.
+ */
+const BOUND = 256
+
+/**
  * A notifier wired to a stub host and channel, with a clock the case controls.
  * @returns the notifier, the session-event sink, and the clock.
  */
@@ -89,16 +98,29 @@ test('the per-session record is bounded however many sessions pass through', asy
   assert.ok(held >= 50 && held <= 400, `the bound is proportionate (${held})`)
 })
 
-test('a session that is still waiting on its window is never evicted', async () => {
+test('the bound holds however the map is filled', async () => {
+  // What this case can prove: the map stays capped, and the sessions held are the ones a reader is
+  // closest to hearing about. Measured against the cap itself rather than against `SESSIONS` — an
+  // earlier version compared with the number of sessions it had driven, which is hundreds above the
+  // bound, so a map that stopped evicting altogether still looked bounded.
+  //
+  // What it cannot prove, and does not claim: the branch where *every* track is waiting on its calm
+  // window. Reproducing that needs the timers to still be pending at the moment the bound is
+  // consulted, and in this host they are not — measured, not assumed: driving 400 sessions with a
+  // 20 ms window and with a 30 s window both leave 144 tracks held, i.e. the idle branch either way.
+  // The rule that branch belongs to is still the right one (`forgetColdest` used to skip every
+  // waiting track and then stop, which is arithmetically not a bound), but it is unverified at
+  // runtime and `internal/review-2026-09.md` says so rather than implying otherwise.
   const { notifier, spoke } = setup()
 
-  // Every session here has a pending window, so none of them is idle: eviction
-  // may only take cold records, or a notice that is about to be offered would be
-  // dropped before it could be.
   for (let index = 0; index < SESSIONS; index += 1) spoke(`pending_${index}`)
+  spoke('pending_overflow')
 
-  // The map is allowed to exceed the idle bound while everything in it is live —
-  // that is the correct trade: a bounded number of *idle* records, not a bounded
-  // number of sessions mid-flight.
-  assert.ok(notifier.trackedSessions() >= 1, 'live sessions are held while they wait')
+  const held = notifier.trackedSessions()
+  assert.ok(
+    held <= BOUND,
+    `the map stays capped: ${held} held after ${SESSIONS + 1} sessions`,
+  )
+  assert.ok(held >= BOUND / 2, `and it gives up about half rather than everything: ${held}`)
+  assert.ok(held > 0, 'while still holding the sessions it is working on')
 })
