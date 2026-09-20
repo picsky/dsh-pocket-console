@@ -369,11 +369,11 @@ export function createEscalation({
     // picture, so the race covers exactly the two live outcomes.
     return Promise.race([
       Promise.resolve(desktop).then((outcome) => {
-        // An answer from the browser is the one proof that a person is at the desk, so it
-        // is what puts the head start back. Nothing weaker does: a page left open is this
-        // plugin's premise, not evidence that anybody is sitting in front of it.
-        priority?.set(DESK)
-        record.complete(undefined, messages().answeredAtDesk, 'success')
+        // Only an answer that actually settles this race says anything about where the
+        // person is. A desk answer arriving after the phone already settled it is the
+        // browser catching up, not a person sitting down — and moving the side for it would
+        // put the head start back while the reader is still holding the phone.
+        if (record.complete(undefined, messages().answeredAtDesk, 'success')) priority?.set(DESK)
         return outcome
       }),
       record.settle.promise,

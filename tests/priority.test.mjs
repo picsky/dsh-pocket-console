@@ -198,6 +198,29 @@ test('the card says which wait is in force, and says there is none under phone p
   desktop2.resolve('rejected')
 })
 
+test('a desk answer that arrives after the phone settled it changes nothing', async () => {
+  const { route, state, listenerOf } = await scaffold({ delaySeconds: 1 })
+  await bind(route)
+  const approval = listenerOf('approval/request')
+
+  const desktop = Promise.withResolvers()
+  const raced = approval.handler(
+    { toolName: 'pwsh', signal: new AbortController().signal },
+    () => desktop.promise,
+  )
+  await sleep(1100)
+  await clickCard(callbackValues(sentCard()).find(value => value.v === 'allowed-once'))
+  assert.equal((await state()).priority, 'phone', 'the phone answered first')
+
+  // The desk answers the same request afterwards — a page that was left open, a person who
+  // came back and pressed the button the composer was still showing. That branch loses the
+  // race it was part of, so it must not move the side: the phone is still where the person is.
+  desktop.resolve('rejected')
+  assert.equal(await raced, 'allowed-once', 'the phone answer is the one that settled it')
+  await sleep(20)
+  assert.equal((await state()).priority, 'phone', 'and a late desk answer does not take the side back')
+})
+
 test('a stored side is what a restart starts from', async () => {
   // Exactly what a restart finds: a record written by the process that saw the phone
   // answer. A person away must not be put back behind a desk head start by a restart.
