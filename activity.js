@@ -765,12 +765,32 @@ export function createActivity({
     /**
      * React to the person moving between the desk and the phone.
      *
-     * A card is minted the first time the phone holds the person, and an already-running
-     * session is followed from that moment: the session's next event settles it in, and this
-     * asks for the edit that puts the card on screen.
+     * A card is minted the first time the phone holds the person. Touching alone was not enough: it
+     * marks records that already exist, and a session running when the person moved had none — it
+     * is created on the next session event, which for a run already in flight may be its last. So
+     * the first thing a run did after the phone took over was the one thing the phone could not
+     * show, which is precisely the run somebody picks the phone up to look at. Every session the
+     * registry still reports as running is taken on here instead.
      */
     onPriority() {
-      if (phoneHasIt()) touch()
+      if (!phoneHasIt()) return
+      let tookOn = false
+      for (const agent of ctx.get?.('agents')?.list?.() ?? []) {
+        // `agent.session.id` is the session this agent drives, which is the key every record and
+        // every event is filed under.
+        const session = agent?.session?.id
+        if (session === undefined || agent?.status !== 'running') continue
+        // Whichever comes first: a session already followed keeps its card, and one that was not is
+        // taken on now so the rest of its turn is recorded.
+        if (!activities.has(session)) tookOn = true
+        recordOf(session)
+      }
+      // Marked for writing, and the write scheduled *here* rather than left to `touch`: a refresh
+      // already pending would make `armRefresh` a no-op, and this record was just created, so
+      // nothing else is waiting to carry it to the phone.
+      for (const record of activities.values()) record.dirty = true
+      if (tookOn) armRefresh()
+      else touch()
     },
     /** How many sessions are being shown, for the suite and for diagnostics. */
     tracked: () => activities.size,

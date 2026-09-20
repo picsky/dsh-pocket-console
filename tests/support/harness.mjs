@@ -457,7 +457,18 @@ function disposePrevious() {
       // reachable whether or not this deployment composed the optional pair.
       // Reading it through `get` is also what keeps a deployment without it
       // loadable: a service property read would throw without an `inject`.
-      if (name === 'agents') return { get: (id) => agents.get(id) }
+      // `list` mirrors the real registry's enumeration, which is how a card is minted for a session
+      // that is already running when the person moves to the phone. The fake agents are stored
+      // without a `session.id`, so it is supplied here the way the real one always has it.
+      if (name === 'agents') {
+        return {
+          get: (id) => agents.get(id),
+          list: () => [...agents.entries()].map(([id, agent]) => ({
+            ...agent,
+            session: { id, ...agent.session },
+          })),
+        }
+      }
       if (!composed.has(name)) return undefined
       if (name === 'webServer') return webServer
       if (name === 'settings') return settings

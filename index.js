@@ -21,6 +21,7 @@ import z from '@deepseek-ai/schemastery'
 import { createResultNotifier } from './results.js'
 import { createEscalation } from './escalation.js'
 import { createActivity } from './activity.js'
+import { createRunRecord } from './run-record.js'
 import { createWork } from './work.js'
 import { LOCALES, messagesFor } from './messages.js'
 import { createMirror } from './mirror.js'
@@ -295,6 +296,10 @@ export async function apply(ctx, config) {
     ctx, log, channel, settings: () => settings, messages, priority, workspaces,
   })
 
+  // What each run did, kept on its own account rather than on a card: the result card shows it, so
+  // it has to exist for runs that never had a card at all.
+  const runRecord = createRunRecord({ messages })
+
   // Starting the next shard is the one thing a finished result cannot do, and the moment a result
   // lands is when the phone has the person's attention — so the offer follows the notice.
   const work = createWork({
@@ -385,6 +390,14 @@ export async function apply(ctx, config) {
     )
     const offResults = results.install()
     const offActivity = activity.install()
+    // What one run did, recorded per session and independently of any card. It is a third reader of
+    // the same firehose rather than part of the activity card, because the card only exists while
+    // the phone holds the person — and the run somebody asks about afterwards may well have happened
+    // at the desk, or be the first one after the phone took over.
+    const offRunRecord = ctx.on('session/event', (session, event) => { runRecord.observe(session, event) })
+    const offRunStream = ctx.on('agent/assistant-stream', ({ agent, frame }) => {
+      runRecord.observeStream(agent?.id, frame)
+    })
     // A card is minted when the phone takes the person, so the activity card has to hear
     // about the move rather than wait for the session's next event to notice. The same
     // move in the other direction is what gives a head start back to a request that
@@ -421,6 +434,8 @@ export async function apply(ctx, config) {
       offQuestion()
       offResults()
       offActivity()
+      offRunRecord()
+      offRunStream()
       offPriority()
       offAction()
       // Abandon rather than settle: the desktop branch of each in-flight race

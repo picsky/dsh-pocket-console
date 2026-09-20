@@ -1,0 +1,201 @@
+/**
+ * The run record: one run's text, anchored where a person last spoke.
+ *
+ * This module is fed a session's events and read back by two cards, so its contract is what both of
+ * them rely on. The cases are written against the module directly rather than through a deployment:
+ * what is being pinned is which text a run holds and where it starts, which is not visible from a
+ * rendered card once the bound has trimmed it.
+ *
+ * Run: npm test
+ */
+
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { createRunRecord, textOf, RUN_BUDGET } from '../run-record.js'
+import { messagesFor } from '../messages.js'
+
+/** A record with the deployment's copy, as the plugin composes it. */
+const record = () => createRunRecord({ messages: () => messagesFor('zh') })
+
+const humanSaid = (text, turn = 1) => ({
+  type: 'user/message',
+  surfaceOp: 'append',
+  data: { turn, source: { kind: 'user' }, content: [{ type: 'text', text }] },
+})
+const modelSaid = (text, { turn = 1, step = 1 } = {}) => ({
+  type: 'assistant/message',
+  surfaceOp: 'append',
+  data: { turn, step, message: { content: [{ type: 'text', text }] } },
+})
+const toolCalled = (name, { turn = 1, step = 1 } = {}) => ({
+  type: 'tool/call',
+  data: { turn, step, callId: 'c1', name },
+})
+const toolFailed = (reason, { turn = 1, step = 1 } = {}) => ({
+  type: 'tool/result',
+  surfaceOp: 'append',
+  data: {
+    turn,
+    step,
+    message: { content: [{ type: 'tool-result', toolCallId: 'c1', isError: true, content: [{ type: 'text', text: reason }] }] },
+    error: { name: 'ToolError', code: 'E1' },
+  },
+})
+const turnEnded = (turn = 1) => ({ type: 'turn/end', data: { turn, reason: { kind: 'completed' } } })
+
+test('a run starts at the last thing a person said', () => {
+  const runs = record()
+  const session = { id: 's_1' }
+  const feed = (event) => runs.observe(session, event)
+
+  feed(humanSaid('第一件事'))
+  feed(modelSaid('第一件事的答案'))
+  feed(turnEnded())
+  feed(humanSaid('第二件事', 2))
+  feed(modelSaid('第二件事的答案', { turn: 2 }))
+
+  const { entries } = runs.readRun('s_1')
+  // What came before the last human message is not what they are asking about, and dropping it is
+  // also what bounds this store without an arbitrary cap.
+  assert.deepEqual(entries, ['第二件事', '第二件事的答案'], 'only the run the person last started')
+  // The earlier run is not gone: a frozen card shows the sequence, so `read` still has both.
+  assert.equal(runs.read('s_1').entries.length, 4, 'while the whole record keeps the earlier run')
+})
+
+test('a run holds what a person said, what the model said, and what failed', () => {
+  const runs = record()
+  const session = { id: 's_1' }
+  runs.observe(session, humanSaid('把测试修好'))
+  runs.observe(session, modelSaid('我先看失败的用例。'))
+  runs.observe(session, toolCalled('pwsh'))
+  runs.observe(session, toolFailed('Command failed with exit code 1'))
+  runs.observe(session, turnEnded())
+
+  const { entries } = runs.read('s_1')
+  assert.deepEqual(entries, [
+    '把测试修好',
+    '我先看失败的用例。',
+    '**工具失败**：`pwsh` — Command failed with exit code 1',
+  ])
+})
+
+test('a successful tool call leaves nothing behind', () => {
+  const runs = record()
+  const session = { id: 's_1' }
+  runs.observe(session, humanSaid('跑一下'))
+  runs.observe(session, modelSaid('好。'))
+  runs.observe(session, toolCalled('pwsh'))
+  runs.observe(session, {
+    type: 'tool/result',
+    surfaceOp: 'append',
+    data: {
+      turn: 1,
+      step: 1,
+      message: { content: [{ type: 'tool-result', toolCallId: 'c1', content: [{ type: 'text', text: 'ok' }] }] },
+    },
+  })
+  runs.observe(session, turnEnded())
+
+  // The policy is the same one every card uses: what a tool printed does not change what the reader
+  // writes next, and a log of every successful call buries the part that does.
+  assert.deepEqual(runs.read('s_1').entries, ['跑一下', '好。'])
+})
+
+test('injected context does not anchor a run', () => {
+  const runs = record()
+  const session = { id: 's_1' }
+  runs.observe(session, humanSaid('问题'))
+  runs.observe(session, modelSaid('回答'))
+  // A plugin-injected message renders as folded context, not as the reader's own words, so it is
+  // part of what the run was told rather than the question the run is answering.
+  runs.observe(session, {
+    type: 'user/message',
+    surfaceOp: 'append',
+    data: { turn: 1, source: { kind: 'plugin', plugin: 'somewhere' }, content: [{ type: 'text', text: '注入的上下文' }] },
+  })
+  runs.observe(session, turnEnded())
+
+  assert.deepEqual(runs.read('s_1').entries, ['问题', '回答'], 'the run is still the one the person started')
+})
+
+test('a run is recorded whether or not a card was ever sent for it', () => {
+  const runs = record()
+  // No card, no priority, no handle — just events. This is the case the activity card could not
+  // cover: a run at the desk, or the first run after the phone took over.
+  runs.observe({ id: 'never-carded' }, humanSaid('在桌面跑的一轮'))
+  runs.observe({ id: 'never-carded' }, modelSaid('做完了。'))
+  runs.observe({ id: 'never-carded' }, turnEnded())
+
+  assert.equal(runs.has('never-carded'), true, 'the session is recorded on its own account')
+  assert.deepEqual(runs.read('never-carded').entries, ['在桌面跑的一轮', '做完了。'])
+})
+
+test('the live stream is what fills a run whose message never came', () => {
+  const runs = record()
+  const session = { id: 's_1' }
+  runs.observe(session, humanSaid('开始'))
+  runs.observeStream('s_1', { type: 'start', turn: 1, step: 1 })
+  runs.observeStream('s_1', { type: 'chunk', chunk: { type: 'text-delta', text: '只有' } })
+  runs.observeStream('s_1', { type: 'chunk', chunk: { type: 'text-delta', text: '实时片段' } })
+  runs.observe(session, turnEnded())
+
+  // The live frames are the only copy of that text until the step settles, and a run that streamed
+  // everything and committed nothing would otherwise close empty.
+  assert.equal(runs.read('s_1').entries.includes('只有实时片段'), true, 'the streamed step reached the run')
+})
+
+test('a step whose text both streamed and settled is recorded once', () => {
+  const runs = record()
+  const session = { id: 's_1' }
+  runs.observe(session, humanSaid('开始'))
+  runs.observeStream('s_1', { type: 'start', turn: 1, step: 1 })
+  runs.observeStream('s_1', { type: 'chunk', chunk: { type: 'text-delta', text: '同一句话' } })
+  runs.observe(session, modelSaid('同一句话'))
+  runs.observe(session, turnEnded())
+
+  const { entries } = runs.read('s_1')
+  const appearances = entries.filter(entry => entry.includes('同一句话')).length
+  assert.equal(appearances, 1, `the text is recorded once, not twice: ${appearances}`)
+})
+
+test('what the bound leaves out is counted, not silently lost', () => {
+  const runs = record()
+  const session = { id: 's_1' }
+  runs.observe(session, humanSaid('很长的开头'))
+  // Well past the budget, so the oldest entries have to go.
+  for (let index = 0; index < 40; index += 1) {
+    runs.observe(session, modelSaid(`第${index}段 ${'中'.repeat(200)}`))
+  }
+  runs.observe(session, turnEnded())
+
+  const { entries, dropped } = runs.read('s_1')
+  // A card that had to leave something out has to be able to say so: a reader who is not told cannot
+  // tell a short run from a truncated one.
+  assert.ok(dropped > 0, `the excess is counted: ${dropped}`)
+  assert.equal(entries.includes('很长的开头'), false, 'and the oldest went first')
+  assert.match(entries[entries.length - 1], /第39段/, 'keeping the end, which is what a reader wants')
+})
+
+test('the record is bounded, and forgets the coldest session first', () => {
+  const runs = record()
+  for (let index = 0; index < 70; index += 1) {
+    runs.observe({ id: `s_${index}` }, humanSaid(`第${index}个会话`))
+  }
+  const order = runs.order()
+  assert.equal(order.length, 64, 'the map is capped')
+  assert.equal(order.includes('s_0'), false, 'and the session nobody has spoken in since is forgotten')
+})
+
+test('textOf reads blocks, a bare string, and nothing at all', () => {
+  assert.equal(textOf([{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }]), 'ab')
+  // A tool result's content is blocks, not a string; reading it as one would render an object.
+  assert.equal(textOf('bare'), 'bare')
+  assert.equal(textOf(undefined), '')
+  assert.equal(textOf([{ type: 'tool-call', name: 'x' }]), '')
+})
+
+test('the budget the record holds to is the one it says it is', () => {
+  // Stated here so a change to the constant has to come past this line: the number is a product
+  // decision about how much of a run a phone can usefully show.
+  assert.equal(RUN_BUDGET, 8 * 1024)
+})

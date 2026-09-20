@@ -896,3 +896,35 @@ test('taking the phone over mid-turn picks the running turn up', async () => {
   assert.match(JSON.stringify(shown.card), /npm test/, 'and shows where it is')
   assert.match(JSON.stringify(shown.card), /第 1 轮/, 'for the turn that was already running')
 })
+
+test('a run already in flight is taken on when the phone takes over', async () => {
+  const scaffolded = await scaffold({ delaySeconds: 1 })
+  await bind(scaffolded.route)
+
+  // A session running while the desk still had the person. It has no card — that is the point: the
+  // desk could see it — and, before this, it had no record either.
+  scaffolded.agents.set('s_running', { status: 'running' })
+  await takeOverFromThePhone(scaffolded)
+
+  // The takeover is the moment somebody picks the phone up to look at this run. Minting its card
+  // lazily on the session's *next* event was not enough: for a run already in flight that next
+  // event may be its last, so the first thing it did after the move was the one thing the phone
+  // could not show.
+  // The mint schedules a write, and the write is throttled to the refresh window: reading before it
+  // has run would read the state from before the move.
+  await settle()
+  const shown = activityCard()
+  assert.ok(shown, 'the run in flight is followed from the move, not from its next event')
+  assert.match(JSON.stringify(shown.card), /处理中|已结束/, 'and the card says what it is doing')
+})
+
+test('a session that is not running is not taken on by the move', async () => {
+  const scaffolded = await scaffold({ delaySeconds: 1 })
+  await bind(scaffolded.route)
+  // Idle sessions are what the phone has nothing to say about: there is no run to follow, and a card
+  // for one would be a message about nothing.
+  scaffolded.agents.set('s_idle', { status: 'idle' })
+  await takeOverFromThePhone(scaffolded)
+
+  assert.equal(activityCard(), undefined, 'no card is minted for a session with no run')
+})
