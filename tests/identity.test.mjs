@@ -39,8 +39,18 @@ test('a session with nothing to name stays unnamed', () => {
 
 test('a long workspace name is clipped so one title cannot crowd out a card', () => {
   const long = `/${'x'.repeat(200)}`
-  assert.equal(workspaceLabel(long).length, 40, 'a name longer than the limit is cut to it')
-  assert.equal(workspaceLabel(`/${'x'.repeat(40)}`), 'x'.repeat(40), 'a name exactly at the limit is kept')
+  assert.equal(workspaceLabel(long), 'x'.repeat(40), 'a name longer than the limit is cut to it')
+  assert.equal(workspaceLabel(`/${'x'.repeat(40)}`), 'x'.repeat(40), 'a name exactly at the limit is kept in full')
+  assert.equal(workspaceLabel(`/${'x'.repeat(41)}`), 'x'.repeat(40), 'the next character is the one dropped')
+  // The limit is about characters, not UTF-16 code units: a name whose 40th character is an
+  // emoji must not come back as half of one. A lone surrogate goes into the card verbatim
+  // and renders as a broken glyph, which is worse than a shorter name.
+  const emoji = `/${'x'.repeat(39)}🚀`
+  const clipped = workspaceLabel(emoji)
+  assert.equal(clipped, `${'x'.repeat(39)}🚀`, 'a character that is two code units is kept whole')
+  assert.equal([...clipped].length, 40, 'and it still counts as forty characters')
+  assert.equal(/[\uD800-\uDBFF]$/.test(clipped), false, 'the label never ends on a lone high surrogate')
+  assert.equal(workspaceLabel(`/${'x'.repeat(40)}🚀`), 'x'.repeat(40), 'and a name that is too long stops before it')
 })
 
 test('a title keeps what the card is, and adds the workspace when there is one', () => {

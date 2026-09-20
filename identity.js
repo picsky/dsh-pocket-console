@@ -20,6 +20,27 @@
 const WORKSPACE_LIMIT = 40
 
 /**
+ * Keep the first `limit` characters of a name, counting characters rather than code units.
+ *
+ * `String.prototype.slice` counts UTF-16 code units, so a limit landing between the halves
+ * of a surrogate pair returns half a character — which then goes into the card as a lone
+ * `\uD83D` and renders as a broken glyph. Walking the string yields whole code points.
+ * @param name - the directory name.
+ * @param limit - how many characters to keep.
+ * @returns the name, clipped if it was longer.
+ */
+function clipName(name, limit) {
+  let kept = ''
+  let count = 0
+  for (const character of name) {
+    if (count === limit) break
+    kept += character
+    count += 1
+  }
+  return kept
+}
+
+/**
  * What a card title calls one session's workspace.
  *
  * The name only; a session without one, or with one that names nothing (a filesystem
@@ -44,7 +65,7 @@ export function workspaceLabel(cwd) {
   // three is something to put on a card.
   const name = segments.at(-1)
   if (name === undefined || name === '..' || /^[A-Za-z]:$/.test(name)) return undefined
-  return name.length <= WORKSPACE_LIMIT ? name : name.slice(0, WORKSPACE_LIMIT)
+  return clipName(name, WORKSPACE_LIMIT)
 }
 
 /**

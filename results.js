@@ -43,7 +43,7 @@ const TRACK_CAPACITY = 256
 /**
  * Watch root sessions, then offer each stopped session's answer to the channel.
  */
-export function createResultNotifier({ ctx, log, channel, settings, messages, now = () => Date.now() }) {
+export function createResultNotifier({ ctx, log, channel, settings, messages, workspaces, now = () => Date.now() }) {
   /** Per-session observation: the newest turn, its last message, and when we last spoke. */
   const tracks = new Map()
   /** Notices whose rid is still live, keyed by that rid. */
@@ -209,6 +209,9 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
       })
       const notice = notices.get(id)
       if (notice !== undefined) notice.handle = handle
+      // Remembered against the message as well, so a press that finds no live notice can
+      // still be told which session the card belonged to.
+      workspaces?.record(handle, workspace)
       log.info(messages().logNoticeSent)
       // Remembered only now: a card that never arrived has nothing to put back, and the
       // session's last seq is what a later run compares against to see whether the
@@ -505,8 +508,10 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
         // Even then the card says only what this side knows: it is not live here. It
         // cannot tell whether it was superseded, whether the reader moved the session on,
         // or whether the process that held it is gone — and an earlier rewrite may already
-        // be showing the true reason, which "expired" would replace with a guess.
-        retract(messageId, messages().noticeStale)
+        // be showing the true reason, which "expired" would replace with a guess. The
+        // workspace is not a guess: it was remembered against the message when the card
+        // went out, which is what a restart cannot take away.
+        retract(messageId, messages().noticeStale, workspaces?.lookup(messageId))
       }
       return { toast: messages().noticeGone, accepted: false }
     }

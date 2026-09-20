@@ -45,7 +45,7 @@ const titleFor = (settings, workspace, kind) => titleOf(`${settings.titlePrefix}
  *   thunks, and whether the channel is closed for new work.
  * @returns the answerer, the action router, the pending report, and disposal.
  */
-export function createEscalation({ log, channel, settings, mirror, messages, isClosed = () => false }) {
+export function createEscalation({ log, channel, settings, mirror, messages, workspaces, isClosed = () => false }) {
   /** Live escalations keyed by the opaque id embedded in their action payloads. */
   const open = new Map()
   /** Set by close(): an escalation started after disposal must not arm a timer. */
@@ -319,6 +319,10 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
         void deliverCard(record).then((handle) => {
           record.handle = handle
           record.delivered = true
+          // Remembered against the message, not only on the record: a press that arrives
+          // after a restart finds no record, and rewriting that card must still be able
+          // to name the session it belonged to.
+          workspaces?.record(handle, record.workspace)
         }).catch((error) => {
           log.warn(messages().logDeliveryFailed, error)
           // The card never arrived, so there is no phone decision to wait for.
@@ -395,7 +399,9 @@ export function createEscalation({ log, channel, settings, mirror, messages, isC
     if (handle === undefined || typeof channel.update !== 'function') return
     const copy = messages()
     void Promise.resolve(channel.update(handle, {
-      title: `${settings().titlePrefix} ${copy.requestGoneTitle}`,
+      // The record this card belonged to is gone, so the workspace comes from what was
+      // remembered against the message; a card that cannot be named is still retired.
+      title: titleFor(settings(), workspaces?.lookup(handle), copy.requestGoneTitle),
       tone: 'muted',
       body: [copy.requestGone],
       buttons: [],

@@ -300,6 +300,36 @@ test('a notice retired as stale still says which session it was about', async ()
   assert.match(JSON.stringify(retired), /已有新消息/, 'and still says why it stopped taking replies')
 })
 
+test('a card the phone presses after its notice is gone is still named', async () => {
+  const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle' })
+  await bind(route)
+  agents.set('s_ws', {
+    status: 'idle',
+    followup: () => {},
+    session: { header: { cwd: '/work/my-app' } },
+  })
+  const emit = listenerOf('session/event').handler
+
+  runTurn(emit, 's_ws', '构建通过了。')
+  await sleep(1100)
+  const card = sentCard()
+  const submit = callbackValues(card).find(value => value.submit === true)
+  const [answer] = controlNames(card)
+
+  // The press arrives after this side stopped holding the notice — a restart, or a
+  // supersession — so there is no record to read a workspace from, and the message the
+  // press carries is the only thing that can name the card.
+  emit({ id: 's_ws' }, { type: 'user/message', data: { source: { kind: 'user' } } })
+  await sleep(20)
+  observed.patched.length = 0
+  const refused = await clickCard(submit, { [answer]: '接着补文档' })
+  assert.equal(refused.toast.content, '该结果已过期', 'the press is refused')
+
+  const stale = JSON.parse(observed.patched.at(-1).data.content)
+  assert.equal(stale.header.title.content, 'DSH 结果 · my-app', 'and the stale card is still named')
+  assert.match(JSON.stringify(stale), /不再有效/, 'while saying only what this side knows')
+})
+
 test('a notice rewritten when the reader replies keeps the workspace', async () => {
   const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle' })
   await bind(route)

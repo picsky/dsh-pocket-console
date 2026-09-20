@@ -48,6 +48,12 @@ out when it does.
   reading the session again at each of those moments would drop the name from a rewrite whenever
   the session had been reclaimed in between. The title is the one part of a card that shows in
   the chat list, so this identifies a card without opening it (`identity.js`).
+  A card rewritten when its record is already gone — a press arriving after a restart, or after
+  the process dropped the request — is named from what was remembered against the message
+  itself, so the card a reader presses is not the one card that cannot say which session it was
+  about (`workspaces.js`). A workspace name longer than forty characters is cut on a character
+  boundary rather than a code-unit one, so a name ending in an emoji is not left half-written in
+  the title.
 
 - **Both READMEs were restructured around the order a reader needs things in.** The entrance is
   now the install, the uninstall, and the three settings the Settings card exposes; security,

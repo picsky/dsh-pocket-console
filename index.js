@@ -22,6 +22,7 @@ import { createResultNotifier } from './results.js'
 import { createEscalation } from './escalation.js'
 import { LOCALES, messagesFor } from './messages.js'
 import { createMirror } from './mirror.js'
+import { createWorkspaces } from './workspaces.js'
 import { registerRoutes } from './routes.js'
 
 /** Plugin name used by the Loader and every diagnostic. */
@@ -251,12 +252,20 @@ export async function apply(ctx, config) {
   // The decision the phone took, and what the browser half did with it.
   const mirror = createMirror({ log, settings: () => settings, messages })
 
+  // What each card on the phone calls its session's workspace, kept beside the message
+  // rather than only on the record: a card rewritten after a restart has no record left.
+  const workspaces = createWorkspaces()
+
   // The escalation machine owns the timer, the race, and the pending registry;
   // this file only wires it to the two seams and the channel's actions.
-  escalation = createEscalation({ log, channel, settings: () => settings, mirror, messages })
+  escalation = createEscalation({
+    log, channel, settings: () => settings, mirror, messages, workspaces,
+  })
   // Result notices ride the session firehose rather than a live request, so a
   // turn that ends while nobody is watching still reaches the phone.
-  results = createResultNotifier({ ctx, log, channel, settings: () => settings, messages })
+  results = createResultNotifier({
+    ctx, log, channel, settings: () => settings, messages, workspaces,
+  })
 
   /** The card's status snapshot: what the section serves and what is open. */
   const snapshot = async () => ({

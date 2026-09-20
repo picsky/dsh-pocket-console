@@ -248,6 +248,38 @@ test('a request with no workspace to name still gets the title it always had', a
   desktop.resolve('rejected')
 })
 
+test('a card carries its workspace rather than re-reading the session', async () => {
+  const { route, listenerOf, agents } = await scaffold()
+  await bind(route)
+  const agent = { status: 'idle', session: { header: { cwd: '/work/my-app' } } }
+  agents.set('s_ws', agent)
+
+  const approval = listenerOf('approval/request')
+  const desktop = Promise.withResolvers()
+  void approval.handler(
+    { toolName: 'pwsh', agent, signal: new AbortController().signal },
+    () => desktop.promise,
+  )
+  await sleep(1200)
+  assert.equal(sentCard().header.title.content, 'DSH 工具审批 · my-app', 'the card went out named')
+
+  // The session is reclaimed before the reader answers — the case the design exists for.
+  // A rewrite that looked the workspace up again would come back with nothing, and the
+  // card would turn anonymous at the moment it is answered.
+  agent.session.header = {}
+  agents.delete('s_ws')
+  const settled = await clickCard(callbackValues(sentCard()).find(value => value.v === 'allowed-once'))
+  assert.equal(settled.toast.content, '已批准（仅本次）')
+  await sleep(20)
+
+  const rewritten = JSON.parse(observed.patched.at(-1).data.content)
+  assert.equal(
+    rewritten.header.title.content,
+    'DSH 工具审批 · my-app',
+    'the settlement is named from what the card already knew, not from a session that is gone',
+  )
+})
+
 test('a card rewritten once the request is answered keeps the workspace', async () => {
   const { route, listenerOf, agents } = await scaffold()
   await bind(route)
