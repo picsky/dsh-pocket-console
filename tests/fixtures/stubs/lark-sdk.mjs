@@ -43,6 +43,10 @@ export const observed = {
   deduplicated: 0,
   /** How many deliveries were accepted and then failed before the answer arrived. */
   lostAnswers: 0,
+  /** Set to make the next accepted delivery answer without naming the message it created. */
+  answerWithoutId: false,
+  /** How many answers arrived without a message id. */
+  unnamedAnswers: 0,
   /** Completes the pending `registerApp()` promise; set while it is pending. */
   completeRegisterApp: undefined,
   /** Rejects the pending `registerApp()` promise. */
@@ -83,6 +87,8 @@ export function resetObserved() {
   observed.deliveryFailures = 0
   observed.deduplicated = 0
   observed.lostAnswers = 0
+  observed.answerWithoutId = false
+  observed.unnamedAnswers = 0
   observed.completeRegisterApp = undefined
   observed.failRegisterApp = undefined
   observed.handshake = 'ready'
@@ -164,6 +170,14 @@ export class Client {
           const handle = `om_${this.sent}`
           if (uuid !== undefined) this.accepted.set(uuid, handle)
           observed.delivered.push({ handle, request })
+          if (observed.answerWithoutId === true) {
+            // The card exists and the answer does not name it — a renamed field, or an envelope the
+            // SDK reshaped. A caller that treats this as a success holds a message it can never find
+            // again, which is why it is a case rather than a curiosity.
+            observed.answerWithoutId = false
+            observed.unnamedAnswers += 1
+            return { data: {} }
+          }
           if (observed.loseNextAnswer === true) {
             // Accepted, and the answer never arrives: the message exists on the platform and this
             // side does not know it. This is the shape of failure a retry has to survive.
