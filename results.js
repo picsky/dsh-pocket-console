@@ -16,7 +16,7 @@
  * @module pocket-console/results
  */
 
-import { CARD_TEXT_BUDGET, clipToBytes, looksLikeSizeRefusal } from './budget.js'
+import { CARD_TEXT_BUDGET, clipTailToBytes, clipToBytes, looksLikeSizeRefusal } from './budget.js'
 import { titleOf, workspaceLabel } from './identity.js'
 import { PHONE as PRIORITY_PHONE, DESK as PRIORITY_DESK } from './priority.js'
 import { RESTORE_LIMIT, createNoticeStore } from './notice-store.js'
@@ -41,13 +41,98 @@ export function isAnswer(message) {
 /** How many sessions are observed at once before the coldest are forgotten. */
 const TRACK_CAPACITY = 256
 
+/** Bytes of UTF-8, which is what a size the platform counts and a size this code counts agree on. */
+const rawBytes = (value) => Buffer.byteLength(String(value ?? ''), 'utf8')
+
+/**
+ * What this run did, as one block of text, keeping both ends and naming what it left out.
+ *
+ * Why both ends rather than a prefix: the two things a person decides on are **what the run set out
+ * to do** and **where it stopped**, and in a long run those are the first and last parts of it. A
+ * prefix keeps the plan and loses the ending; a suffix keeps the ending and loses the plan. Neither
+ * alone answers "what happened", so the middle is what gives way — and it is named, because a reader
+ * who is not told cannot tell a short run from a truncated one.
+ *
+ * `dropped` is the record's own count of what its bound discarded; the space this has to split is
+ * whatever the marker and the card's budget leave, so a run that already lost its middle upstream
+ * does not lose a second middle here silently.
+ * @param entries - the run's entries, in order.
+ * @param dropped - bytes the record itself left out, if any.
+ * @param copy - the copy table in force.
+ * @param budget - the byte budget for this block.
+ * @returns the text, or an empty string when there is nothing to show.
+ */
+function runBlock(entries, dropped, copy, budget) {
+  const shown = entries.filter(entry => entry !== '')
+  if (shown.length === 0 && dropped === 0) return ''
+  const whole = shown.join('\n\n')
+  // The record's own loss is part of what the reader is missing, so it is charged before anything
+  // else: a card that says nothing about it would present a partial run as a complete one.
+  const carried = dropped > 0 ? copy.resultOmitted(dropped) : ''
+  if (rawBytes(whole) + rawBytes(carried) <= budget) {
+    return [whole, carried].filter(part => part !== '').join('\n\n')
+  }
+
+  const marker = copy.resultOmitted(0)
+  const room = budget - rawBytes(carried) - rawBytes(marker)
+  if (room <= 0) return carried
+  // Halved: one end of the room for the head, one for the tail, so a long run shows both.
+  const perEnd = Math.floor(room / 2)
+
+  /**
+   * One end of the run, taking entries until its half is used.
+   *
+   * The **first** entry is taken whatever it costs. A plan is a single message and it is routinely
+   * longer than half of what the marker leaves, so a rule that took only what fit would drop the head
+   * every time a run had a plan in it — the one thing this exists to show. It is clipped to the room
+   * that remains instead, so the bound still holds.
+   * @param entries - the run's entries, this end first.
+   * @param limit - the bytes this end may use.
+   * @param keep - which end of an entry too long for this end survives.
+   * @returns the text of this end.
+   */
+  const takeEnd = (entries, limit, keep) => {
+    const taken = []
+    let used = 0
+    for (const entry of entries) {
+      const size = rawBytes(entry) + 2
+      if (taken.length === 0 && size > limit) {
+        const room = Math.max(1, limit)
+        // Which end is kept is the honest one for where this text sits: the start of a run should
+        // keep its opening, the end of one should keep its conclusion.
+        taken.push(keep === 'tail'
+          ? clipToBytes(entry, copy.truncated, room)
+          : clipTailToBytes(entry, copy.truncated, room))
+        break
+      }
+      if (used + size > limit) break
+      taken.push(entry)
+      used += size
+    }
+    return { taken, used }
+  }
+
+  const head = takeEnd(shown, perEnd, 'tail')
+  // The tail draws only from what the head did not take, so an entry is never shown twice.
+  const remaining = shown.slice(head.taken.length)
+  const tail = takeEnd([...remaining].reverse(), perEnd, 'head')
+  const omitted = remaining.slice(0, Math.max(0, remaining.length - tail.taken.length))
+  const lost = omitted.reduce((total, entry) => total + rawBytes(entry) + 2, 0) + dropped
+  return [
+    head.taken.join('\n\n'),
+    copy.resultOmitted(lost),
+    [...tail.taken].reverse().join('\n\n'),
+  ].filter(part => part !== '').join('\n\n')
+}
+
 /**
  * Watch root sessions, then offer each stopped session's answer to the channel.
  * @param options - the host context, the logger, the channel, the settings, the copy, the workspace
- *   registry, the priority state, and what to offer once a notice has gone out.
+ *   registry, the priority state, the record of what each run did, and what to offer once a notice
+ *   has gone out.
  */
 export function createResultNotifier({
-  ctx, log, channel, settings, messages, workspaces, priority, onSent, now = () => Date.now(),
+  ctx, log, channel, settings, messages, workspaces, priority, runRecord, onSent, now = () => Date.now(),
 }) {
   /** Per-session observation: the newest turn, its last message, and when we last spoke. */
   const tracks = new Map()
@@ -214,6 +299,16 @@ export function createResultNotifier({
     noticeSet(id, { session, handle: undefined, workspace })
     track.ended = undefined
     track.sentAt = now()
+    // What the run did, from the last thing a person said to the moment it stopped. The card face
+    // keeps the answer, because that is what a reader glances at; the run goes in the fold beside it,
+    // which the channel renders as a panel the reader opens in place. Nothing is sent for it: the
+    // message count per run does not change, which is the promise that makes this card acceptable.
+    const run = runRecord?.readRun?.(session) ?? { entries: [], dropped: 0 }
+    const details = (() => {
+      const blocks = runBlock(run.entries, run.dropped, messages(), Math.floor(CARD_TEXT_BUDGET / 2))
+      return blocks === '' ? undefined : { title: messages().resultProcess, blocks: [blocks] }
+    })()
+    if (details !== undefined) view.details = details
     try {
       const handle = await channel.deliver(view).catch(async (error) => {
         if (!looksLikeSizeRefusal(error)) throw error

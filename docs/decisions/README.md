@@ -21,3 +21,4 @@ code. A change that contradicts a record here needs a new record, not a quiet ed
 | [0014](0014-the-process-binds-every-change.md) | Every change lands as a pull request with the four checks green; the release keeps one documented shortcut, and a tag is a publish |
 | [0015](0015-desk-presence-is-the-gateways-request-id.md) | A person is at the desk when a human message carries the gateway's request id, and a page merely being open is not |
 | [0016](0016-the-phone-can-start-the-next-task.md) | The phone can start a new session, only in the workspace it is already looking at, and only while it holds the person |
+| [0017](0017-the-result-card-carries-the-run.md) | The result card carries the run in a fold, keeping both ends and naming the middle it gave up |

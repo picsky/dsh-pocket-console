@@ -10,6 +10,16 @@ out when it does.
 
 ### Added
 
+- **The result card now carries what the run did, not only the last thing said.** A turn that ends
+  with a couple of confirmations ends on a confirmation, so the plan being confirmed was nowhere on
+  the phone and the person was left deciding the next step without the text it depends on. The run —
+  from the last thing they said to the moment it stopped — now travels in a **fold on the same card**,
+  so it costs no extra message, which is the promise that makes this card acceptable. When it does not
+  fit, **both ends are kept and the middle is given up by name**, with a byte count: the two things a
+  decision rests on are what the run set out to do and where it stopped, and those are its first and
+  last parts. A button to "read the rest" was refused — cards cannot link to each other, and opening a
+  page would mean serving one (`results.js`, [0017](docs/decisions/0017-the-result-card-carries-the-run.md)).
+
 - **What one run did is recorded on its own account, whether or not a card was ever sent for it.**
   The result card could only ever show the model's **last** message, and a turn that ends with a
   couple of confirmations ends on a confirmation — so the plan being confirmed was nowhere on the
@@ -19,6 +29,11 @@ out when it does.
   what its bound leaves out is counted rather than silently lost (`run-record.js`, `index.js`).
 
 ### Fixed
+
+- **A run too long for the fold gave up the plan it was built to show.** A 60-step plan is a single
+  entry of about 1.9 KB, while half the room left after the marker is about 1.1 KB, so a rule that took
+  only what fit dropped the head every time a run opened with a plan. Each end now takes one entry
+  whatever it costs, clipped to the room that remains, and a case asserts it (`results.js`).
 
 - **The first run after the phone takes over was the one the phone could not show.** A session that
   was already running when the person moved had no activity card, and the card was minted lazily on
