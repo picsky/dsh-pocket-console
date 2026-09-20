@@ -15,6 +15,7 @@
     "client.js",
     "results.js",
     "identity.js",
+    "priority.js",
     "workspaces.js",
     "notice-store.js",
     "routes.js",

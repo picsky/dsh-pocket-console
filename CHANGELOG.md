@@ -38,6 +38,19 @@ out when it does.
 
 ### Changed
 
+- **The desktop head start now follows the person.** The wait was a constant: the configured
+  number of seconds of desk-only time before the channel was used, whatever the person was
+  doing. An answer from a phone card is the evidence that nobody is at the desk — the person is
+  holding the phone — so from that moment the wait is zero and a card goes out as soon as there
+  is one. An answer *at the desk* is the only thing that brings the head start back, because it
+  is the only proof that anybody is sitting there; a page being open is not, and nothing about a
+  browser being connected moves it. Both timers read the wait through one place, and every
+  countdown already running is re-timed on the spot, so a move reaches the requests in flight
+  rather than only the next one. The side is durable, because a restart that put a person who is
+  away back behind a head start would make the phone go quiet exactly when it is the only surface
+  there is. An approval that arrives under phone priority says so on the card, in the same words
+  a deployment that configured zero already got (`priority.js`, `escalation.js`, `results.js`).
+
 - **Every phone card now names the workspace of the session it belongs to.** The title carried
   the deployment's prefix and what the card was asking for and nothing else, so several sessions
   running at once produced cards that could not be told apart, and a card that had finished

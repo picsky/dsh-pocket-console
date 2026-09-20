@@ -18,6 +18,7 @@
 
 import { CARD_TEXT_BUDGET, clipToBytes, looksLikeSizeRefusal } from './budget.js'
 import { titleOf, workspaceLabel } from './identity.js'
+import { PHONE as PRIORITY_PHONE } from './priority.js'
 import { RESTORE_LIMIT, createNoticeStore } from './notice-store.js'
 
 import { randomUUID } from 'node:crypto'
@@ -43,7 +44,7 @@ const TRACK_CAPACITY = 256
 /**
  * Watch root sessions, then offer each stopped session's answer to the channel.
  */
-export function createResultNotifier({ ctx, log, channel, settings, messages, workspaces, now = () => Date.now() }) {
+export function createResultNotifier({ ctx, log, channel, settings, messages, workspaces, priority, now = () => Date.now() }) {
   /** Per-session observation: the newest turn, its last message, and when we last spoke. */
   const tracks = new Map()
   /** Notices whose rid is still live, keyed by that rid. */
@@ -56,6 +57,15 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, wo
   let restored = false
   /** Set while a restore is in flight, so the two triggers cannot both run it. */
   let restoring = false
+
+  /**
+   * The wait in force: the configured calm window, or none while the phone has the person.
+   *
+   * Resolved here so neither the arming path nor the re-timing path has to know which side
+   * the person is on, and so a deployment composed without the priority machine keeps the
+   * setting it configured.
+   */
+  const effectiveDelay = () => priority?.delaySeconds() ?? settings().delaySeconds
 
   /**
    * The workspace one session belongs to, resolved once per notice.
@@ -117,7 +127,7 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, wo
    */
   const rearmOne = (session, track) => {
     if (track.timer !== undefined) clearTimeout(track.timer)
-    const deadline = track.touched + settings().delaySeconds * 1000
+    const deadline = track.touched + effectiveDelay() * 1000
     track.timer = setTimeout(() => {
       track.timer = undefined
       // A throw here would be an uncaught exception, which the harness treats as
@@ -536,6 +546,10 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, wo
   /** Deliver one instruction, then record it on the notice's own message. */
   async function send(agent, text, notice) {
     try {
+      // A reply typed on the phone is a person at the phone, so the head start stops
+      // applying to whatever this session does next. Re-timed on the spot, so the calm
+      // window of the turn this instruction starts is the short one.
+      if (priority?.set(PRIORITY_PHONE) === true) rearm()
       // Imported here rather than at load: the message constructor lives in the
       // harness, and a deployment without it must still load this plugin.
       const { createUserMessage } = await import('@deepseek-ai/dsh-llm')

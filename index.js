@@ -22,6 +22,7 @@ import { createResultNotifier } from './results.js'
 import { createEscalation } from './escalation.js'
 import { LOCALES, messagesFor } from './messages.js'
 import { createMirror } from './mirror.js'
+import { createPriority } from './priority.js'
 import { createWorkspaces } from './workspaces.js'
 import { registerRoutes } from './routes.js'
 
@@ -256,21 +257,36 @@ export async function apply(ctx, config) {
   // rather than only on the record: a card rewritten after a restart has no record left.
   const workspaces = createWorkspaces()
 
+  /**
+   * Which side the person is on, which is what decides the wait both timers count down.
+   *
+   * Durable, because a restart that put a person who is away back behind a desk head start
+   * would make the phone go quiet exactly when it is the only surface there is.
+   */
+  const priority = createPriority({ ctx, log, settings: () => settings, messages })
+  try {
+    await priority.restore()
+  } catch (error) {
+    log.warn('priority restore failed', error)
+  }
+
   // The escalation machine owns the timer, the race, and the pending registry;
   // this file only wires it to the two seams and the channel's actions.
   escalation = createEscalation({
-    log, channel, settings: () => settings, mirror, messages, workspaces,
+    log, channel, settings: () => settings, mirror, messages, workspaces, priority,
   })
   // Result notices ride the session firehose rather than a live request, so a
   // turn that ends while nobody is watching still reaches the phone.
   results = createResultNotifier({
-    ctx, log, channel, settings: () => settings, messages, workspaces,
+    ctx, log, channel, settings: () => settings, messages, workspaces, priority,
   })
 
   /** The card's status snapshot: what the section serves and what is open. */
   const snapshot = async () => ({
     namespace: NAME,
     settings: { ...settings },
+    /** Which side is in force, which is what the effective wait follows. */
+    priority: priority.get(),
     /** Open escalations, each with what it is waiting on. */
     pending: escalation.pending(),
     enrollment: await channel.enrollmentState?.() ?? { state: 'unsupported' },

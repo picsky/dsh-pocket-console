@@ -15,6 +15,7 @@
 
 import { CARD_TEXT_BUDGET, clipToBytes, looksLikeSizeRefusal } from './budget.js'
 import { titleOf, workspaceLabel } from './identity.js'
+import { DESK, PHONE } from './priority.js'
 
 import { randomUUID } from 'node:crypto'
 
@@ -45,11 +46,21 @@ const titleFor = (settings, workspace, kind) => titleOf(`${settings.titlePrefix}
  *   thunks, and whether the channel is closed for new work.
  * @returns the answerer, the action router, the pending report, and disposal.
  */
-export function createEscalation({ log, channel, settings, mirror, messages, workspaces, isClosed = () => false }) {
+export function createEscalation({
+  log, channel, settings, mirror, messages, workspaces, priority, isClosed = () => false,
+}) {
   /** Live escalations keyed by the opaque id embedded in their action payloads. */
   const open = new Map()
   /** Set by close(): an escalation started after disposal must not arm a timer. */
   let closed = false
+
+  /**
+   * The wait in force: the configured head start, or none while the phone has the person.
+   *
+   * Resolved here rather than at each timer, so no timer has to know which side the person
+   * is on — and so a deployment composed without the priority machine keeps the setting.
+   */
+  const effectiveDelay = () => priority?.delaySeconds() ?? settings().delaySeconds
 
   /**
    * Bound text to what one card may carry.
@@ -84,9 +95,9 @@ export function createEscalation({ log, channel, settings, mirror, messages, wor
       const body = [copy.toolLabel(toolName)]
       if (callId !== undefined) body.push(copy.callIdLabel(callId))
       if (reason !== undefined && reason !== '') body.push(copy.reasonLabel(clip(reason, budget)))
-      body.push(settings().delaySeconds === 0
+      body.push(effectiveDelay() === 0
         ? copy.approvalLive
-        : copy.approvalUpgraded(settings().delaySeconds))
+        : copy.approvalUpgraded(effectiveDelay()))
       return {
         title: titleFor(settings(), record.workspace, copy.approvalTitle),
         tone: 'warning',
@@ -305,14 +316,15 @@ export function createEscalation({ log, channel, settings, mirror, messages, wor
     /**
      * Arm the wait, or re-arm it against a deadline counted from the request's arrival.
      *
-     * The deadline is the arrival plus the configured wait, so a change to the wait
-     * keeps the time already spent: a request that has waited 100 of 120 seconds and
-     * meets a 20-second value goes out now, rather than after another 20.
-     * @param delaySeconds - the wait in force right now.
+     * The deadline is the arrival plus the wait in force, so a change to the wait keeps the
+     * time already spent: a request that has waited 100 of 120 seconds and meets a
+     * 20-second value goes out now, rather than after another 20. The wait is read here
+     * rather than passed in, because two things can change it — the setting, and which side
+     * the person is on — and both have to reach a countdown that is already running.
      */
-    const arm = (delaySeconds) => {
+    const arm = () => {
       if (record.timer !== undefined) clearTimeout(record.timer)
-      const remaining = record.startedAt + delaySeconds * 1000 - Date.now()
+      const remaining = record.startedAt + effectiveDelay() * 1000 - Date.now()
       record.timer = setTimeout(() => {
         record.timer = undefined
         record.armed = true
@@ -337,20 +349,19 @@ export function createEscalation({ log, channel, settings, mirror, messages, wor
       record.timer.unref?.()
     }
 
-    arm(settings().delaySeconds)
+    arm()
 
     /**
-     * Re-time this escalation against a changed wait.
+     * Re-time this escalation against a wait that changed under it.
      *
-     * A wait that grew must not outlive the request it is holding, and a wait that
-     * shrank must not keep somebody waiting for a number nobody chose any more.
-     * Only a record still waiting for its first card is re-timed: one that has
-     * already gone out is being answered, not delayed.
-     * @param delaySeconds - the wait in force right now.
+     * A wait that grew must not outlive the request it is holding, and a wait that shrank
+     * must not keep somebody waiting for a number nobody chose any more. Only a record still
+     * waiting for its first card is re-timed: one that has already gone out is being
+     * answered, not delayed.
      */
-    record.rearm = (delaySeconds) => {
+    record.rearm = () => {
       if (!pending()) return
-      arm(delaySeconds)
+      arm()
     }
 
     // A settled or abandoned escalation must never leave the caller waiting. The
@@ -358,6 +369,10 @@ export function createEscalation({ log, channel, settings, mirror, messages, wor
     // picture, so the race covers exactly the two live outcomes.
     return Promise.race([
       Promise.resolve(desktop).then((outcome) => {
+        // An answer from the browser is the one proof that a person is at the desk, so it
+        // is what puts the head start back. Nothing weaker does: a page left open is this
+        // plugin's premise, not evidence that anybody is sitting in front of it.
+        priority?.set(DESK)
         record.complete(undefined, messages().answeredAtDesk, 'success')
         return outcome
       }),
@@ -409,6 +424,24 @@ export function createEscalation({ log, channel, settings, mirror, messages, wor
     })).catch(error => { log.warn(copy.logMessageRewriteFailed, error) })
   }
 
+  /** Re-time every request that is still waiting for its card. */
+  const rearmAll = () => {
+    for (const record of [...open.values()]) record.rearm?.()
+  }
+
+  /**
+   * Record that a person answered from the phone, and put the phone in charge.
+   *
+   * The head start exists to leave room for whoever is at the desk. An answer that came
+   * from a card is the evidence that nobody is: the person is holding the phone, and
+   * making them wait out a head start for an empty chair delays the only surface that can
+   * answer. Every counted-down wait is re-timed on the spot, so the change reaches the
+   * requests already in flight rather than only the next one.
+   */
+  const phoneTookOver = () => {
+    if (priority?.set(PHONE) === true) rearmAll()
+  }
+
   /** Answer one approval from an action payload. */
   const decodeApproval = (record, payload) => {
     if (payload?.v !== ALLOW && payload?.v !== REJECT) return undefined
@@ -416,6 +449,7 @@ export function createEscalation({ log, channel, settings, mirror, messages, wor
     // Only the answer that actually settles the request is mirrored: a click
     // arriving after the desktop already decided changes nothing.
     if (record.complete(payload.v, label, payload.v === ALLOW ? 'success' : 'danger')) {
+      phoneTookOver()
       mirror.record(record, payload.v)
     }
     return { toast: label }
@@ -459,6 +493,10 @@ export function createEscalation({ log, channel, settings, mirror, messages, wor
     const answered = record.answers.size
     const total = record.request.questions.length
     if (answered < total) {
+      // Recorded here rather than only at the end: a reader part-way through a card has
+      // already shown they are at the phone, and the wait for the next request should
+      // reflect that without waiting for them to finish this one.
+      phoneTookOver()
       // Rewrite the message so the user sees what is already recorded; a toast
       // alone would leave a card that looks untouched.
       if (record.delivered && typeof channel.update === 'function') {
@@ -476,7 +514,10 @@ export function createEscalation({ log, channel, settings, mirror, messages, wor
       .map(item => `${item.id}=${item.custom ?? item.selected.join('/')}`)
       .join(copy.answerSeparator))
     const accepted = record.complete({ answers }, copy.answered(summary), 'success')
-    if (accepted) mirror.record(record, { answers })
+    if (accepted) {
+      phoneTookOver()
+      mirror.record(record, { answers })
+    }
     return { toast: messages().answersSubmitted }
   }
 
@@ -545,15 +586,14 @@ export function createEscalation({ log, channel, settings, mirror, messages, wor
       }
     },
     /**
-     * Re-time every request still waiting for its card against a changed wait.
+     * Re-time every request still waiting for its card against the wait in force.
      *
-     * Called when the wait is edited, because the timer was armed from the value in
-     * force when the request arrived: without this, an edit reaches the next request
-     * and not the one the reader was looking at when they made it.
+     * Called when the wait changes under a countdown — an edit to the setting, or a move
+     * between the sides — because the timer was armed when the request arrived: without
+     * this, a change reaches the next request and not the one the reader is looking at.
      */
     rearm() {
-      const delaySeconds = settings().delaySeconds
-      for (const record of [...open.values()]) record.rearm?.(delaySeconds)
+      rearmAll()
     },
   }
 }
