@@ -8,6 +8,24 @@ out when it does.
 
 ## Unreleased
 
+### Added
+
+- **What one run did is recorded on its own account, whether or not a card was ever sent for it.**
+  The result card could only ever show the model's **last** message, and a turn that ends with a
+  couple of confirmations ends on a confirmation — so the plan being confirmed was nowhere on the
+  phone. The record a frozen card folds was held on the activity card's record, which exists only
+  while the phone holds the person, so a run at the desk had no record at all. A run is now recorded
+  per session from the last thing a person said, in `run-record.js`, independently of any card, and
+  what its bound leaves out is counted rather than silently lost (`run-record.js`, `index.js`).
+
+### Fixed
+
+- **The first run after the phone takes over was the one the phone could not show.** A session that
+  was already running when the person moved had no activity card, and the card was minted lazily on
+  the session's next event — which, for a run already in flight, may be its last. So the first thing
+  that run did after the move was exactly the thing somebody picked the phone up to look at. Moving
+  to the phone now takes on every session the registry still reports as running (`activity.js`).
+
 ## 0.8.2
 
 ### Added
