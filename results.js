@@ -780,7 +780,7 @@ export function createResultNotifier({
    *   values, and the message the press came from.
    * @returns the channel's toast response, or undefined.
    */
-  function handleAction({ payload, values, messageId } = {}) {
+  async function handleAction({ payload, values, messageId } = {}) {
     const id = typeof payload?.nid === 'string' ? payload.nid : undefined
     if (id === undefined) return undefined
     const notice = notices.get(id)
@@ -816,11 +816,47 @@ export function createResultNotifier({
     // too, so that no later run can put the card back and take the reply twice.
     notices.delete(id)
     void store.remove(id)
-    void send(agent, text, notice)
+    // Awaited, and its answer is the toast. The earlier version fired the send and returned
+    // "已发送给 agent" immediately, so a reply that never reached the session was reported as sent:
+    // the reader was told the next step had been handed over, stopped thinking about it, and the
+    // instruction existed nowhere — the rid dead in memory *and* on disk, and the card already
+    // rewritten to say it had arrived. The cost of awaiting is that this handler must stay inside
+    // the platform's 3-second callback budget; the work is one dynamic import and one synchronous
+    // hand-off, and a card rewrite that is slow is not waited on above.
+    const delivered = await send(agent, text, notice)
+    if (!delivered) {
+      // Put the notice back so the card can be answered again. It is the honest state: the reply
+      // was never taken, so the box on the card is still the way to send it. The window for a
+      // second press is the send's own few milliseconds, and a duplicate press inside it would be
+      // refused rather than answered twice — which is the right way round.
+      noticeSet(id, notice)
+      void store.put({
+        rid: id,
+        session: notice.session,
+        handle: notice.handle,
+        workspace: notice.workspace,
+        seq: await sessionSeq(notice.session),
+        sentAt: now(),
+      }).then(() => { log.info(messages().logNoticeStored(id)) }).catch(() => {})
+      return { toast: messages().notSent, accepted: false }
+    }
     return { toast: messages().sent, accepted: true }
   }
 
-  /** Deliver one instruction, then record it on the notice's own message. */
+  /**
+   * Hand one instruction to the session, then record it on the notice's own message.
+   *
+   * The return value is the whole point: `true` only once the instruction has actually been given
+   * to the agent. Everything after that — the card rewrite, the durable bookkeeping — is about a
+   * card, not about the instruction, and a failure there must not be reported as a failure to send.
+   * The caller answers the reader's toast on this value, so "the instruction did not go" and "the
+   * card did not get rewritten" stay distinguishable.
+   *
+   * @param agent - the session's live agent.
+   * @param text - what the reader typed.
+   * @param notice - the notice the reply was made against.
+   * @returns whether the instruction was queued in the session.
+   */
   async function send(agent, text, notice) {
     try {
       // A reply typed on the phone is a person at the phone, so the head start stops
@@ -828,7 +864,9 @@ export function createResultNotifier({
       // window of the turn this instruction starts is the short one.
       if (priority?.set(PRIORITY_PHONE) === true) rearm()
       // Imported here rather than at load: the message constructor lives in the
-      // harness, and a deployment without it must still load this plugin.
+      // harness, and a deployment without it must still load this plugin. It can genuinely
+      // reject — a deployment that cannot resolve the harness — which is why the failure below
+      // is a real branch and not a formality.
       const { createUserMessage } = await import('@deepseek-ai/dsh-llm')
       agent.followup(createUserMessage({
         content: [{ type: 'text', text }],
@@ -841,6 +879,15 @@ export function createResultNotifier({
         source: { kind: 'user' },
       }))
       log.info(messages().logInstructionQueued)
+    } catch (error) {
+      log.warn(messages().logInstructionFailed, error)
+      return false
+    }
+    // Past this point the instruction is in the session; only the card is at risk. A failed
+    // rewrite leaves a reply box on a card whose reply has already been taken, which is wrong but
+    // recoverable by reading the conversation — and reporting it as "not sent" would be a worse
+    // lie than the stale box.
+    try {
       // The card keeps the answer and the fold, and loses the box it was answered through. The
       // earlier version replaced the whole face with "已收到指令", which took away the answer the
       // reader had just replied to and the run fold beside it — an edit that destroys text is worse
@@ -866,8 +913,9 @@ export function createResultNotifier({
         })).catch(error => { log.warn(messages().logNoticeCardFailed, error) })
       }
     } catch (error) {
-      log.warn(messages().logInstructionFailed, error)
+      log.warn(messages().logNoticeCardFailed, error)
     }
+    return true
   }
 
   return {

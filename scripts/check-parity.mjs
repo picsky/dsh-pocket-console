@@ -380,9 +380,53 @@ function checkReadmeVisuals(root) {
 
 checkReadmeVisuals(root)
 
+/**
+ * A published document that quotes a byte budget must quote the code's own number.
+ *
+ * This exists because the failure already happened once, in the other direction: the README said
+ * the platform capped a card at 30 KB and that text was held under 4.5 KB, while the code shipped a
+ * 32 KB budget and the platform was measured accepting 131 KB. The README is the only document a
+ * reader outside this repository sees, so a number in it that disagrees with `budget.js` is not a
+ * stale comment — it is the published claim being wrong, and it took a measurement against the real
+ * tenant to find it because nothing compared the two.
+ *
+ * Only the constant is pinned, not the measurements: a measured figure is evidence and may be
+ * legitimately exceeded by the next measurement, while a quoted budget is a fact about this code.
+ * The derived readings (characters, the size of an example plan) are deliberately left free — they
+ * are consequences of the constant, and pinning them would make an honest re-measurement fail.
+ *
+ * @param root - the repository root.
+ */
+function checkDocumentedBudgets(root) {
+  const source = read('budget.js')
+  const readConstant = (name) => {
+    const match = new RegExp(`export const ${name} = (\\d+)(?: \\* (\\d+))?`).exec(source)
+    if (match === null) throw new Error(`check-parity: budget.js exports no ${name}`)
+    return match[2] === undefined ? Number(match[1]) : Number(match[1]) * Number(match[2])
+  }
+  const bytes = readConstant('CARD_TEXT_BUDGET')
+  const kb = bytes / 1024
+  if (!Number.isInteger(kb)) fail(`check-parity: CARD_TEXT_BUDGET is ${bytes} bytes, which is not a whole KB`)
+
+  // The same sentence appears in both READMEs, so both are checked: they are written independently
+  // and one of them drifting is exactly how the two languages start telling different stories.
+  for (const document of ['README.md', 'README.zh-CN.md']) {
+    const text = readFileSync(resolve(root, document), 'utf8')
+    const stated = new RegExp(`held under \\*\\*${kb} KB|限制在 \\*\\*${kb} KB`)
+    if (!stated.test(text)) {
+      fail(`${document}: does not state the card's text budget as ${kb} KB, which is what budget.js ships`)
+    }
+    if (/\b4\.5 KB|4\.5 KB/.test(text)) {
+      fail(`${document}: still quotes the retired 4.5 KB budget, which contradicted the code`)
+    }
+  }
+}
+
+checkDocumentedBudgets(root)
+
 if (problems.length > 0) {
   console.error('check-parity: the places that must agree do not')
   for (const problem of problems) console.error(`  ${problem}`)
   process.exit(1)
 }
-console.log(`check-parity: ${config.length} config fields agree across Config, SectionSchema, the card, both config pages, and the bundle patch — names and defaults — and every published document links only to published files`)
+console.log(`check-parity: ${config.length} config fields agree across Config, SectionSchema, the card, both config pages, and the bundle patch — names and defaults; every published document links only to published files; and a quoted card-text budget matches budget.js`)

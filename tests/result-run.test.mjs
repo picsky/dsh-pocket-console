@@ -81,23 +81,33 @@ function runWithAPlan(scaffolded, id, plan = PLAN) {
  * The asking session records what is handed to it, so a case about a reply can check that the
  * instruction actually reached the session rather than only that the card was rewritten.
  * @param plan - the plan text the run opens with.
- * @returns the scaffold result, the result card, and the asked session's follow-ups.
+ * @param options - `refuseFirst` makes the first hand-off throw, which is the failure the reply
+ *   path has to survive: the instruction is in the session or it is not, and everything else the
+ *   path does is about a card.
+ * @returns the scaffold result, the result card, the asked session's follow-ups, and how many
+ *   hand-offs were attempted.
  */
-async function afterARun(plan = PLAN) {
+async function afterARun(plan = PLAN, { refuseFirst = false } = {}) {
   const scaffolded = await scaffold({ delaySeconds: 1, resultNotify: 'idle' })
   await bind(scaffolded.route)
   /** What the reply handed to the asking session, in order. */
   const followed = []
+  /** How many times the path tried to hand something over, including the failures. */
+  const attempts = { count: 0 }
   scaffolded.agents.set('s_1', {
     status: 'idle',
     session: { header: { cwd: '/work/my-app' } },
-    followup: (message) => { followed.push(message) },
+    followup: (message) => {
+      attempts.count += 1
+      if (refuseFirst && attempts.count === 1) throw new Error('the session was reclaimed mid-press')
+      followed.push(message)
+    },
   })
   await phoneHoldsIt(scaffolded)
   observed.created.length = 0
   runWithAPlan(scaffolded, 's_1', plan)
   await sleep(1_400)
-  return { scaffolded, result: cardTitled('DSH 结果'), followed }
+  return { scaffolded, result: cardTitled('DSH 结果'), followed, attempts }
 }
 
 test('the result card carries the plan the run opened with', async () => {
@@ -220,4 +230,44 @@ test('replying keeps the answer and the run, and gives up only the box', async (
   assert.equal(/回复这条消息/.test(words), false, 'and nothing points at the reply box that is gone')
   assert.equal(/开下一段|新会话里开/.test(words), false, 'nor at the next-task form that is gone')
   assert.equal(followed.at(-1).content[0].text, '接着做下一步')
+})
+
+test('a reply that never reached the session is not reported as sent', async () => {
+  // The failure this case exists for: the earlier version fired the hand-off and answered
+  // "已发送给 agent" immediately. A reply that never arrived was reported as sent, so the reader
+  // stopped thinking about it — while the rid was dead in memory *and* on disk and the card had
+  // already been rewritten to say the instruction had arrived. Being told a lie about the one
+  // thing this plugin does is worse than being told it failed.
+  const { result, followed, attempts } = await afterARun(PLAN, { refuseFirst: true })
+  const reply = callbackValues(result.card).find(value => value.submit === true)
+  const field = reply.submits.value
+
+  const toast = await clickCard(reply, { [field]: '接着做下一步' }, { messageId: result.handle })
+  assert.equal(attempts.count, 1, 'the hand-off was attempted')
+  assert.equal(followed.length, 0, 'and it did not land')
+  // The channel maps the handler's `accepted` onto the toast's type, so a warning is what a
+  // refusal looks like from the reader's side.
+  assert.equal(toast.toast.type, 'warning', 'so the press is refused, not toasted as success')
+  assert.match(
+    String(toast.toast.content),
+    /没能送出去/,
+    'and the reader is told it did not go: ' + JSON.stringify(toast.toast),
+  )
+
+  // The box has to still be there, because the notice was put back: a reply that failed must
+  // remain sendable, or the person has to reconstruct it from memory.
+  const afterFailure = cardFrom(result.handle)
+  const stillAnswerable = callbackValues(afterFailure).some(value => value.submit === true)
+  assert.equal(stillAnswerable, true, 'the reply box is still on the card')
+  assert.equal(
+    /已收到指令/.test(JSON.stringify(afterFailure)),
+    false,
+    'and the card does not claim the instruction arrived',
+  )
+
+  // And a second press goes through, which is the whole reason the notice came back.
+  const retry = await clickCard(reply, { [field]: '接着做下一步' }, { messageId: result.handle })
+  assert.equal(retry.toast.type, 'success', 'the retry is accepted')
+  assert.equal(followed.length, 1, 'and this time the instruction landed')
+  assert.equal(followed[0].content[0].text, '接着做下一步')
 })
