@@ -77,22 +77,27 @@ function runWithAPlan(scaffolded, id, plan = PLAN) {
 
 /**
  * A deployment where the phone holds the person and one run with a plan has just stopped.
+ *
+ * The asking session records what is handed to it, so a case about a reply can check that the
+ * instruction actually reached the session rather than only that the card was rewritten.
  * @param plan - the plan text the run opens with.
- * @returns the scaffold result, the emitter, and the result card.
+ * @returns the scaffold result, the result card, and the asked session's follow-ups.
  */
 async function afterARun(plan = PLAN) {
   const scaffolded = await scaffold({ delaySeconds: 1, resultNotify: 'idle' })
   await bind(scaffolded.route)
+  /** What the reply handed to the asking session, in order. */
+  const followed = []
   scaffolded.agents.set('s_1', {
     status: 'idle',
     session: { header: { cwd: '/work/my-app' } },
-    followup: () => {},
+    followup: (message) => { followed.push(message) },
   })
   await phoneHoldsIt(scaffolded)
   observed.created.length = 0
   runWithAPlan(scaffolded, 's_1', plan)
   await sleep(1_400)
-  return { scaffolded, result: cardTitled('DSH 结果') }
+  return { scaffolded, result: cardTitled('DSH 结果'), followed }
 }
 
 test('the result card carries the plan the run opened with', async () => {
@@ -161,9 +166,11 @@ test('carrying the run costs no extra message', async () => {
 
 test('the card carrying the run still fits the platform', async () => {
   await afterARun()
-  // The fold competes with the card face for one message, and the platform refuses a body over
-  // 30 KB — measured the way the request will carry it, since the card JSON is escaped again on its
-  // way out. A card that says everything and arrives as nothing is worse than a shorter one.
+  // The fold competes with the card face for one message. The platform's real body limit was
+  // measured against this tenant at 131 KB (the documented 30 KB is wrong — see
+  // `internal/boundaries.md`), and the card's own text budget is far below it. What this asserts is
+  // the order of magnitude: a card that grew past the measured cap would arrive as nothing at all,
+  // which is worse than a shorter one.
   const bodies = [
     ...observed.created.map(request => request.data.content),
     ...observed.patched.map(request => request.data.content),
@@ -171,6 +178,46 @@ test('the card carrying the run still fits the platform', async () => {
   assert.ok(bodies.length > 0, 'the card was written')
   for (const content of bodies) {
     const body = Buffer.byteLength(JSON.stringify(content), 'utf8')
-    assert.ok(body < 30 * 1024, `the body stays inside the platform cap: ${body} bytes`)
+    assert.ok(body < 131 * 1024, `the body stays inside the measured platform cap: ${body} bytes`)
   }
+})
+
+test('replying keeps the answer and the run, and gives up only the box', async () => {
+  const { result, scaffolded, followed } = await afterARun()
+  const before = foldedRun(result.card)
+  assert.ok(before, 'the card came with the run')
+  const reply = callbackValues(result.card).find(value => value.submit === true)
+  assert.ok(reply, 'and with a box to reply in')
+  const field = reply.submits?.value
+  assert.ok(typeof field === 'string', 'the reply control names itself: ' + JSON.stringify(reply.submits))
+
+  await clickCard(reply, { [field]: '接着做下一步' }, { messageId: result.handle })
+  // The rewrite is deliberately not awaited by the press — the toast is answered first so the
+  // callback stays inside the platform's three-second window — and it loads the harness's message
+  // constructor before it writes. Waiting for the write, not for a fixed tick, is what keeps this
+  // case from passing or failing on how fast the machine is.
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (callbackValues(cardFrom(result.handle)).every(value => value.submit !== true)) break
+    await sleep(25)
+  }
+
+  const after = cardFrom(result.handle)
+  assert.deepEqual(
+    callbackValues(after).some(value => value.submit === true),
+    false,
+    'the box it was answered through is gone, so one answer cannot be sent twice',
+  )
+  // The failure this case exists for: a reply is a small event, and rewriting the card into
+  // "已收到指令" was taking the answer and the fold with it — the reader answers, scrolls back, and
+  // the thing they were reading is gone.
+  assert.match(JSON.stringify(after), /已收到指令/, 'the card says the instruction arrived')
+  assert.match(JSON.stringify(after), /测试也过了/, 'and the answer it was reporting is still on it')
+  assert.equal(foldedRun(after), before, 'and the run it carried is unchanged')
+  // The hint pointed at a box that is no longer there, so it goes with it.
+  assert.equal(
+    after.body.elements.some(element => /回复这条消息/.test(element.content ?? '')),
+    false,
+    'and the sentence pointing at the gone box is gone too',
+  )
+  assert.equal(followed.at(-1).content[0].text, '接着做下一步')
 })

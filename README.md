@@ -85,7 +85,7 @@ Full invariants, threat model and reporting: [SECURITY.md](SECURITY.md).
 
 ## What it deliberately does not do
 
-- **No GUI mirroring.** Moving the interface would move the workspace, the session, the settings and the credentials — so you also **cannot browse sessions, read history, or change settings from the phone**. What you *can* do is start the next task: when a run finishes while the phone holds you, the card offers a new session in that same workspace.
+- **No GUI mirroring.** Moving the interface would move the workspace, the session, the settings and the credentials — so you also **cannot browse sessions, read history, or change settings from the phone**. What you *can* do is start the next task: when a run finishes while the phone holds you, **the result card itself carries** the form that opens a new session in that same workspace — no second card, and no second notification.
 - **No push to the phone by default.** A card goes out only when the desktop has not answered in time — with two deliberate exceptions, because both are somebody being **blocked**, not a status update: an approval or question, and the result of a finished run.
 - **No auto-approval, ever.** The plugin never decides in your place: **silence never approves**.
 - **No inbound listener.** No port, tunnel, relay or third-party server — so also no "reachable from anywhere".

@@ -1,16 +1,20 @@
 /**
- * Starting a new task from the phone: when the offer appears, what it inherits, and what a press
+ * Starting a new task from the phone: where the offer appears, what it inherits, and what a press
  * does to the session it starts.
  *
- * The two properties worth more than the rest are here as cases of their own, because both fail
- * silently if they are wrong:
+ * The offer rides on the result card rather than a card of its own. A result already ends on
+ * "what now?", and a separate card asking that question was one more notification for the same run
+ * — the cost this plugin spends the most care on. Three properties are worth more than the rest,
+ * and all three fail silently if they are wrong:
  *
  * - **The new session inherits the asking session's workspace.** A new task started against the
- *   deployment's default directory instead is work in the wrong project, and nothing about the card
- *   would look wrong.
+ *   deployment's default directory is work in the wrong project, and nothing about the card would
+ *   look wrong.
  * - **The first prompt does not carry a gateway request id.** That id is what the deployment reads
  *   as "somebody typed at the desk", so a phone-started task carrying one would hand the head start
  *   back and undo phone priority.
+ * - **Using the offer does not destroy the answer.** The card is a result first; a rewrite that
+ *   closed it by replacing the whole face would take away the text the reader came back for.
  *
  * Run: npm test
  */
@@ -48,14 +52,35 @@ function runTurn(emit, id, answer = '构建已经通过。', turn = 1) {
   emit({ id }, { type: 'turn/end', data: { turn, reason: { kind: 'completed' } } })
 }
 
-/** The title every new-task card starts with, which no other card does. */
-const WORK_TITLE = 'DSH 新任务'
+/** The title the standalone new-task card used to carry. Nothing should ever bear it again. */
+const OLD_WORK_TITLE = 'DSH 新任务'
 
-/** The new-task card this deployment has sent, or undefined. */
-const workCard = () => cardTitled(WORK_TITLE)
+/** The result card this deployment has sent, which is where the offer lives. */
+const resultCard = () => cardTitled('DSH 结果')
 
 /**
- * Put the phone in charge, which is the only side a new-task card is offered on.
+ * The control the next task's text goes in.
+ *
+ * Read off the card rather than assumed, and picked by the name the *offer* reported rather than by
+ * position: a result card carries two forms — the reply box and this one — and the channel is free
+ * to name either however it likes. Taking the first control would type a new task into the reply
+ * box, which is a different card answering a different question.
+ * @param card - the rendered result card.
+ * @returns the control name for the new task's text.
+ */
+const workField = (card) => {
+  const submit = callbackValues(card).find(value => value.work === 'work-start')
+  const name = submit?.submits?.workText
+  assert.ok(typeof name === 'string', 'the offer reports which control carries the new task')
+  assert.ok(
+    controlNames(card).includes(name),
+    'and that control is on the card: ' + JSON.stringify(controlNames(card)),
+  )
+  return name
+}
+
+/**
+ * Put the phone in charge, which is the only side a result — and so the offer — goes out on.
  * @param scaffolded - the scaffold result.
  */
 async function phoneHoldsIt(scaffolded) {
@@ -70,10 +95,10 @@ async function phoneHoldsIt(scaffolded) {
 }
 
 /**
- * A deployment where the phone holds the person, with a finished run and both cards on the phone.
+ * A deployment where the phone holds the person, with one finished run on the phone.
  * @param config - plugin config overrides.
  * @param host - which optional services the deployment composes.
- * @returns the scaffold result, the session-event emitter, and the two cards' handles.
+ * @returns the scaffold result, the session-event emitter, and the result card's handle.
  */
 async function withAFinishedRun(config = {}, host = {}) {
   const scaffolded = await scaffold({ delaySeconds: 1, resultNotify: 'idle', ...config }, host)
@@ -88,16 +113,29 @@ async function withAFinishedRun(config = {}, host = {}) {
   const emit = scaffolded.listenerOf('session/event').handler
   runTurn(emit, 's_1')
   await sleep(1_200)
-  return { scaffolded, emit, notice: cardTitled('DSH 结果'), work: workCard() }
+  return { scaffolded, emit, notice: resultCard() }
 }
 
-test('a finished run offers the next task, on the phone', async () => {
-  const { work, notice } = await withAFinishedRun()
+test('the result card carries the offer, and no second card is sent for it', async () => {
+  const { notice } = await withAFinishedRun()
   assert.ok(notice, 'the result went to the phone')
-  assert.ok(work, 'and so did the offer to start the next task')
-  assert.match(JSON.stringify(work.card), /新会话/, 'which says it starts a new session')
-  assert.match(JSON.stringify(work.card), /my-app/, 'and names the workspace it inherits')
-  const submit = callbackValues(work.card).find(value => value.work === 'work-start')
+  // The whole point of the change: one run, one result message, and the offer inside it.
+  assert.equal(resultCard().handle, notice.handle, 'the offer rides the result card itself')
+  assert.equal(cardTitled(OLD_WORK_TITLE), undefined, 'and no separate new-task card exists')
+  // Counted, not inferred from a title: the run's own messages are the thing the phone pays for.
+  // `withAFinishedRun` clears the delivery log after the phone takes over, so what is left is
+  // exactly what this run produced. The activity card is the other one, and it only exists when a
+  // run is still going — this one is over.
+  assert.equal(
+    observed.created.length,
+    1,
+    'a finished run costs one notification, not two: ' + JSON.stringify(observed.created.map(request => request.data.content?.slice(0, 60))),
+  )
+
+  const card = JSON.stringify(notice.card)
+  assert.match(card, /新会话/, 'the card says it can start a new session')
+  assert.match(card, /my-app/, 'and names the workspace that session would inherit')
+  const submit = callbackValues(notice.card).find(value => value.work === 'work-start')
   assert.ok(submit, 'the card carries the one action this module answers')
 })
 
@@ -113,18 +151,21 @@ test('nothing is offered while the desk holds the person', async () => {
   runTurn(emit, 's_1')
   await sleep(1_200)
 
-  assert.ok(cardTitled('DSH 结果'), 'the result still goes out')
   // What could come next is something the desk can already see, and a card sent while somebody is
-  // sitting there is the push this plugin says it does not do.
-  assert.equal(workCard(), undefined, 'but no new-task card is pushed to the desk')
+  // sitting there is the push this plugin says it does not do. The result still goes out, because
+  // `resultNotify` is about the answer, not about the offer.
+  const notice = resultCard()
+  assert.ok(notice, 'the result still goes out')
+  const submit = callbackValues(notice.card).find(value => value.work === 'work-start')
+  assert.equal(submit, undefined, 'but nothing on it offers to start a task')
 })
 
 test('a press starts a session in the asking session\'s workspace, and prompts it', async () => {
-  const { scaffolded, work } = await withAFinishedRun()
-  const submit = callbackValues(work.card).find(value => value.work === 'work-start')
-  const [field] = controlNames(work.card)
+  const { scaffolded, notice } = await withAFinishedRun()
+  const submit = callbackValues(notice.card).find(value => value.work === 'work-start')
+  const field = workField(notice.card)
 
-  const toast = await clickCard(submit, { [field]: '把剩下的两个 shard 做完' })
+  const toast = await clickCard(submit, { [field]: '把剩下的两个 shard 做完' }, { messageId: notice.handle })
   assert.equal(toast.toast.content, '已发送给 agent', 'the press is accepted')
 
   const created = scaffolded.sessionController.created
@@ -143,36 +184,53 @@ test('a press starts a session in the asking session\'s workspace, and prompts i
 })
 
 test('an empty press starts nothing', async () => {
-  const { scaffolded, work } = await withAFinishedRun()
-  const submit = callbackValues(work.card).find(value => value.work === 'work-start')
-  const [field] = controlNames(work.card)
+  const { scaffolded, notice } = await withAFinishedRun()
+  const submit = callbackValues(notice.card).find(value => value.work === 'work-start')
+  const field = workField(notice.card)
 
-  const toast = await clickCard(submit, { [field]: '   ' })
+  const toast = await clickCard(submit, { [field]: '   ' }, { messageId: notice.handle })
   assert.equal(toast.toast.content, '指令为空，未发送')
   assert.equal(scaffolded.sessionController.created.length, 0, 'nothing was started')
 })
 
-test('the card stops offering once it has been used', async () => {
-  const { scaffolded, work } = await withAFinishedRun()
-  const submit = callbackValues(work.card).find(value => value.work === 'work-start')
-  const [field] = controlNames(work.card)
-  const handle = work.handle
+test('using the offer closes it without taking the answer away', async () => {
+  const { notice } = await withAFinishedRun()
+  const submit = callbackValues(notice.card).find(value => value.work === 'work-start')
+  const field = workField(notice.card)
+  const handle = notice.handle
 
-  await clickCard(submit, { [field]: '做完剩下的' })
+  await clickCard(submit, { [field]: '做完剩下的' }, { messageId: notice.handle })
   await sleep(30)
 
   // Left as a form it would invite a second press that starts a second session for one decision.
   const after = cardFrom(handle)
-  assert.deepEqual(callbackValues(after), [], 'and it carries nothing left to press')
-  assert.match(JSON.stringify(after), /已开新会话/, 'saying what it did')
-  assert.match(JSON.stringify(after), /my-app/, 'and naming the workspace it did it in')
+  assert.deepEqual(callbackValues(after), [], 'every control is gone, so nothing can be pressed twice')
+  assert.match(JSON.stringify(after), /已开新会话/, 'the card says what it did')
+  assert.match(JSON.stringify(after), /my-app/, 'and names the workspace it did it in')
+  // The card is a result first. Closing it by replacing the face is the failure this case exists
+  // for: the reader answers the offer, scrolls back, and the answer they were reading is gone.
+  assert.match(JSON.stringify(after), /构建已经通过/, 'and the answer it was reporting is still there')
+})
+
+test('a second press on the same card starts nothing', async () => {
+  const { scaffolded, notice } = await withAFinishedRun()
+  const submit = callbackValues(notice.card).find(value => value.work === 'work-start')
+  const field = workField(notice.card)
+
+  await clickCard(submit, { [field]: '做完剩下的' }, { messageId: notice.handle })
+  await sleep(30)
+  // A channel may keep showing the form after this side has rewritten the card, so the guard
+  // cannot be the card's face — it has to be the message. Same text, same message, one session.
+  const again = await clickCard(submit, { [field]: '做完剩下的' }, { messageId: notice.handle })
+  assert.match(again.toast.content, /已经开过一次/, 'the reader is told why nothing happened')
+  assert.equal(scaffolded.sessionController.created.length, 1, 'and no second session was started')
 })
 
 test('starting a task puts the new session on the phone\'s side', async () => {
-  const { scaffolded, work } = await withAFinishedRun()
-  const submit = callbackValues(work.card).find(value => value.work === 'work-start')
-  const [field] = controlNames(work.card)
-  await clickCard(submit, { [field]: '开始吧' })
+  const { scaffolded, notice } = await withAFinishedRun()
+  const submit = callbackValues(notice.card).find(value => value.work === 'work-start')
+  const field = workField(notice.card)
+  await clickCard(submit, { [field]: '开始吧' }, { messageId: notice.handle })
 
   // The person is holding the phone, so the session they just started must not wait out a desk
   // head start — the same reason answering a card moves the side.
@@ -180,25 +238,26 @@ test('starting a task puts the new session on the phone\'s side', async () => {
 })
 
 test('a deployment with no session controller says so instead of failing', async () => {
-  const { scaffolded, work } = await withAFinishedRun({}, {
+  const { scaffolded, notice } = await withAFinishedRun({}, {
     services: ['settings', 'webServer', 'storageDomain', 'sessionQuery'],
   })
-  assert.ok(work, 'the offer still goes out')
-  const submit = callbackValues(work.card).find(value => value.work === 'work-start')
-  const [field] = controlNames(work.card)
+  assert.ok(notice, 'the offer still goes out')
+  const submit = callbackValues(notice.card).find(value => value.work === 'work-start')
+  const field = workField(notice.card)
 
-  const toast = await clickCard(submit, { [field]: '做点什么' })
+  const toast = await clickCard(submit, { [field]: '做点什么' }, { messageId: notice.handle })
   assert.match(toast.toast.content, /没有会话控制器/, 'the reader is told why nothing happened')
-  assert.equal(scaffolded.warnings.length > 0, true, 'and the deployment log says so too')})
+  assert.equal(scaffolded.warnings.length > 0, true, 'and the deployment log says so too')
+})
 
 test('the task the phone starts does not count as somebody at the desk', async () => {
-  const { scaffolded, work } = await withAFinishedRun()
+  const { scaffolded, notice } = await withAFinishedRun()
   const before = (await scaffolded.state()).priority
   assert.equal(before, 'phone', 'the phone had it')
 
-  const submit = callbackValues(work.card).find(value => value.work === 'work-start')
-  const [field] = controlNames(work.card)
-  await clickCard(submit, { [field]: '接着做' })
+  const submit = callbackValues(notice.card).find(value => value.work === 'work-start')
+  const field = workField(notice.card)
+  await clickCard(submit, { [field]: '接着做' }, { messageId: notice.handle })
   await sleep(30)
 
   // The prompt this plugin sends carries no gateway request id, so the desk-presence rule must not

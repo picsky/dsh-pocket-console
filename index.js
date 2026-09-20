@@ -300,8 +300,9 @@ export async function apply(ctx, config) {
   // it has to exist for runs that never had a card at all.
   const runRecord = createRunRecord({ messages })
 
-  // Starting the next shard is the one thing a finished result cannot do, and the moment a result
-  // lands is when the phone has the person's attention — so the offer follows the notice.
+  // Starting the next shard is the one thing a finished result cannot do. It used to follow the
+  // notice as a card of its own, which cost a second notification for one run; now it rides on the
+  // result card, so the offer is handed *to* the notifier rather than called after it.
   const work = createWork({
     ctx, log, channel, settings: () => settings, messages, workspaces, priority,
   })
@@ -318,7 +319,8 @@ export async function apply(ctx, config) {
     // The run the person last started, so the card carries what happened rather than only the last
     // thing said.
     runRecord,
-    onSent: async (session) => { await work.offer(session) },
+    // The next-task offer, appended to the card this notifier is about to send.
+    nextTask: work,
   })
 
   /** The card's status snapshot: what the section serves and what is open. */
@@ -418,7 +420,12 @@ export async function apply(ctx, config) {
       // The new-task handler goes first because it is the only one that *starts* something: a
       // payload that names it must never fall through to a decoder that would treat the same
       // press as an answer to a request. Each handler returns undefined for what is not its own.
-      const started = await work.handleAction(action)
+      //
+      // The aftermath rewrite is the notifier's, and it is handed in rather than called by the work
+      // module: the offer only knows what it added to a card, while the notifier is the side that
+      // knows what the card already carried — the answer and the run fold, which a rewrite from the
+      // wrong side would drop.
+      const started = await work.handleAction(action, messageId => results.aftermath(messageId))
       if (started !== undefined) return started
       const notice = await results.handleAction(action)
       if (notice !== undefined) return notice

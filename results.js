@@ -163,16 +163,26 @@ function runGroups(entries, dropped, copy, budget, maxGroups) {
 /**
  * Watch root sessions, then offer each stopped session's answer to the channel.
  * @param options - the host context, the logger, the channel, the settings, the copy, the workspace
- *   registry, the priority state, the record of what each run did, and what to offer once a notice
- *   has gone out.
+ *   registry, the priority state, the record of what each run did, and the next-task offer that
+ *   rides on a settled card instead of costing a message of its own.
  */
 export function createResultNotifier({
-  ctx, log, channel, settings, messages, workspaces, priority, runRecord, onSent, now = () => Date.now(),
+  ctx, log, channel, settings, messages, workspaces, priority, runRecord, nextTask, now = () => Date.now(),
 }) {
   /** Per-session observation: the newest turn, its last message, and when we last spoke. */
   const tracks = new Map()
   /** Notices whose rid is still live, keyed by that rid. */
   const notices = new Map()
+  /**
+   * The card a notice was sent as, keyed by the message it went out on.
+   *
+   * Kept because a notice's card is rewritten more than once in its life — when the reader replies,
+   * when a newer result supersedes it — and every rewrite has to carry the same result. The first
+   * version of this dropped everything but a headline, which threw away the answer the reader had
+   * come back to read, and the run fold went with it. Rebuilding from the sent view is what makes a
+   * rewrite agree with the message it rewrites.
+   */
+  const views = new Map()
   /** Where those notices are remembered between runs. */
   const store = createNoticeStore({ ctx, log, messages })
   /** Set while the notifier is unloaded: a restore in flight must not outlive it. */
@@ -362,25 +372,56 @@ export function createResultNotifier({
       dropped: run.dropped,
       first: String(groups[0] ?? '').slice(0, 160),
     })))
+    /**
+     * The card as it will go out, and as every later rewrite of it must look.
+     *
+     * The next-task offer rides here rather than on a card of its own: a result already ends on
+     * "what now?", and a second card asking that question was one more notification for the same
+     * run. What the offer is, and what it does to a card, belongs to the module that owns it, so
+     * this only hands over the view and takes back the one to send.
+     *
+     * Only while the phone holds the person. What could come next is something the desk can see for
+     * itself, and a result card that offered to start a session to somebody sitting at the desk
+     * would be offering the desk a control it already has — the same rule that decides whether a
+     * result is worth a message at all.
+     */
+    const offer = (base) => {
+      if (priority?.get?.() !== PRIORITY_PHONE) return base
+      return typeof nextTask?.mergeInto === 'function' ? nextTask.mergeInto(base, session) : base
+    }
+    /** Assemble the card once, so the marker, the fold and the offer cannot disagree. */
+    const cardFor = (text) => {
+      const base = { ...view, body: [text, messages().replyHint] }
+      return offer(base)
+    }
     try {
-      const handle = await channel.deliver(view).catch(async (error) => {
+      let card = cardFor(answer)
+      const handle = await channel.deliver(card).catch(async (error) => {
         if (!looksLikeSizeRefusal(error)) throw error
         log.debug(messages().logNoticeTooLarge)
         answer = clipToBytes(track.message.text, messages().truncated, Math.floor(CARD_TEXT_BUDGET / 2))
-        return await channel.deliver({ ...view, body: [answer, messages().replyHint] })
+        card = cardFor(answer)
+        // The fold is what does not fit, so the fold is what is given up. The offer is cheaper than
+        // it looks and stays: dropping it would take away the one control a result is worth having.
+        delete card.details
+        return await channel.deliver(card)
       })
       const notice = notices.get(id)
       if (notice !== undefined) notice.handle = handle
+      // The card exactly as it went out — including the offer, if it was appended. A later rewrite
+      // starts from this, because the one thing a rewrite cannot reconstruct is the card itself.
+      if (handle !== undefined) views.set(handle, card)
       // Remembered against the message as well, so a press that finds no live notice can
-      // still be told which session the card belonged to.
-      workspaces?.record(handle, workspace)
+      // still be told which session the card belonged to — and so the next-task offer that rides
+      // this card can name the workspace a new session would inherit. The session goes with it for
+      // that second reason: the press carries the message and nothing else, and a task started
+      // against the deployment's default directory is work in the wrong project.
+      workspaces?.record(handle, workspace, session)
       log.info(messages().logNoticeSent)
       // The card is delivered, a press can find it, and this is the moment the phone has the
-      // person's attention — so it is the moment to offer the one thing a result cannot: the next
-      // shard, in a session of its own. A hook rather than a call into that module, because what
-      // the phone does about a finished run is not this notifier's business, and a deployment
-      // composed without it must still deliver results.
-      if (typeof onSent === 'function') await onSent(session)
+      // person's attention — so the moment to offer the one thing a result cannot: the next shard,
+      // in a session of its own. It rides on this card (see `offer` above), so nothing more is sent
+      // here; `views` is what lets a later rewrite put the same card back together.
       // Remembered only now: a card that never arrived has nothing to put back, and the
       // session's last seq is what a later run compares against to see whether the
       // session moved on while this process was not there to notice.
@@ -556,6 +597,74 @@ export function createResultNotifier({
   }
 
   /**
+   * Take the reply control off a notice card that is no longer live.
+   *
+   * A notice card outlives the process that sent it: the map is in memory, so after a restart a
+   * press found nothing and answered with a toast alone, leaving a card that still looked like it
+   * would take a reply. The press carries the message it came from, so the card is rewritten where
+   * it lies.
+   *
+   * Where this side still holds the card as sent, the *result* is kept and only the controls go.
+   * The first version replaced the whole face with the headline, which took away the answer and the
+   * run fold — the two things the reader came back to the card for — and left a sentence about why
+   * the card no longer worked. A card whose reason is in doubt should still be readable.
+   * @param handle - the message the press came from, as the channel reported it.
+   * @param headline - what the card says instead.
+   * @param workspace - the label the card was sent with, so the rewrite agrees with it.
+   */
+  function retract(handle, headline, workspace) {
+    if (handle === undefined || typeof channel.update !== 'function') return
+    const view = views.get(handle)
+    const known = view !== undefined
+    if (known) views.delete(handle)
+    const body = known ? [...view.body, headline] : [headline]
+    void Promise.resolve(channel.update(handle, {
+      title: titleOf(`${settings().titlePrefix} ${messages().resultTitle}`, workspace),
+      tone: 'muted',
+      body,
+      buttons: [],
+      forms: [],
+      // Kept only when it is the card's own, so an unknown card is not given one by accident.
+      ...(known && view.details !== undefined ? { details: view.details } : {}),
+    })).catch(error => { log.warn(messages().logNoticeCardFailed, error) })
+  }
+
+  /**
+   * Close a card once a next task has been opened from it.
+   *
+   * The result stays — it is what the reader came back to — the fold stays, and every control goes:
+   * a card whose offer has been taken must not leave a reply box that would hand the same session an
+   * instruction aimed at an answer the reader has already moved past. The sentence that pointed at
+   * that box goes with it, for the same reason.
+   *
+   * The offer module builds the closed card because the offer is its own: this side only supplies
+   * the card as sent, which is the one thing the offer cannot see.
+   * @param handle - the message the press came from.
+   * @returns whether the card was rewritten.
+   */
+  async function aftermath(handle) {
+    if (typeof channel.update !== 'function') return false
+    const sent = views.get(handle)
+    // No view means the card went out before this process existed (a restart) or was never sent. It
+    // is then left exactly as it is: rewriting it would replace a result nobody here has a copy of
+    // with a sentence about a task, which is a worse card than a stale one.
+    if (sent === undefined || typeof nextTask?.mergeInto !== 'function') return false
+    const session = workspaces?.sessionOf?.(handle)
+    const line = messages().workStarted(workspaceOf(session))
+    // From the card as sent, not from the base result: the marker that says where the offer began
+    // rides on the sent view, and without it the rewrite could not tell the offer from the answer.
+    const closed = nextTask.mergeInto(sent, session, line)
+    views.delete(handle)
+    try {
+      await channel.update(handle, closed)
+      return true
+    } catch (error) {
+      log.warn(messages().logNoticeCardFailed, error)
+      return false
+    }
+  }
+
+  /**
    * Retire every outstanding notice for one session.
    *
    * A notice is an offer to reply, and it is only honest while the result it
@@ -580,28 +689,6 @@ export function createResultNotifier({
     }
     if (retired > 0) log.debug(messages().logNoticeRetired(headline))
     return retired
-  }
-
-  /**
-   * Take the reply control off a notice card that is no longer live.
-   *
-   * A notice card outlives the process that sent it: the map is in memory, so after a
-   * restart a press found nothing and answered with a toast alone, leaving a card that
-   * still looked like it would take a reply. The press carries the message it came from,
-   * so the card is rewritten where it lies.
-   * @param handle - the message the press came from, as the channel reported it.
-   * @param headline - what the card says instead.
-   * @param workspace - the label the card was sent with, so the rewrite agrees with it.
-   */
-  function retract(handle, headline, workspace) {
-    if (handle === undefined || typeof channel.update !== 'function') return
-    void Promise.resolve(channel.update(handle, {
-      title: titleOf(`${settings().titlePrefix} ${messages().resultTitle}`, workspace),
-      tone: 'muted',
-      body: [headline],
-      buttons: [],
-      forms: [],
-    })).catch(error => { log.warn(messages().logNoticeCardFailed, error) })
   }
 
   /**
@@ -731,12 +818,27 @@ export function createResultNotifier({
         source: { kind: 'user' },
       }))
       log.info(messages().logInstructionQueued)
-      if (notice.handle !== undefined) {
+      // The card keeps the answer and the fold, and loses the box it was answered through. The
+      // earlier version replaced the whole face with "已收到指令", which took away the answer the
+      // reader had just replied to and the run fold beside it — an edit that destroys text is worse
+      // than no edit at all. Rebuilt from the card as sent, so nothing else drifts either.
+      // Only for a card this side still holds. A notice that came back from the previous run has no
+      // view here, and guessing one would replace a result nobody has a copy of with a sentence
+      // about an instruction — the exact failure this branch exists to stop.
+      if (notice.session !== undefined && views.has(notice.handle)) {
+        const base = views.get(notice.handle)
+        views.delete(notice.handle)
+        // The hint that pointed at the box goes with the box: left on, it would tell the reader to
+        // reply to a card that no longer has anywhere to type. Everything else — the answer and the
+        // run fold — is carried over untouched.
+        const body = base.body.includes(messages().replyHint)
+          ? base.body.filter(part => part !== messages().replyHint).concat(messages().received)
+          : [...base.body, messages().received]
         await Promise.resolve(channel.update(notice.handle, {
+          ...base,
           title: titleOf(`${settings().titlePrefix} ${messages().resultTitle}`, notice.workspace),
           tone: 'success',
-          body: [messages().received],
-          buttons: [],
+          body,
           forms: [],
         })).catch(error => { log.warn(messages().logNoticeCardFailed, error) })
       }
@@ -784,6 +886,16 @@ export function createResultNotifier({
      * @returns the toast response, or undefined when this is not a notice action.
      */
     handleAction,
+    /**
+     * Close a card whose next-task offer has been taken.
+     *
+     * Called by the offer's own module once the new session exists. It is this module's job because
+     * only this side holds the card as sent — and a rewrite from the offer would have kept the offer
+     * and dropped the result.
+     * @param handle - the message the press came from.
+     * @returns whether the card was rewritten.
+     */
+    aftermath,
     /**
      * Re-time every session still inside its calm window against a changed wait.
      *

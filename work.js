@@ -38,37 +38,124 @@ export const WORK_START = 'work-start'
 export const WORK_FIELD = 'workText'
 
 /**
+ * How many cards are remembered as "this one already started a session".
+ *
+ * A press that starts a second session for the same text is the one outcome the card must not
+ * allow, and the card's own face cannot be the guard: the platform may keep showing a form on a
+ * card this plugin has already rewritten. Remembering the message is what makes the second press
+ * a no-op, and the bound keeps the memory from growing with the session's history.
+ */
+const USED_CAPACITY = 64
+
+/**
  * Create the new-task card and the action behind it.
  * @param options - the host context, the logger, the channel, the settings, the copy, the workspace
  *   registry delivered cards are remembered in, and the priority state a started task moves.
  * @returns the card's view, and the handler for its press.
  */
 export function createWork({ ctx, log, channel, settings, messages, workspaces, priority }) {
-  /**
-   * The view that offers to start a new task in a session's workspace.
-   * @param session - the session whose workspace would be inherited, when it is known.
-   * @returns the channel-neutral view.
-   */
-  const viewFor = (session) => {
-    const copy = messages()
-    const workspace = workspaceLabel(ctx.get?.('agents')?.get?.(session)?.session?.header?.cwd)
-    return {
-      title: titleOf(`${settings().titlePrefix} ${copy.workTitle}`, workspace),
-      tone: 'info',
-      body: [copy.workIntro],
-      buttons: [],
-      forms: [{
-        payload: { work: WORK_START },
-        fieldId: WORK_FIELD,
-        submitLabel: copy.workStart,
-      }],
-    }
+  /** Messages whose offer has already been used, oldest first, so a second press starts nothing. */
+  const used = new Set()
+
+  /** Remember one message as used, evicting the oldest once the bound is reached. */
+  const markUsed = (messageId) => {
+    if (messageId === undefined) return
+    if (used.size >= USED_CAPACITY) used.delete(used.values().next().value)
+    used.add(messageId)
   }
+
+  /** The one control this module owns: a box for the next task's text, and the press that sends it. */
+  const formOf = (copy) => ({
+    payload: { work: WORK_START },
+    fieldId: WORK_FIELD,
+    submitLabel: copy.workStart,
+    // Its own placeholder, because this box shares a card with the reply box: two empty inputs
+    // labelled the same way would leave the reader guessing which one starts a session and which
+    // one answers the session they are looking at.
+    placeholder: copy.workPlaceholder,
+  })
 
   /** The workspace label of a session, as every card names it. */
   const workspaceOf = (session) => workspaceLabel(
     ctx.get?.('agents')?.get?.(session)?.session?.header?.cwd,
   )
+
+  /**
+   * The sentence that offers the next task, and the control that sends it.
+   *
+   * The offer rides on the result card now, so this is built to be *appended* to a view this module
+   * does not own: the sentence goes on the body, the form on the form list. A result already ends on
+   * "what now?", and a second card asking that question was one more notification for one run — the
+   * cost this plugin keeps counting. The channel namespaces the controls of two forms on one card,
+   * and the core already ships questions with two controls, so both forms can share a face.
+   *
+   * @returns the sentence to append, and the form to add.
+   */
+  const nextTask = () => ({ intro: messages().workIntro, form: formOf(messages()) })
+
+  /**
+   * Where on a view the offer began.
+   *
+   * Recorded on the view itself, because a card carrying this offer is rewritten later — when a
+   * task is opened from it — and that rewrite has to take the offer back off. Without a marker the
+   * rewrite would have to guess which paragraphs were the offer, and guessing is how a card ends up
+   * either repeating the offer or eating part of the answer.
+   */
+  const OFFER_FROM = 'offerFrom'
+
+  /**
+   * Put the next-task offer onto a card that is already going out.
+   *
+   * Two shapes come out of this, and they are the same card at two moments. With no `outcome` it is
+   * the offer: the result, the sentence that asks for the next task, and the box to type it in.
+   * With `outcome` it is the aftermath: the same result, every control gone, and one line saying
+   * what was opened.
+   *
+   * The result is carried through both times on purpose. This card is the answer the reader came
+   * for, and a card that dropped it to say "新会话已开始" would have thrown away the only copy of
+   * the thing it was reporting on. For the same reason the fold is kept: it is the run that
+   * produced the answer.
+   *
+   * The title stays the result's as well: renaming it "新任务" would take the answer's own label
+   * away and make the card look like it is about something that has not happened yet.
+   *
+   * @param view - the result's view, which is not mutated.
+   * @param session - the session whose workspace a new task would inherit.
+   * @param outcome - the line to close with, once a card has been used, instead of the offer.
+   * @returns the view to write.
+   */
+  const mergeInto = (view, session, outcome) => {
+    const copy = messages()
+    // Taken off whichever view is handed over: on the aftermath pass this is the card as sent,
+    // which still carries the marker.
+    const from = view[OFFER_FROM]
+    const base = { ...view, title: titleOf(`${settings().titlePrefix} ${copy.resultTitle}`, workspaceOf(session)) }
+    delete base[OFFER_FROM]
+    if (outcome !== undefined) {
+      // Every control goes, not just this module's: a card whose offer has been taken must not
+      // leave a reply box that would hand the same session an instruction the reader never meant
+      // to send against an answer they have moved past.
+      //
+      // The face is rebuilt rather than appended to. `view` is the card as it was sent, so it still
+      // carries the sentence that pointed at the reply box and the two paragraphs of the offer;
+      // appending the outcome to that would repeat the offer and leave the reader told to reply to
+      // a box that is gone. Both entries sit at a known place — the hint is second, `offerFrom` is
+      // where the offer began — and everything before the hint is the result, which is what stays.
+      const hint = messages().replyHint
+      const from = view[OFFER_FROM]
+      const kept = (from === undefined ? view.body : view.body.slice(0, from))
+        .filter(part => part !== hint)
+      return { ...base, body: [...kept, outcome], forms: [], buttons: [] }
+    }
+    const { intro, form } = nextTask()
+    return {
+      ...base,
+      body: [...view.body, copy.workOfferHint, intro],
+      forms: [...(view.forms ?? []), form],
+      // Where the offer began, so a later rewrite can take it back off without guessing.
+      [OFFER_FROM]: view.body.length,
+    }
+  }
 
   /**
    * Start the session and hand it the first prompt.
@@ -111,38 +198,21 @@ export function createWork({ ctx, log, channel, settings, messages, workspaces, 
 
   return {
     /**
-     * Put the new-task card on the phone for one session.
-     *
-     * Only while the phone holds the person, which is the same rule the activity card follows: what
-     * a run is doing, and what could come next, are things the desk can already see. A card sent
-     * while somebody is sitting at the desk is a message nobody asked for — and a person reading
-     * this plugin's promise would be right to call it push.
-     * @param session - the session whose workspace would be inherited.
-     * @returns the delivered message handle, or undefined when nothing was sent.
-     */
-    async offer(session) {
-      if (typeof channel.deliver !== 'function') return undefined
-      if (priority?.get?.() !== PHONE) return undefined
-      try {
-        const handle = await channel.deliver(viewFor(session))
-        // Recorded against the message so the press, which carries only the message, can find the
-        // session whose workspace it inherits. This is the reason the registry carries a session.
-        workspaces?.record(handle, workspaceOf(session), session)
-        return handle
-      } catch (error) {
-        log.warn(messages().logWorkFailed, error)
-        return undefined
-      }
-    },
-
-    /**
      * Answer one press or form submission from a new-task card.
      * @param action - what the channel reported: the echoed payload, the values, and the message.
+     * @param aftermath - called with the message once the session exists, so whoever owns that card
+     *   can rewrite it. The card is not rewritten here: this module knows what it added, not what
+     *   the card already carried, and a rewrite from here would drop the result it was riding on.
      * @returns the channel's toast response, or undefined when the action is not this module's.
      */
-    async handleAction({ payload, values, messageId } = {}) {
+    async handleAction({ payload, values, messageId } = {}, aftermath) {
       if (payload?.work !== WORK_START) return undefined
       const copy = messages()
+      // The platform may keep showing a form on a card this side has already rewritten, so the
+      // face is not the guard — the message is. Without this the same text starts two sessions.
+      if (messageId !== undefined && used.has(messageId)) {
+        return { toast: copy.workAlreadyStarted, accepted: false }
+      }
       // The channel names its own controls and reports the mapping back, so the value is read
       // through `submits` and never from the field name directly: a channel that renamed the
       // control — which the Feishu one does, to keep two forms on one card from colliding — would
@@ -161,22 +231,27 @@ export function createWork({ ctx, log, channel, settings, messages, workspaces, 
       })
       if (started === undefined) return { toast: copy.noSessionController, accepted: false }
 
-      // The card stops offering, because it has been used. Left as a form it would invite a second
-      // press that starts a second session for the same text.
-      if (messageId !== undefined && typeof channel.update === 'function') {
-        const workspace = workspaceOf(session)
-        void Promise.resolve(channel.update(messageId, {
-          title: titleOf(`${settings().titlePrefix} ${copy.workTitle}`, workspace),
-          tone: 'success',
-          body: [copy.workStarted(workspace)],
-          buttons: [],
-          forms: [],
-        })).catch(error => { log.warn(copy.logMessageRewriteFailed, error) })
-      }
+      markUsed(messageId)
+      await aftermath?.(messageId)
       // The person is holding the phone, so the session they just started should not wait out a
       // desk head start — the same reason a card answer moves the side.
       priority?.set?.(PHONE)
       return { toast: copy.sent, accepted: true }
+    },
+
+    /**
+     * Append the offer to a card somebody else is about to send.
+     *
+     * The result card is where this belongs now. A result already asks "what next?", and answering
+     * it with a second card cost one more notification for the same run — the cost this plugin
+     * spends the most care on. This is the whole of what the module contributes to that card.
+     * @param view - the result's view, or the card as it was sent when closing one.
+     * @param session - the session whose workspace a new task would inherit.
+     * @param outcome - the line to close with, once a card's offer has been taken.
+     * @returns the view to send.
+     */
+    mergeInto(view, session, outcome) {
+      return mergeInto(view, session, outcome)
     },
   }
 }
