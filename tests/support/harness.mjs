@@ -31,7 +31,55 @@ const bound = { recipient: 'ou_bound' }
  * @returns the handle, or a placeholder when nothing has been sent yet.
  */
 function lastDelivered() {
-  return `om_${observed.created.length}`
+  return observed.delivered.at(-1)?.handle ?? 'om_0'
+}
+
+/**
+ * The card that lives in one message, as it stands now.
+ *
+ * The newest edit of that message if it has been edited, and the message it was sent as
+ * otherwise — located by the handle the platform returned, which is the only thing that ties an
+ * edit to its card.
+ * @param handle - the message handle a delivery was given.
+ * @returns the rendered card JSON, or undefined when no such message was accepted.
+ */
+function cardFrom(handle) {
+  const delivered = observed.delivered.find(entry => entry.handle === handle)
+  if (delivered === undefined) return undefined
+  const edited = observed.patched.findLast(entry => entry.path?.message_id === handle)
+  try {
+    return JSON.parse((edited ?? delivered.request).data.content)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Every card this deployment has sent, in order, as `{ handle, card }`.
+ * @returns one entry per accepted delivery.
+ */
+function cardsSent() {
+  return observed.delivered.map(entry => ({ handle: entry.handle, card: cardFrom(entry.handle) }))
+}
+
+/**
+ * The first card whose title starts with one prefix, with the handle it lives in.
+ *
+ * Titles are how a case names the card it means without depending on delivery order: several
+ * machines in this plugin send cards, and which one goes first is a property of the deployment
+ * rather than of the behaviour under test.
+ * @param prefix - the start of the card title.
+ * @returns the handle and card, or undefined when no card has that title.
+ */
+function cardTitled(prefix) {
+  for (const entry of observed.delivered) {
+    const card = cardFrom(entry.handle)
+    if (typeof card?.header?.title?.content === 'string'
+      && card.header.title.content.startsWith(prefix)) {
+      return { handle: entry.handle, card }
+    }
+  }
+  return undefined
 }
 
 /**
@@ -127,6 +175,34 @@ function makeResponse() {
 const corpus = new Map()
 
 /**
+ * The disposers of the deployment currently loaded, so the next case can shut it down.
+ *
+ * One deployment exists at a time in a test process, and leaving one loaded is what puts a
+ * stale card edit into the next case's log.
+ */
+let openDeployment = []
+
+/**
+ * Shut down the deployment a previous case left loaded.
+ *
+ * Called before a new one is built rather than after the old case ends, because a case cannot be
+ * relied on to clean up: it may have failed its last assertion, and a leaked timer would then
+ * corrupt whatever ran next. What matters is that its timers are cleared and its listeners
+ * removed — not that it exits well, so a disposer that throws is swallowed here.
+ */
+function disposePrevious() {
+  const closing = openDeployment
+  openDeployment = []
+  for (const dispose of closing) {
+    try {
+      dispose()
+    } catch {
+      // The deployment's own business; the next case is what this protects.
+    }
+  }
+}
+
+/**
  * Build a fake Host context with in-memory credentials, records, a captured
  * route table, and a captured settings section; apply the plugin.
  * @param configOverrides - plugin config overrides.
@@ -144,6 +220,14 @@ const corpus = new Map()
   keepDurable = false,
   holdStorage = false,
 } = {}) {
+  // The previous deployment is shut down before anything of this one exists.
+  //
+  // A deployment that is still loaded keeps working: a throttled card edit sits on a timer, a
+  // channel holds a long connection, a notice waits out its quiet window. Those timers fire
+  // after the case that created them has finished, and a call they make lands in *this* case's
+  // observation log — a stale write attributed to the wrong case, which reads exactly like a
+  // real failure. Disposing first makes the log a record of one deployment's behaviour.
+  disposePrevious()
   resetObserved()
   // The durable medium — the storage hub and the session logs — is what a restart does
   // not take with it, so a case modelling one keeps it and every other case starts clean.
@@ -160,6 +244,10 @@ const corpus = new Map()
   })
   const listeners = new Map()
   const disposers = []
+  // Published as the deployment's own, so the next case shuts this one down before it starts:
+  // a machine still loaded edits its card on a timer, and that edit would land in the next
+  // case's log.
+  openDeployment = disposers
   const warnings = []
   const infos = []
   const debugs = []
@@ -440,6 +528,7 @@ const corpus = new Map()
     bound, setRejection: (status) => { rejection = status },
     config, ctx, listeners, disposers, warnings, infos, debugs, values, records,
     routes, sections, route, json, state, listenerOf, compose, agents, emitToAll, emitFrame,
+    lastDelivered, cardFrom, cardsSent, cardTitled,
     sessionQuery, storageDomain,
     /** Let a held medium answer, so the pending open and restore can finish. */
     releaseStorage: () => { storageGate?.resolve() },
@@ -540,5 +629,9 @@ export {
   sentCard,
   observed,
   resetObserved,
+  lastDelivered,
+  cardFrom,
+  cardsSent,
+  cardTitled,
   Plugin,
 }
