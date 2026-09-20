@@ -142,6 +142,26 @@ out when it does.
 
 ### Fixed
 
+- **The head start came back only if you had answered a *request* at the desk.** Phone priority sets
+  the wait to zero, and the one thing that gave it back was answering an approval or a question
+  there — so typing into the desktop composer left the deployment behaving as if the person were
+  still on the phone. The session log does say which it was: the browser reaches a session through
+  the gateway's session controller, whose message source carries the caller's own request id, and no
+  other producer of a human message does — not this plugin's instruction from a phone card, not the
+  headless and SDK entry points, not plugin-injected context. A message carrying that id now means
+  somebody is at the desk, so the side moves back and whatever skipped the head start is re-timed
+  (`results.js`, `priority.js`).
+
+- **A request that arrived while the phone held the person stayed on the phone after they went back
+  to the desk.** Phone priority sets the wait to zero so a request does not wait out a head start
+  for an empty chair — but a wait of zero means the request *skips* the head start rather than
+  shortening it, and nothing could give one back: the re-time that exists for exactly this only
+  reaches a request whose card has not gone out. A card the desk let the clock run out on, and a
+  card already on the phone, are both left alone — the first is the feature working, and taking the
+  second back would put one question in front of two surfaces. What changes is the request that had
+  not sent its card yet, which now waits out the head start counted from its own arrival
+  (`escalation.js`, `priority.js`).
+
 - **A card the platform refused as too large now arrives anyway, and the size budget measures the
   right thing.** Two separate faults, one visible as no message at all. The budget was counted in
   the text's own UTF-8 bytes, but the text is escaped into the card JSON and the card JSON is

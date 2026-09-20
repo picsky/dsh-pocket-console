@@ -23,7 +23,7 @@ import { createEscalation } from './escalation.js'
 import { createActivity } from './activity.js'
 import { LOCALES, messagesFor } from './messages.js'
 import { createMirror } from './mirror.js'
-import { createPriority } from './priority.js'
+import { createPriority, DESK } from './priority.js'
 import { createWorkspaces } from './workspaces.js'
 import { registerRoutes } from './routes.js'
 
@@ -264,7 +264,18 @@ export async function apply(ctx, config) {
    * Durable, because a restart that put a person who is away back behind a desk head start
    * would make the phone go quiet exactly when it is the only surface there is.
    */
-  const priority = createPriority({ ctx, log, settings: () => settings, messages })
+  const priority = createPriority({
+    ctx,
+    log,
+    settings: () => settings,
+    messages,
+    // What a return to the desk is *for*: a request that arrived while the phone held the person
+    // skipped the head start rather than shortening it, and without this it would stay on the
+    // phone even once somebody is sitting at the desk again. Wired here rather than at each
+    // caller, because more than one path puts the person back and none of them should have to
+    // know about this.
+    returnedToDesk: () => escalation?.deskReturn(),
+  })
   try {
     await priority.restore()
   } catch (error) {
@@ -361,8 +372,14 @@ export async function apply(ctx, config) {
     const offResults = results.install()
     const offActivity = activity.install()
     // A card is minted when the phone takes the person, so the activity card has to hear
-    // about the move rather than wait for the session's next event to notice.
-    const offPriority = priority.subscribe(() => { activity.onPriority() })
+    // about the move rather than wait for the session's next event to notice. The same
+    // move in the other direction is what gives a head start back to a request that
+    // arrived while the phone held the person — its card skipped the wait entirely, and
+    // without this it would sit on the phone even once somebody is back at the desk.
+    const offPriority = priority.subscribe((side) => {
+      activity.onPriority()
+      if (side === DESK) escalation.deskReturn()
+    })
     const offAction = channel.subscribe((action) => {
       // The action carries the message the press came from, which is how a card whose
       // request is gone — after a restart, or once settled — is rewritten to stop

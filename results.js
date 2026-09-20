@@ -18,7 +18,7 @@
 
 import { CARD_TEXT_BUDGET, clipToBytes, looksLikeSizeRefusal } from './budget.js'
 import { titleOf, workspaceLabel } from './identity.js'
-import { PHONE as PRIORITY_PHONE } from './priority.js'
+import { PHONE as PRIORITY_PHONE, DESK as PRIORITY_DESK } from './priority.js'
 import { RESTORE_LIMIT, createNoticeStore } from './notice-store.js'
 
 import { randomUUID } from 'node:crypto'
@@ -471,6 +471,15 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, wo
       // carried is no longer the session's latest word, so it stops taking
       // replies instead of injecting one into a conversation that moved on.
       retire(session.id, messages().readerSpoke)
+      // Typing into the desktop composer is a person at the desk, and it is the one signal for
+      // that which this deployment can see at all. The browser reaches the session through the
+      // gateway's session controller, whose `source` carries the caller's own request id; every
+      // other path that mints a `{ kind: 'user' }` message does not — the message this plugin
+      // itself sends from a phone card, the headless and SDK entry points, and the plugin-injected
+      // context that renders as folded text rather than as the reader's own words. `rpcId` is
+      // therefore what separates a person typing at the desk from everything else, and it is read
+      // defensively because it is not part of the declared source type.
+      if (typeof source.rpcId === 'string' && source.rpcId !== '') priority?.set(PRIORITY_DESK)
     }
     if (event.type === 'assistant/message' && event.surfaceOp === 'append') {
       const blocks = event.data?.message?.content ?? []
