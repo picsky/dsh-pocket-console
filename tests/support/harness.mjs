@@ -27,6 +27,14 @@ const SAME_ORIGIN = { origin: `http://${HOST}` }
 const bound = { recipient: 'ou_bound' }
 
 /**
+ * The message handle this deployment was last given, which is what a press carries.
+ * @returns the handle, or a placeholder when nothing has been sent yet.
+ */
+function lastDelivered() {
+  return `om_${observed.created.length}`
+}
+
+/**
  * Click one button the way the long connection delivers it: through the
  * dispatcher, inside the v2 envelope whose `event` the SDK flattens before the
  * handler sees it.
@@ -35,14 +43,17 @@ const bound = { recipient: 'ou_bound' }
  * @param options - the pressing identity, defaulting to whoever is bound.
  * @returns the channel's response, whose toast reports the outcome.
  */
-async function clickCard(value, formValue, { operator = bound.recipient } = {}) {
+async function clickCard(value, formValue, { operator = bound.recipient, messageId } = {}) {
   return await observed.dispatcher.invoke({
     schema: '2.0',
     header: { event_type: 'card.action.trigger' },
     event: {
       action: { value, ...(formValue === undefined ? {} : { form_value: formValue }) },
       operator: { open_id: operator },
-      context: { open_message_id: 'om_stub_1' },
+      // The press carries the message it came from, which is what a rewrite of "the card the
+      // press came from" is addressed by. Defaulting to the last message this deployment was
+      // given keeps that name true for the cards a case has actually caused.
+      context: { open_message_id: messageId ?? lastDelivered() },
     },
   })
 }
@@ -401,11 +412,24 @@ const corpus = new Map()
    * session feed — and a case about the second one has to reach it. Cordis dispatches to all
    * of them, so a case that only called the first would be testing something the deployment
    * does not do.
+   *
+   * A frame event is delivered as Cordis delivers it: an agent-scoped listener is called with
+   * **one** argument, the payload `{ agent, frame }`. Handing it the frame beside the payload
+   * would let a case pass against a call convention the deployment never produces — which is
+   * how the live-stream listener once shipped reading a second argument that never arrived.
    * @param event - the event name.
    * @param args - the arguments every listener receives.
    */
   const emitToAll = (event, ...args) => {
     for (const entry of [...(listeners.get(event) ?? [])]) entry.handler(...args)
+  }
+  /**
+   * Feed one live stream frame to every listener, the way Cordis does.
+   * @param agentId - the session the attempt belongs to.
+   * @param frame - the start, chunk or end publication.
+   */
+  const emitFrame = (agentId, frame) => {
+    emitToAll('agent/assistant-stream', { agent: { id: agentId }, frame })
   }
   /** Compose one more optional service, the way a later bundle layer would. */
   const compose = (name) => {
@@ -415,7 +439,7 @@ const corpus = new Map()
   return {
     bound, setRejection: (status) => { rejection = status },
     config, ctx, listeners, disposers, warnings, infos, debugs, values, records,
-    routes, sections, route, json, state, listenerOf, compose, agents, emitToAll,
+    routes, sections, route, json, state, listenerOf, compose, agents, emitToAll, emitFrame,
     sessionQuery, storageDomain,
     /** Let a held medium answer, so the pending open and restore can finish. */
     releaseStorage: () => { storageGate?.resolve() },

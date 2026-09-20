@@ -50,6 +50,16 @@ const REFRESH_MS = 250
  */
 const CLOCK_MS = 5_000
 
+/**
+ * How long to wait before trying a failed send again.
+ *
+ * Long enough that a channel which is down is not hammered at the refresh rate, and long
+ * enough that a response lost after the platform accepted the card is not answered with a
+ * second card within the moment a reader would notice. Short enough that a transient failure
+ * still gets the card out while the run it describes is worth looking at.
+ */
+const RETRY_MS = 5_000
+
 /** Sessions shown at once before the coldest are forgotten. */
 const CAPACITY = 64
 
@@ -94,6 +104,8 @@ export function createActivity({
         handle: undefined,
         sending: false,
         dirty: false,
+        /** When a failed send may be tried again, so a dead channel is not hammered. */
+        retryAt: undefined,
         workspace: undefined,
         turn: undefined,
         step: undefined,
@@ -136,7 +148,6 @@ export function createActivity({
    */
   const buildView = (record) => {
     const copy = messages()
-    console.warn(`DEBUG buildView session=${String(record.session)} ws=${String(record.workspace)} handle=${String(record.handle)} settled=${record.settled}`)
     const parts = [statusOf(record, copy)]
     // The step is named only once it is known: a turn that has started but whose first step
     // has not been announced yet has no step number, and printing one would print `undefined`.
@@ -166,17 +177,44 @@ export function createActivity({
     }
   }
 
+  /** Schedule the next write, unless one is already pending. */
+  const armRefresh = () => {
+    if (disposed || refreshTimer !== undefined) return
+    refreshTimer = setTimeout(flush, REFRESH_MS)
+    refreshTimer.unref?.()
+  }
+
   /**
    * Write out every card whose contents moved.
    *
    * Sends the first version and edits every one after it: the send is the only notification
-   * this card ever produces.
+   * this card ever produces. A card the reader is not supposed to see — because the desk took
+   * the person back while the edit was queued, or because the run started while the desk had
+   * them — is not written at all here, since the window between deciding and writing is long
+   * enough for the situation to change under it.
    */
   const flush = () => {
     refreshTimer = undefined
     if (disposed) return
+    const at = now()
+    let requeue = false
     for (const record of activities.values()) {
-      if (!record.dirty || record.sending) continue
+      if (!record.dirty) continue
+      // Held back while a send is in flight, and while a send that failed is waiting its turn:
+      // dropping the flag instead would lose whatever changed in the meantime, which for a
+      // turn that ended mid-send means a card that says "working" for good.
+      if (record.sending || (record.retryAt ?? 0) > at) {
+        requeue = true
+        continue
+      }
+      if (!phoneHasIt()) {
+        // The desk has the person. A card that exists keeps its last state — it is a record of
+        // a run, and taking it away would take away the answer to "what was it doing" — and one
+        // that was never sent is not sent now, because a message the desk is not expecting is
+        // exactly the notification this plugin does not send.
+        record.dirty = false
+        continue
+      }
       record.dirty = false
       const view = buildView(record)
       if (record.handle === undefined) {
@@ -184,12 +222,18 @@ export function createActivity({
         void Promise.resolve(channel.deliver(view)).then((handle) => {
           record.handle = handle
           record.sending = false
+          record.retryAt = undefined
           // Remembered against the message as well, so a card rewritten without its record —
           // after a restart — can still name the session it belongs to.
           workspaces?.record(handle, record.workspace)
           log.info(messages().logActivitySent)
         }).catch((error) => {
           record.sending = false
+          // A send that fails is retried, but not on the next window: a channel that is down
+          // would otherwise be hammered at the refresh rate, and a response that was lost
+          // after the platform accepted the card would produce a second one.
+          record.retryAt = now() + RETRY_MS
+          record.dirty = true
           log.warn(messages().logActivitySendFailed, error)
         })
         continue
@@ -197,15 +241,14 @@ export function createActivity({
       void Promise.resolve(channel.update(record.handle, view))
         .catch(error => { log.warn(messages().logActivityUpdateFailed, error) })
     }
+    if (requeue) armRefresh()
   }
 
   /** Ask for an edit, at most once per refresh window. */
   const touch = () => {
     if (disposed) return
     for (const record of activities.values()) record.dirty = true
-    if (refreshTimer !== undefined) return
-    refreshTimer = setTimeout(flush, REFRESH_MS)
-    refreshTimer.unref?.()
+    armRefresh()
   }
 
   /** Keep the clock moving while nothing else changes. */
@@ -228,9 +271,10 @@ export function createActivity({
     const type = event?.type
 
     if (type === 'turn/start') {
-      if (!phoneHasIt()) return
-      // A new turn starts the card over: the reader wants where it is now, not where the last
-      // turn got to.
+      // Recorded whatever the side is. A turn that starts while the desk has the person is
+      // tracked without a card, so that taking the phone over mid-turn continues *that* run
+      // instead of opening a second card for it — the record is what the card is, and two
+      // records for one turn would mean two messages about one thing.
       const record = recordOf(session.id)
       record.turn = event.data?.turn
       record.step = undefined
@@ -240,7 +284,8 @@ export function createActivity({
       record.settled = false
       record.startedAt = now()
       if (record.workspace === undefined) record.workspace = workspaceOf(session.id)
-      touch()
+      record.dirty = true
+      if (phoneHasIt()) armRefresh()
       return
     }
 
@@ -252,18 +297,21 @@ export function createActivity({
       record.step = event.data?.step
       record.tool = undefined
       record.fragments = []
-      touch()
+      record.dirty = true
+      if (phoneHasIt()) armRefresh()
       return
     }
     if (type === 'tool/call') {
       record.tool = event.data?.name
       record.step = event.data?.step ?? record.step
-      touch()
+      record.dirty = true
+      if (phoneHasIt()) armRefresh()
       return
     }
     if (type === 'tool/result') {
       record.tool = undefined
-      touch()
+      record.dirty = true
+      if (phoneHasIt()) armRefresh()
       return
     }
     if (type === 'assistant/message') {
@@ -277,7 +325,8 @@ export function createActivity({
           .join('')
         if (text !== '') {
           record.fragments = [text]
-          touch()
+          record.dirty = true
+          if (phoneHasIt()) armRefresh()
         }
       }
       return
@@ -289,7 +338,8 @@ export function createActivity({
       // and leaving it would have the card claim to be waiting on something that finished.
       record.tool = undefined
       if (reason?.kind === 'error') record.failed = reason.error?.message ?? messages().activityError
-      touch()
+      record.dirty = true
+      if (phoneHasIt()) armRefresh()
     }
   }
 
@@ -334,8 +384,12 @@ export function createActivity({
     install() {
       disposed = false
       const offSession = ctx.on('session/event', observe)
-      const offStream = ctx.on('agent/assistant-stream', (payload, frame) => {
-        observeStream(payload?.agent?.id, frame)
+      // One argument, and it is the payload: an agent-scoped listener is called with
+      // `{ agent, frame }`, not with the frame beside it. Reading it as two arguments leaves
+      // `frame` undefined and the live stream silently dead — which is the failure this
+      // comment exists to keep anyone from reintroducing.
+      const offStream = ctx.on('agent/assistant-stream', ({ agent, frame }) => {
+        observeStream(agent?.id, frame)
       })
       startClock()
       return () => {

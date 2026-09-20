@@ -8,15 +8,6 @@
 export const observed = {
   created: [],
   patched: [],
-  /**
-   * Every message this stub accepted, in the order it accepted them.
-   *
-   * The handle the platform returned travels with the request that produced it. Without that
-   * pairing a case has to guess which entry of {@link observed.created} a handle names, and a
-   * guess that is off by one reads a different card — which looks exactly like a real failure.
-   * @type {{ handle: string, request: unknown }[]}
-   */
-  delivered: [],
   /** The dispatcher the channel registered its handlers on. */
   dispatcher: undefined,
   /** The options the dispatcher was built with, including its log routing. */
@@ -55,7 +46,6 @@ export const observed = {
 export function resetObserved() {
   observed.created.length = 0
   observed.patched.length = 0
-  observed.delivered.length = 0
   observed.dispatcher = undefined
   observed.dispatcherOptions = undefined
   observed.started = 0
@@ -126,9 +116,7 @@ export class Client {
           }
           observed.created.push(request)
           this.sent += 1
-          const handle = `om_${this.sent}`
-          observed.delivered.push({ handle, request })
-          return { data: { message_id: handle } }
+          return { data: { message_id: `om_${this.sent}` } }
         },
         patch: async (request) => {
           observed.patched.push(request)
