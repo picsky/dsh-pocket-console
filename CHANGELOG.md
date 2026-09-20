@@ -100,6 +100,14 @@ out when it does.
   poll can see what happened, and the Host logs the lapse (`mirror.js`, `client.js`). The
   deployment log gains one line, `logMirrorLapsed` / 有一条手机决定…过期了, and the browser half
   gains one report, `lapsed`.
+- **A saved change to the desktop head start did not move a countdown that was already
+  running.** The wait was read once, when the request arrived, so an edit reached the next
+  request and not the one the reader was looking at when they made it — which reads as a
+  setting that did not save, and the next move is to restart `dsh`, which withdraws every
+  outstanding notice for nothing. A request still waiting for its card, and a session still
+  inside its calm window, are now re-timed against the value in force, counting from when they
+  started: a request that has waited 100 of 120 seconds and meets a 20-second value goes out
+  now rather than after another 20 (`escalation.js`, `results.js`, `index.js`).
 
 ## 0.8.1
 

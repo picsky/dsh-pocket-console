@@ -93,20 +93,50 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
   }
 
   /**
-   * Restart the quiet window. Any activity in the session calls this, so a run
-   * of turns collapses into one notice after the last one stops.
+   * Arm one session's calm window against the wait in force right now.
+   *
+   * The deadline is this activity plus the wait, not the wait counted from now, so
+   * re-arming an edit keeps the time already spent: a session that has been calm for
+   * 100 of 120 seconds and meets a 20-second value notifies now.
+   * @param session - the session whose window is being (re-)set.
+   * @param track - that session's observation state.
    */
-  const arm = (session) => {
-    if (disposed) return
-    const track = trackOf(session)
+  const rearmOne = (session, track) => {
     if (track.timer !== undefined) clearTimeout(track.timer)
+    const deadline = track.touched + settings().delaySeconds * 1000
     track.timer = setTimeout(() => {
       track.timer = undefined
       // A throw here would be an uncaught exception, which the harness treats as
       // fatal: a notification must never be able to end the process.
       void fire(session).catch(error => { log.warn(messages().logNoticeFailed, error) })
-    }, settings().delaySeconds * 1000)
+    }, Math.max(0, deadline - now()))
     track.timer.unref?.()
+  }
+
+  /**
+   * Restart the quiet window. Any activity in the session calls this, so a run
+   * of turns collapses into one notice after the last one stops.
+   */
+  const arm = (session) => {
+    if (disposed) return
+    rearmOne(session, trackOf(session))
+  }
+
+  /**
+   * Re-time every session still inside its calm window against a changed wait.
+   *
+   * The window is a countdown, and it was armed from the value in force when the
+   * session last moved: an edit has to reach a notice that is already counting down,
+   * or the setting appears not to work until the next turn.
+   */
+  const rearm = () => {
+    if (disposed) return
+    for (const [session, track] of tracks) {
+      // Only a window that is already running is re-timed; a track with no timer is
+      // not waiting to notify anybody.
+      if (track.timer === undefined) continue
+      rearmOne(session, track)
+    }
   }
 
   /** Offer the stopped session's answer, once the session is actually quiet. */
@@ -549,6 +579,13 @@ export function createResultNotifier({ ctx, log, channel, settings, messages, no
      * @returns the toast response, or undefined when this is not a notice action.
      */
     handleAction,
+    /**
+     * Re-time every session still inside its calm window against a changed wait.
+     *
+     * Called when the wait is edited: the window is a countdown, so without this an
+     * edit reaches the next turn and not the notice the reader was watching.
+     */
+    rearm,
     /**
      * How many sessions are being observed right now.
      *
