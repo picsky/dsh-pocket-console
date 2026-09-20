@@ -271,7 +271,13 @@ function renderCard(view, messages) {
   // A folded record, where the view carries one. Collapsed by default and opened in place by the
   // client: the reader who wants the whole of a finished run asks for it, and the reader who does
   // not is not made to scroll past it.
+  //
+  // A rule is drawn above it because the panel's own header is the only thing the platform will
+  // render for a collapsed fold — a header is one line with a chevron, and the client decides what
+  // that looks like. Without a rule the panel reads as one more paragraph of the card rather than as
+  // a separate section, which is how a reader ends up not realising it can be opened at all.
   if (view.details !== undefined) {
+    elements.push({ tag: 'hr' })
     elements.push({
       tag: 'collapsible_panel',
       expanded: false,

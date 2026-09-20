@@ -62,7 +62,7 @@ test('a run starts at the last thing a person said', () => {
   assert.equal(runs.read('s_1').entries.length, 4, 'while the whole record keeps the earlier run')
 })
 
-test('a run holds what a person said, what the model said, and what failed', () => {
+test('a run holds what a person said, what the model said, and what it ran', () => {
   const runs = record()
   const session = { id: 's_1' }
   runs.observe(session, humanSaid('把测试修好'))
@@ -75,30 +75,61 @@ test('a run holds what a person said, what the model said, and what failed', () 
   assert.deepEqual(entries, [
     '把测试修好',
     '我先看失败的用例。',
+    // A tool is one line naming what sort of step it was — never its arguments, never its output.
+    '▸ 运行命令',
     '**工具失败**：`pwsh` — Command failed with exit code 1',
   ])
 })
 
-test('a successful tool call leaves nothing behind', () => {
+test('a tool with no known kind is named, not guessed at', () => {
+  const runs = record()
+  const session = { id: 's_1' }
+  runs.observe(session, humanSaid('用那个插件'))
+  // A deployment that installs a plugin gets tools this table has never heard of. Naming the tool is
+  // honest; guessing a kind would put a wrong word on the card, which is worse than a vague one.
+  runs.observe(session, toolCalled('some_plugin_tool'))
+  runs.observe(session, turnEnded())
+
+  assert.deepEqual(runs.readRun('s_1').entries, ['用那个插件', '▸ 调用工具：`some_plugin_tool`'])
+})
+
+test('consecutive calls of one kind collapse into a counted line', () => {
+  const runs = record()
+  const session = { id: 's_1' }
+  runs.observe(session, humanSaid('读几个文件'))
+  for (let index = 0; index < 5; index += 1) runs.observe(session, toolCalled('read'))
+  // A different kind starts its own line, and the count does not carry across it.
+  runs.observe(session, toolCalled('edit'))
+  runs.observe(session, toolCalled('read'))
+  runs.observe(session, turnEnded())
+
+  // Five reads and one read say the same thing to a reader deciding what to do next, and the
+  // nineteenth line of `读取` only costs the budget the prose needs.
+  assert.deepEqual(runs.readRun('s_1').entries, [
+    '读几个文件',
+    '▸ 读取 ×5',
+    '▸ 改动文件',
+    '▸ 读取',
+  ])
+})
+
+test('a failure ends the run of a kind', () => {
   const runs = record()
   const session = { id: 's_1' }
   runs.observe(session, humanSaid('跑一下'))
-  runs.observe(session, modelSaid('好。'))
   runs.observe(session, toolCalled('pwsh'))
-  runs.observe(session, {
-    type: 'tool/result',
-    surfaceOp: 'append',
-    data: {
-      turn: 1,
-      step: 1,
-      message: { content: [{ type: 'tool-result', toolCallId: 'c1', content: [{ type: 'text', text: 'ok' }] }] },
-    },
-  })
+  runs.observe(session, toolFailed('boom'))
+  runs.observe(session, toolCalled('pwsh'))
   runs.observe(session, turnEnded())
 
-  // The policy is the same one every card uses: what a tool printed does not change what the reader
-  // writes next, and a log of every successful call buries the part that does.
-  assert.deepEqual(runs.read('s_1').entries, ['跑一下', '好。'])
+  // The line before the failure carries it; counting a later call into that same line would hide
+  // which invocation failed.
+  assert.deepEqual(runs.readRun('s_1').entries, [
+    '跑一下',
+    '▸ 运行命令',
+    '**工具失败**：`pwsh` — boom',
+    '▸ 运行命令',
+  ])
 })
 
 test('injected context does not anchor a run', () => {

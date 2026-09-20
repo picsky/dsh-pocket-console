@@ -89,39 +89,50 @@ function runBlock(entries, dropped, copy, budget) {
    * @param entries - the run's entries, this end first.
    * @param limit - the bytes this end may use.
    * @param keep - which end of an entry too long for this end survives.
-   * @returns the text of this end.
+   * @returns the rendered lines, and the bytes of the run's *original* text they account for.
    */
   const takeEnd = (entries, limit, keep) => {
-    const taken = []
+    const lines = []
     let used = 0
+    let accounted = 0
     for (const entry of entries) {
       const size = rawBytes(entry) + 2
-      if (taken.length === 0 && size > limit) {
-        const room = Math.max(1, limit)
+      if (lines.length === 0 && size > limit) {
+        const roomLeft = Math.max(1, limit)
         // Which end is kept is the honest one for where this text sits: the start of a run should
         // keep its opening, the end of one should keep its conclusion.
-        taken.push(keep === 'tail'
-          ? clipToBytes(entry, copy.truncated, room)
-          : clipTailToBytes(entry, copy.truncated, room))
+        const clipped = keep === 'tail'
+          ? clipToBytes(entry, copy.truncated, roomLeft)
+          : clipTailToBytes(entry, copy.truncated, roomLeft)
+        lines.push(clipped)
+        // Accounted for as the original, because the reader is not missing this entry — only part of
+        // it. What they *are* missing is what the marker is for, and it is counted below as the
+        // difference, which is the only count that stays true when an entry is clipped rather than
+        // dropped whole.
+        accounted += size
+        used += rawBytes(clipped) + 2
         break
       }
       if (used + size > limit) break
-      taken.push(entry)
+      lines.push(entry)
       used += size
+      accounted += size
     }
-    return { taken, used }
+    return { lines, accounted }
   }
 
   const head = takeEnd(shown, perEnd, 'tail')
   // The tail draws only from what the head did not take, so an entry is never shown twice.
-  const remaining = shown.slice(head.taken.length)
+  const remaining = shown.slice(head.lines.length)
   const tail = takeEnd([...remaining].reverse(), perEnd, 'head')
-  const omitted = remaining.slice(0, Math.max(0, remaining.length - tail.taken.length))
-  const lost = omitted.reduce((total, entry) => total + rawBytes(entry) + 2, 0) + dropped
+  // What the two ends account for, against the whole run: the difference is what the reader cannot
+  // see, and it includes a clipped entry's tail as well as every entry no end had room for.
+  const total = shown.reduce((sum, entry) => sum + rawBytes(entry) + 2, 0)
+  const lost = Math.max(0, total - head.accounted - tail.accounted) + dropped
   return [
-    head.taken.join('\n\n'),
+    head.lines.join('\n\n'),
     copy.resultOmitted(lost),
-    [...tail.taken].reverse().join('\n\n'),
+    [...tail.lines].reverse().join('\n\n'),
   ].filter(part => part !== '').join('\n\n')
 }
 
@@ -309,6 +320,21 @@ export function createResultNotifier({
       return blocks === '' ? undefined : { title: messages().resultProcess, blocks: [blocks] }
     })()
     if (details !== undefined) view.details = details
+    // Said out loud, because the two ways this ends up absent look identical on the phone: a card
+    // with no fold is what a run the record never saw produces too. The count is what tells them
+    // apart, and a reader who reports "there is no panel" is otherwise unanswerable. The shape of
+    // the view goes with it, so a report can be checked against what was actually sent rather than
+    // against what the reporter could see on a phone.
+    log.debug(messages().logRunFold(session, run.entries.length, details !== undefined))
+    log.debug(messages().logResultView(JSON.stringify({
+      elements: view.body.length,
+      details: view.details === undefined ? null : {
+        title: view.details.title,
+        blocks: view.details.blocks.length,
+        first: String(view.details.blocks[0] ?? '').slice(0, 160),
+      },
+      body: view.body.map(part => String(part).slice(0, 60)),
+    })))
     try {
       const handle = await channel.deliver(view).catch(async (error) => {
         if (!looksLikeSizeRefusal(error)) throw error

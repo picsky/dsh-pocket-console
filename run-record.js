@@ -46,6 +46,31 @@ const CAPACITY = 64
 const TURN_HISTORY = 5
 
 /**
+ * What kind of step each tool name is, copied from the Harness's own client
+ * (`@deepseek-ai/dsh-client-ui-tool`'s `TOOL_VARIANTS`).
+ *
+ * Taken from there rather than invented here, so a phone and the desk agree on what a tool is, and
+ * kept to six kinds because the phone question is "how far along is this", which six answers. A tool
+ * this table does not know — one an installed plugin provides — is deliberately **not** guessed at:
+ * it falls back to a generic line, because a wrong kind is worse than an unspecific one.
+ */
+const TOOL_KINDS = {
+  bash: 'command',
+  pwsh: 'command',
+  read: 'read',
+  read_image: 'read',
+  web_fetch: 'read',
+  web_search: 'search',
+  grep: 'search',
+  glob: 'search',
+  write: 'write',
+  edit: 'edit',
+  run_code: 'code',
+  cordis_package_inspect: 'read',
+  cordis_runtime_inspect: 'read',
+}
+
+/**
  * The bytes one string costs in memory, which is not what it costs to send.
  *
  * These totals exist to bound what this process holds, so they are counted in the string's own UTF-8
@@ -128,6 +153,15 @@ export function createRunRecord({ messages }) {
       /** The last tool named, because a tool result names no tool of its own. */
       lastTool: undefined,
       /**
+       * The kind of the tool line most recently appended, and how many calls it now stands for.
+       *
+       * A run of the same kind collapses into one line with a count: twenty reads and one read say
+       * the same thing to a reader deciding what to do next, and the nineteenth line of `读取` only
+       * costs the budget the prose needs.
+       */
+      lastKind: undefined,
+      lastKindCount: 0,
+      /**
        * What the bound has made this record leave out, in bytes.
        *
        * Counted rather than merely lost: a card that dropped part of a run has to be able to say so,
@@ -172,6 +206,33 @@ export function createRunRecord({ messages }) {
     }
   }
 
+  /**
+   * Add a tool call as one short line, collapsing a run of the same kind.
+   *
+   * The count is written into the line already there rather than appended as another line, which is
+   * what keeps a hundred-step run from spending a hundred lines of the budget.
+   * @param record - the session's record.
+   * @param name - the wire tool name, which decides the kind.
+   */
+  const noteTool = (record, name) => {
+    const copy = messages()
+    const kind = TOOL_KINDS[name] ?? 'other'
+    const label = copy.toolKind(kind, name)
+    if (record.lastKind === kind && record.process.length > 0) {
+      record.lastKindCount += 1
+      const counted = copy.toolKindRepeated(label, record.lastKindCount)
+      // Replaced in place: the line it supersedes is removed from the running total, so a counted
+      // line costs the budget once rather than growing with every call.
+      const previous = record.process[record.process.length - 1]
+      record.processSize += rawBytes(counted) - rawBytes(previous)
+      record.process[record.process.length - 1] = counted
+      return
+    }
+    record.lastKind = kind
+    record.lastKindCount = 1
+    note(record, label)
+  }
+
   /** Move the run being followed into the finished list and start a fresh one. */
   const closeTurn = (record) => {
     if (record.process.length > 0) {
@@ -188,6 +249,8 @@ export function createRunRecord({ messages }) {
     record.streamSize = 0
     record.streamedStep = undefined
     record.committedStep = undefined
+    record.lastKind = undefined
+    record.lastKindCount = 0
   }
 
   /**
@@ -241,6 +304,7 @@ export function createRunRecord({ messages }) {
         // Kept because a `tool/result` names no tool of its own: the call that produced it is the
         // only thing that knows which one failed.
         record.lastTool = event.data?.name
+        noteTool(record, event.data?.name)
         return
       }
       if (type === 'tool/result') {
@@ -261,6 +325,10 @@ export function createRunRecord({ messages }) {
             record.lastTool ?? '',
             clipToBytes(reason, messages().truncated, 300),
           ))
+          // A failure ends the run of a kind, so the next call starts its own line rather than being
+          // counted into one that already carries a failure.
+          record.lastKind = undefined
+          record.lastKindCount = 0
         }
         return
       }
