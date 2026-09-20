@@ -315,6 +315,9 @@ export async function apply(ctx, config) {
     messages,
     workspaces,
     priority,
+    // The run the person last started, so the card carries what happened rather than only the last
+    // thing said.
+    runRecord,
     onSent: async (session) => { await work.offer(session) },
   })
 

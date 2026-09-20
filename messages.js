@@ -62,6 +62,10 @@ const zh = {
   appDescription: '把 DeepSeek Harness 的工具审批与提问送到飞书',
   resultTitle: '结果',
   replyHint: '**回复这条消息**即可把下一步交给这个会话。',
+  /** Label over the folded record of what this run did, on the result card. */
+  resultProcess: '这一段做了什么',
+  /** Placed between the two ends of a run whose middle did not fit, so a reader knows it is partial. */
+  resultOmitted: bytes => `**……中间省略约 ${bytes} 字节……**`,
   sendToAgent: '发送给 agent',
   superseded: '**这条结果已被新的结果取代**，请用最新那条回复。',
   readerSpoke: '**该结果已有新消息**，这条通知不再接受回复。',
@@ -207,6 +211,8 @@ const en = {
   appDescription: 'DeepSeek Harness tool approvals and questions, delivered to Feishu',
   resultTitle: 'Result',
   replyHint: '**Reply to this message** to hand the next step to this session.',
+  resultProcess: 'What this run did',
+  resultOmitted: bytes => `**…… about ${bytes} bytes left out in the middle ……**`,
   sendToAgent: 'Send to the agent',
   superseded: '**A newer result replaced this one** — reply to that message instead.',
   readerSpoke: '**This session has a newer message**, so this notice no longer accepts a reply.',
