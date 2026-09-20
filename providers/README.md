@@ -34,7 +34,7 @@ export async function create({ ctx, config, binding, log, messages }) {
 |---|---|---|
 | `available()` | no | Whether it can deliver right now. On `false` the core **arms no timer and does not escalate**, leaving the desktop chain authoritative. Absent means always available. |
 | `supportsForms` | yes | Whether it can render forms and return multi-select answers or free text. On `false` the core escalates only questions that are *entirely single-select options*; anything else is left to the desktop. |
-| `deliver(view)` | yes | Deliver one message, resolving to an opaque handle for `update`. **Throw on failure** — the core logs a warning and falls back to the desktop. |
+| `deliver(view, options?)` | yes | Deliver one message, resolving to an opaque handle for `update`. **Throw on failure** — the core logs a warning and falls back to the desktop. `options.uuid`, when given, is an idempotency key for this one message: a transport that can carry one must make a repeat of the same key resolve to the message it already accepted rather than delivering a second. See below. |
 | `update(handle, view)` | no | Replace an already-delivered message with a new view. Without it, a decision is not reported back to the card. |
 | `subscribe(onAction)` | yes | Subscribe to user actions. Returns the unsubscribe function. |
 | `close()` | no | Release transport resources. |
@@ -61,6 +61,20 @@ The load order is `resume()` → wait for the user's click when there is a UI �
 only when there is no UI and still no connection. So a deployment that has already bound
 should, after a restart, **print no link and need no click**; the only log line `resume()` may
 emit is a warning when it fails.
+
+### Delivery and the idempotency key
+
+A card is a notification, and a notification that arrives twice is the cost this plugin is built
+to avoid. The one way one card becomes two messages is a send the platform accepted whose answer
+never came back: this side cannot tell "it was sent" from "it was not", so a card that retries
+would deliver a second message.
+
+`deliver(view, { uuid })` is how a channel closes that. When the core passes a `uuid`, the
+channel must make **a repeat of the same key resolve to the message it already accepted** instead
+of delivering a second one. Feishu does this with the request's own `uuid` field, which it holds
+for an hour. A transport with no such mechanism may ignore the option — the core still never
+re-uses a handle it has been given, and the failure it cannot cover is the narrower one where the
+answer is lost *and* the platform has no way to recognise the repeat.
 
 ## Logging
 

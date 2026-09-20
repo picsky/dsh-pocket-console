@@ -33,6 +33,8 @@ import { clipToBytes } from './budget.js'
 import { titleOf, workspaceLabel } from './identity.js'
 import { PHONE } from './priority.js'
 
+import { randomUUID } from 'node:crypto'
+
 /**
  * The shortest interval between two edits of one card.
  *
@@ -120,6 +122,8 @@ export function createActivity({
       dirty: false,
       /** When a failed send may be tried again, so a dead channel is not hammered. */
       retryAt: undefined,
+      /** The idempotency key this card is sent under, so a retry cannot become a second card. */
+      uuid: undefined,
       workspace: undefined,
       turn: undefined,
       step: undefined,
@@ -231,8 +235,14 @@ export function createActivity({
       record.dirty = false
       const view = buildView(record)
       if (record.handle === undefined) {
+        // A send the platform accepted but whose answer was lost is the one way this card could
+        // become two messages — and two messages mean two notifications for one run. The key is
+        // what stops it: a channel that can carry one keeps the platform from accepting the same
+        // card twice, and a channel that cannot is kept from a second *attempt* only by the
+        // answer itself, which is why a delivered id is never sent again.
         record.sending = true
-        void Promise.resolve(channel.deliver(view)).then((handle) => {
+        record.uuid ??= randomUUID()
+        void Promise.resolve(channel.deliver(view, { uuid: record.uuid })).then((handle) => {
           record.handle = handle
           record.sending = false
           record.retryAt = undefined
@@ -242,9 +252,9 @@ export function createActivity({
           log.info(messages().logActivitySent)
         }).catch((error) => {
           record.sending = false
-          // A send that fails is retried, but not on the next window: a channel that is down
-          // would otherwise be hammered at the refresh rate, and a response that was lost
-          // after the platform accepted the card would produce a second one.
+          // An answer that never arrived is the one failure worth retrying: the card may or may
+          // not exist, and the key is what makes trying again safe. A channel that is down is
+          // waited out rather than hammered at the refresh rate.
           record.retryAt = now() + RETRY_MS
           record.dirty = true
           log.warn(messages().logActivitySendFailed, error)

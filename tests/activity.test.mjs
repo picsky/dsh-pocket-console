@@ -281,6 +281,52 @@ test('the map is capped, so a long-lived deployment does not remember every sess
   assert.equal((await scaffolded.state()).activity.tracked, 64, 'and the cap still holds')
 })
 
+test('a card the platform accepted but never answered is not sent again', async () => {
+  const scaffolded = await phoneHoldsIt()
+  const before = observed.created.length
+
+  // The failure a retry can make worse: the platform has the card, and this side never finds out.
+  // Without an idempotency key the retry would send a second one, and the reader would be
+  // notified twice about the same run.
+  observed.loseNextAnswer = true
+  scaffolded.emitToAll('session/event', { id: 's_1' }, { type: 'turn/start', data: { turn: 2 } })
+  await settle()
+  assert.equal(observed.lostAnswers, 1, 'the first send was accepted and its answer was lost')
+  assert.equal(observed.created.length, before + 1, 'so one activity card exists')
+
+  // The retry goes out under the same key, so the platform answers with what it already has.
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'tool/call',
+    data: { turn: 2, step: 1, name: 'npm test' },
+  })
+  await sleep(5_200)
+  assert.equal(observed.deduplicated, 1, 'the repeat was answered, not sent')
+  assert.equal(observed.created.length, before + 1, 'and the reader has one card, not two')
+})
+
+test('two runs are two cards, each under its own key', async () => {
+  const scaffolded = await phoneHoldsIt()
+
+  await startRun(scaffolded, 's_1')
+  await startRun(scaffolded, 's_2')
+
+  // One key per card, and never a shared one: two keys that collided would make the platform
+  // answer the second run with the first run's card.
+  const carried = observed.created
+    .filter((request) => {
+      try {
+        return JSON.parse(request.data.content).header.title.content.startsWith(ACTIVITY_TITLE)
+      } catch {
+        return false
+      }
+    })
+    .map(request => request.data?.uuid)
+
+  assert.equal(carried.length, 2, 'both runs were shown')
+  assert.equal(carried.filter(key => key !== undefined).length, carried.length, 'every card carries a key')
+  assert.equal(new Set(carried).size, carried.length, 'and no two share one')
+})
+
 test('a send that fails is retried, and not on the very next window', async () => {
   const scaffolded = await phoneHoldsIt()
 
