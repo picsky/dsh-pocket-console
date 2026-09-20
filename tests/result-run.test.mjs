@@ -14,6 +14,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { CARD_BODY_BUDGET } from '../budget.js'
 import {
   sleep,
   clickCard,
@@ -177,18 +178,26 @@ test('carrying the run costs no extra message', async () => {
 test('the card carrying the run still fits the platform', async () => {
   await afterARun()
   // The fold competes with the card face for one message. The platform's real body limit was
-  // measured against this tenant at 131 KB (the documented 30 KB is wrong — see
-  // `internal/boundaries.md`), and the card's own text budget is far below it. What this asserts is
-  // the order of magnitude: a card that grew past the measured cap would arrive as nothing at all,
-  // which is worse than a shorter one.
-  const bodies = [
-    ...observed.created.map(request => request.data.content),
-    ...observed.patched.map(request => request.data.content),
-  ]
-  assert.ok(bodies.length > 0, 'the card was written')
-  for (const content of bodies) {
-    const body = Buffer.byteLength(JSON.stringify(content), 'utf8')
-    assert.ok(body < 131 * 1024, `the body stays inside the measured platform cap: ${body} bytes`)
+  // measured against this tenant at 131 KB accepted and 164 KB refused (the documented 30 KB is
+  // wrong — see `internal/boundaries.md`), and every card this deployment actually sends has to sit
+  // under the budget the renderer enforces for it.
+  //
+  // Asserted against the whole **request**, which is what the platform weighs, on every write the
+  // run produced rather than on the result card alone: the per-part budgets bound a string and an
+  // element count, and neither of them bounds the body — that is what `CARD_BODY_BUDGET` is for, and
+  // this is the case that says the renderer applies it to real traffic.
+  const writes = [...observed.created, ...observed.patched]
+  assert.ok(writes.length > 0, 'the card was written')
+  for (const write of writes) {
+    const body = Buffer.byteLength(JSON.stringify({
+      params: { receive_id_type: 'open_id' },
+      data: { receive_id: 'ou_x', msg_type: 'interactive', content: write.data.content },
+    }), 'utf8')
+    assert.ok(
+      body <= CARD_BODY_BUDGET,
+      `every body stays inside the renderer's own whole-card budget: ${body} bytes`,
+    )
+    assert.ok(body < 131 * 1024, `and well inside the measured platform cap: ${body} bytes`)
   }
 })
 
