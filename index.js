@@ -21,6 +21,7 @@ import z from '@deepseek-ai/schemastery'
 import { createResultNotifier } from './results.js'
 import { createEscalation } from './escalation.js'
 import { createActivity } from './activity.js'
+import { createWork } from './work.js'
 import { LOCALES, messagesFor } from './messages.js'
 import { createMirror } from './mirror.js'
 import { createPriority, DESK } from './priority.js'
@@ -287,16 +288,29 @@ export async function apply(ctx, config) {
   escalation = createEscalation({
     log, channel, settings: () => settings, mirror, messages, workspaces, priority,
   })
-  // Result notices ride the session firehose rather than a live request, so a
-  // turn that ends while nobody is watching still reaches the phone.
-  results = createResultNotifier({
-    ctx, log, channel, settings: () => settings, messages, workspaces, priority,
-  })
 
   // The activity card follows a run while it runs, but only once the phone holds the person:
   // while the desk has them, the run is visible where they already are.
   const activity = createActivity({
     ctx, log, channel, settings: () => settings, messages, priority, workspaces,
+  })
+
+  // Starting the next shard is the one thing a finished result cannot do, and the moment a result
+  // lands is when the phone has the person's attention — so the offer follows the notice.
+  const work = createWork({
+    ctx, log, channel, settings: () => settings, messages, workspaces, priority,
+  })
+  // Result notices ride the session firehose rather than a live request, so a
+  // turn that ends while nobody is watching still reaches the phone.
+  results = createResultNotifier({
+    ctx,
+    log,
+    channel,
+    settings: () => settings,
+    messages,
+    workspaces,
+    priority,
+    onSent: async (session) => { await work.offer(session) },
   })
 
   /** The card's status snapshot: what the section serves and what is open. */
@@ -380,11 +394,17 @@ export async function apply(ctx, config) {
       activity.onPriority()
       if (side === DESK) escalation.deskReturn()
     })
-    const offAction = channel.subscribe((action) => {
+    const offAction = channel.subscribe(async (action) => {
       // The action carries the message the press came from, which is how a card whose
       // request is gone — after a restart, or once settled — is rewritten to stop
-      // looking answerable. It reaches both decoders for that reason.
-      const notice = results.handleAction(action)
+      // looking answerable. It reaches every decoder for that reason.
+      //
+      // The new-task handler goes first because it is the only one that *starts* something: a
+      // payload that names it must never fall through to a decoder that would treat the same
+      // press as an answer to a request. Each handler returns undefined for what is not its own.
+      const started = await work.handleAction(action)
+      if (started !== undefined) return started
+      const notice = await results.handleAction(action)
       if (notice !== undefined) return notice
       return escalation.handleAction(action)
     })

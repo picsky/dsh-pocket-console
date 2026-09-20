@@ -72,6 +72,14 @@ const zh = {
   noAgent: '会话已不在运行，指令未发送',
   sent: '已发送给 agent',
   received: '**已收到指令**，已排入该会话。',
+  workTitle: '新任务',
+  workIntro: '在一个**新会话**里开一轮，工作区沿用这个会话的。',
+  workPlaceholder: '新会话要做什么？',
+  workStart: '开始新任务',
+  workStarted: workspace => `**已开新会话**${workspace === undefined ? '' : ` · ${workspace}`}，本轮结束后会像往常一样通知你。`,
+  noSessionController: '这个部署没有会话控制器，开不了新会话。',
+  logWorkStarted: (session, workspace) => `新会话已开始：${session}（工作区 ${workspace ?? '未知'}）。`,
+  logWorkFailed: '开新会话失败',
 
   /**
    * Deployment log lines, in the deployment's language.
@@ -208,6 +216,14 @@ const en = {
   noAgent: 'That session is no longer running, so nothing was sent',
   sent: 'Sent to the agent',
   received: '**Instruction received** and queued for that session.',
+  workTitle: 'New task',
+  workIntro: 'Start a turn in a **new session**, using this one\'s workspace.',
+  workPlaceholder: 'What should the new session do?',
+  workStart: 'Start a new task',
+  workStarted: workspace => `**New session started**${workspace === undefined ? '' : ` · ${workspace}`}; you will hear about its result as usual.`,
+  noSessionController: 'this deployment has no session controller, so it cannot start a new session.',
+  logWorkStarted: (session, workspace) => `started a new session: ${session} (workspace ${workspace ?? 'unknown'})`,
+  logWorkFailed: 'starting a new session failed',
 
   /** Deployment log lines. See the Chinese dictionary for why these are localized. */
   logMessageRewriteFailed: 'message rewrite failed',

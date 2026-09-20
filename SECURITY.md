@@ -62,6 +62,12 @@ hold, it is a bug:
   [ADR 0006](docs/decisions/0006-binding-is-not-up-for-grabs.md).
 - **A grant is one-shot.** `allowed-once` applies to the call that asked, keyed by
   a random id that dies the moment the request settles.
+- **Starting a task from the phone cannot choose where.** A new-task card starts a session in the
+  workspace of the session the card was about, read from that session at the moment of the press. The
+  press carries no directory, so a lost phone is not a way to run work in an arbitrary project, and
+  the new session inherits that workspace and the deployment's model rather than a selection the
+  press asked for. This is the one action larger than deciding a request: see the README's
+  *Limitations* for what it costs.
 - **An answer must be one the request offered.** A label no option carried is
   refused; a question id that is not in the request is refused.
 - **Secrets live in the credential store**, never in the process environment and

@@ -76,7 +76,7 @@ That is every key at the value the code already ships, so copying it changes not
 An approval card is a **remote code-execution authorization channel**, so it is built like one:
 
 - **Grants are single-use.** `allowed-once` applies to that call only; the random id that carries it dies the moment the request settles.
-- **The blast radius of a lost phone is one answer.** The card is itself a credential, so only the bound recipient can press: a private chat only binds an unbound deployment, and group messages never bind.
+- **The blast radius of a lost phone is one answer — or one task.** The card is itself a credential, so only the bound recipient can press: a private chat only binds an unbound deployment, and group messages never bind. Answering a card decides something the desk already started. **Starting a new task from the phone is larger than that**: it begins work in the current session's workspace, so a lost phone is a way to run a turn in that project, within whatever the agent's own approval rules allow. It still cannot choose a workspace, reach another project, or touch settings and credentials.
 - **Secrets never go in environment variables.** Every command the agent runs inherits the process environment, so credentials live in `$DSH_HOME/.credentials.yaml`.
 - **The app asks for the minimum.** Three permissions, one event and one callback, from the minimum base rather than the default template's cloud-doc permissions.
 - **There is no server of ours in the path.** Feishu sees the card, because Feishu is the transport.
@@ -85,8 +85,8 @@ Full invariants, threat model and reporting: [SECURITY.md](SECURITY.md).
 
 ## What it deliberately does not do
 
-- **No GUI mirroring.** Moving the interface would move the workspace, the session, the settings and the credentials — so you also **cannot keep working from the phone**.
-- **No push to the phone by default.** A card goes out only when the desktop has not answered in time.
+- **No GUI mirroring.** Moving the interface would move the workspace, the session, the settings and the credentials — so you also **cannot browse sessions, read history, or change settings from the phone**. What you *can* do is start the next task: when a run finishes while the phone holds you, the card offers a new session in that same workspace.
+- **No push to the phone by default.** A card goes out only when the desktop has not answered in time — with two deliberate exceptions, because both are somebody being **blocked**, not a status update: an approval or question, and the result of a finished run.
 - **No auto-approval, ever.** The plugin never decides in your place: **silence never approves**.
 - **No inbound listener.** No port, tunnel, relay or third-party server — so also no "reachable from anywhere".
 - **No changes to DSH.** It ships as a `dsh.bundle` profile layer and registers on two documented waterfalls. Nothing in the harness is patched or forked, and a DSH upgrade cannot break it.
