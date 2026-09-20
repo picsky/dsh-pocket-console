@@ -264,7 +264,18 @@ export async function apply(ctx, config) {
    * Durable, because a restart that put a person who is away back behind a desk head start
    * would make the phone go quiet exactly when it is the only surface there is.
    */
-  const priority = createPriority({ ctx, log, settings: () => settings, messages })
+  const priority = createPriority({
+    ctx,
+    log,
+    settings: () => settings,
+    messages,
+    // What a return to the desk is *for*: a request that arrived while the phone held the person
+    // skipped the head start rather than shortening it, and without this it would stay on the
+    // phone even once somebody is sitting at the desk again. Wired here rather than at each
+    // caller, because more than one path puts the person back and none of them should have to
+    // know about this.
+    returnedToDesk: () => escalation?.deskReturn(),
+  })
   try {
     await priority.restore()
   } catch (error) {

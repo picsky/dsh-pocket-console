@@ -56,10 +56,11 @@ export function shouldReturnHeadStart(record) {
 
 /**
  * Create the priority state.
- * @param options - the host context, the logger, the effective settings thunk, and the copy.
+ * @param options - the host context, the logger, the effective settings thunk, the copy, and what
+ *   to do when the person is provably back at the desk.
  * @returns reading, moving, and resolving the wait from the current side.
  */
-export function createPriority({ ctx, log, settings, messages }) {
+export function createPriority({ ctx, log, settings, messages, returnedToDesk }) {
   /** The side in force. Starts at the desk, which is the documented default. */
   let side = DESK
 
@@ -95,6 +96,18 @@ export function createPriority({ ctx, log, settings, messages }) {
       if (next === side) return false
       side = next
       log.info(side === PHONE ? messages().logPhonePriority : messages().logDeskPriority)
+      // Every path that puts the person back at the desk says so by moving this side, so the one
+      // thing that has to happen because of it happens here: give the head start back to whatever
+      // skipped it. Wired at this level so that a caller which moves the side cannot forget it —
+      // there is more than one such caller, and they are in different modules.
+      if (side === DESK && typeof returnedToDesk === 'function') {
+        try {
+          returnedToDesk()
+        } catch (error) {
+          // A reaction, not the state: whatever it failed to do must not undo the move.
+          log.warn(messages().logPriorityListenerFailed, error)
+        }
+      }
       for (const listener of listeners) {
         try {
           listener(side)

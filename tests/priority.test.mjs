@@ -389,6 +389,51 @@ test('a request still waiting when the desk returns gets its head start back', a
   assert.equal(observed.created.length, 0, 'the recovered request waits the head start out')
 })
 
+test('typing at the desktop composer is a person at the desk', async () => {
+  const { route, state, listenerOf, emitToAll } = await scaffold({ delaySeconds: 1 })
+  await bind(route)
+  const approval = listenerOf('approval/request')
+  await phoneHasIt(approval)
+  assert.equal((await state()).priority, 'phone', 'the phone has it')
+
+  // What the browser's own submission looks like in the session log: a human message whose source
+  // carries the request id the gateway's session controller stamped on it. That id is the whole
+  // difference between a person typing at the desk and the several other producers of a
+  // `{ kind: 'user' }` message — including this plugin's own phone-side instruction.
+  emitToAll('session/event', { id: 's_1' }, {
+    type: 'user/message',
+    surfaceOp: 'append',
+    data: {
+      source: { kind: 'user', rpcId: 'b2f1c0de-0000-4000-8000-000000000001' },
+      content: [{ type: 'text', text: '接着把文档补完' }],
+    },
+  })
+  await sleep(20)
+  assert.equal((await state()).priority, 'desk', 'and the head start is back in force')
+})
+
+test('a message with no gateway id does not count as somebody at the desk', async () => {
+  const { route, state, listenerOf, emitToAll } = await scaffold({ delaySeconds: 1 })
+  await bind(route)
+  const approval = listenerOf('approval/request')
+  await phoneHasIt(approval)
+  assert.equal((await state()).priority, 'phone', 'the phone has it')
+
+  // The same shape minus the id, which is how every other producer writes one: this plugin's own
+  // instruction from a result card, the headless and SDK entry points, and plugin-injected context.
+  // Counting any of them as somebody at the desk would hand the head start back the moment a
+  // person tapped a card on the phone — undoing the very thing that puts the phone in charge.
+  for (const source of [{ kind: 'user' }, { kind: 'plugin', plugin: 'somewhere' }]) {
+    emitToAll('session/event', { id: 's_1' }, {
+      type: 'user/message',
+      surfaceOp: 'append',
+      data: { source, content: [{ type: 'text', text: '接着补文档' }] },
+    })
+  }
+  await sleep(20)
+  assert.equal((await state()).priority, 'phone', 'so the phone keeps it')
+})
+
 test('a request whose card already reached the phone is not disturbed', async () => {
   const { route, listenerOf } = await scaffold({ delaySeconds: 1 })
   await bind(route)

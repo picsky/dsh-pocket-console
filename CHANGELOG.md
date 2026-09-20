@@ -142,6 +142,16 @@ out when it does.
 
 ### Fixed
 
+- **The head start came back only if you had answered a *request* at the desk.** Phone priority sets
+  the wait to zero, and the one thing that gave it back was answering an approval or a question
+  there — so typing into the desktop composer left the deployment behaving as if the person were
+  still on the phone. The session log does say which it was: the browser reaches a session through
+  the gateway's session controller, whose message source carries the caller's own request id, and no
+  other producer of a human message does — not this plugin's instruction from a phone card, not the
+  headless and SDK entry points, not plugin-injected context. A message carrying that id now means
+  somebody is at the desk, so the side moves back and whatever skipped the head start is re-timed
+  (`results.js`, `priority.js`).
+
 - **A request that arrived while the phone held the person stayed on the phone after they went back
   to the desk.** Phone priority sets the wait to zero so a request does not wait out a head start
   for an empty chair — but a wait of zero means the request *skips* the head start rather than
