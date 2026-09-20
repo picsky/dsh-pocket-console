@@ -315,7 +315,14 @@ function renderCard(view, messages) {
       name: `form_${index}`,
       elements: [
         form.options === undefined
-          ? { tag: 'input', name: name(form.fieldId), placeholder: plainText(messages().answerPlaceholder) }
+          ? {
+              tag: 'input',
+              name: name(form.fieldId),
+              // A view may name its own placeholder, which matters when two forms share one card:
+              // the answer box and the next-task box ride the same result card, and a shared
+              // placeholder would make them read as the same control.
+              placeholder: plainText(form.placeholder ?? messages().answerPlaceholder),
+            }
           : {
               tag: 'checker',
               name: name(form.fieldId),
