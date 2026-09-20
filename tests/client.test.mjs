@@ -354,21 +354,35 @@ test('the browser half loads through the module loader and registers its card', 
   )
   uiSession.pendingInteractions.getSnapshot = () => new Map([['s_agent', pending]])
 
-  // A decision whose window passed before this page saw it is said out loud: the
-  // host has no other way to learn that a composer was left waiting behind it.
-  served = { id: 'm2c', sessionId: 's_agent', questions: ['x'], answer: phoneAnswer, expired: true }
+  // The other half of that scenario: the page was already open and its timers
+  // were frozen — a sleeping machine, a background tab — so by the time a poll
+  // ran the window had gone. Nothing can be done for that composer any more, and
+  // this is the only side that can say it, so it is said rather than passed over.
+  const stalled = { id: 'm2c', sessionId: 's_agent', questions: ['x'], answer: phoneAnswer }
+  served = stalled
   await sleep(1100)
-  assert.equal(lateAnswers.length, 1, 'an expired decision is not applied')
+  stalled.expired = true
+  await sleep(1100)
   assert.ok(
     reports.some(entry => entry.status === 'lapsed' && entry.syncId === 'm2c'),
-    `a lapsed decision is reported: ${JSON.stringify(reports.slice(-3))}`,
+    `a decision that lapsed after this page was open is reported: ${JSON.stringify(reports.slice(-3))}`,
   )
-  const lapsedReports = reports.filter(entry => entry.status === 'lapsed' && entry.syncId === 'm2c').length
+  const lapsedOnce = reports.filter(entry => entry.status === 'lapsed' && entry.syncId === 'm2c').length
   await sleep(1100)
   assert.equal(
     reports.filter(entry => entry.status === 'lapsed' && entry.syncId === 'm2c').length,
-    lapsedReports,
+    lapsedOnce,
     'and said once, not every tick',
+  )
+
+  // A decision whose window passed before this page saw it is said out loud: the
+  // host has no other way to learn that a composer was left waiting behind it.
+  served = { id: 'm2d', sessionId: 's_agent', questions: ['x'], answer: phoneAnswer, expired: true }
+  await sleep(1100)
+  assert.equal(lateAnswers.length, 1, 'an expired decision is not applied to a composer')
+  assert.ok(
+    reports.some(entry => entry.status === 'lapsed' && entry.syncId === 'm2d'),
+    `a lapsed decision is reported: ${JSON.stringify(reports.slice(-3))}`,
   )
 
   // A page whose Session UI is absent says so instead of failing silently.
