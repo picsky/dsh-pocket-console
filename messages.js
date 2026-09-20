@@ -102,6 +102,8 @@ const zh = {
   noSessionController: '这个部署没有会话控制器，开不了新会话。',
   logWorkStarted: (session, workspace) => `新会话已开始：${session}（工作区 ${workspace ?? '未知'}）。`,
   logWorkFailed: '开新会话失败',
+  logWorkUnowned: cwd => `要继承的目录不属于任何工作区（${cwd}），新会话会落在网页端的「未分组」里。`,
+  logWorkUngrouped: '新会话没能挂进工作区，已退回按目录创建；它会落在网页端的「未分组」里',
 
   /**
    * Deployment log lines, in the deployment's language.
@@ -268,6 +270,8 @@ const en = {
   noSessionController: 'this deployment has no session controller, so it cannot start a new session.',
   logWorkStarted: (session, workspace) => `started a new session: ${session} (workspace ${workspace ?? 'unknown'})`,
   logWorkFailed: 'starting a new session failed',
+  logWorkUnowned: cwd => `the directory to inherit belongs to no workspace (${cwd}); the new session will sit under "ungrouped" in the Web interface.`,
+  logWorkUngrouped: 'the new session could not be attached to a workspace and was created by directory instead; it will sit under "ungrouped" in the Web interface',
 
   /** Deployment log lines. See the Chinese dictionary for why these are localized. */
   logMessageRewriteFailed: 'message rewrite failed',

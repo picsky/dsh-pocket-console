@@ -24,3 +24,4 @@ code. A change that contradicts a record here needs a new record, not a quiet ed
 | [0017](0017-the-result-card-carries-the-run.md) | The result card carries the run in a fold, keeping both ends and naming the middle it gave up |
 | [0018](0018-the-status-board-is-a-pinned-card.md) | The persistent status board is a pinned card — and one with no controls, so it stays editable |
 | [0019](0019-the-next-task-rides-the-result-card.md) | The next task is a form on the result card, and a rewrite may not take the answer away |
+| [0020](0020-a-phone-started-session-joins-its-workspace.md) | A phone-started session is created through its workspace, so the desk groups it where it belongs |

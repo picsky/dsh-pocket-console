@@ -107,6 +107,11 @@
 |---|---|
 | 插件**不能**创建"受限会话"，只能新建或直接给 agent 发消息 | **已验证**（读实现） |
 | 新建会话就是 Web 界面走的那条路：`sessionController.create({ cwd, agentPreset? })` | **已验证**（读实现 + 类型） |
+| **`create` 只在给了 `workspaceId` 时才 `attachSession`**；只给 `cwd` 的会话不属于任何工作区 | **已验证**（读实现 + 真机复现：一条 header cwd 等于已登记工作区路径的会话，不在任何工作区的 `sessionIds` 里。见 [0020](../docs/decisions/0020-a-phone-started-session-joins-its-workspace.md)） |
+| 工作区成员资格是**双条件**：名册里有这个 id，**且** header 的规范 cwd 等于工作区路径 | **已验证**（类型文档原文）⇒ 事后补一条 id 不足以修复 |
+| `workspaceId` 与 `cwd` **不能同时给**（`gateway/bad-request`） | **已验证**（读实现） |
+| 工作区控制器在持久化域变化时**主动广播** `upsert` 给 Web 客户端 | **已验证**（读实现）⇒ 挂载成功时**开着的页面不必刷新**就会显示新会话 |
+| `WorkspaceRegistry.resolveByPath(path)` 做 `realpath` 后按字符串匹配；目录无主返回 `undefined`，目录不可解析则**抛错** | **已验证**（读实现） |
 | `sessionController.prompt()` 会把调用方 request id 写进消息 source；**其他人类消息路径都不写** | **已验证**（逐个查过。这是桌面判据的基础，见 [0015](../docs/decisions/0015-desk-presence-is-the-gateways-request-id.md)） |
 | 该字段**没有任何类型声明**，只存在于运行时的对象上；失效时**静默** | **已验证**（搜遍所有 `.d.ts`）。**这是一处上游依赖风险** |
 | 工具结果可达数百 KB，且会话层**没有截断标记** | **已验证**（读实现） |
