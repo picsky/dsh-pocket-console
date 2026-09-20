@@ -93,6 +93,54 @@ test('a run holds what a person said, what the model said, and what it ran', () 
   ])
 })
 
+test('a second turn in one session does not orphan the message that opens it', () => {
+  const runs = record()
+  const session = { id: 's_1' }
+  // Two turns, one after the other — the ordinary shape of a session somebody keeps talking to.
+  runs.observe(session, humanSaid('第一件'))
+  runs.observe(session, { type: 'turn/start', data: { turn: 1 } })
+  runs.observe(session, modelSaid('第一件的答案'))
+  runs.observe(session, turnEnded(1))
+  runs.observe(session, humanSaid('第二件'))
+  runs.observe(session, { type: 'turn/start', data: { turn: 2 } })
+  runs.observe(session, modelSaid('第二件的答案', { turn: 2 }))
+  runs.observe(session, turnEnded(2))
+
+  // A turn that has ended has to be known as ended, or the next `turn/start` looks like the same
+  // turn: the run is never closed, and the message that opened the new turn is orphaned into a run
+  // nothing reads — so the reader is shown an answer to a question the record cannot show.
+  assert.deepEqual(lines(runs, 's_1'), ['第二件', '第二件的答案'], 'the new run keeps the message that opened it')
+  assert.deepEqual(
+    runs.read('s_1').entries.map(entry => entry.text),
+    ['第一件', '第一件的答案', '第二件', '第二件的答案'],
+    'while the whole record still holds the turn before it',
+  )
+})
+
+test('the message that opened a run stays in it across the turns that follow', () => {
+  const runs = record()
+  const session = { id: 's_1' }
+  runs.observe(session, humanSaid('把剩下的两个 shard 做完'))
+  // The message lands **before** the turn that claims it opens, so a rule that closes the previous
+  // run on "is anything in it" archives the anchor itself here — and the reader loses the words the
+  // whole run is an answer to.
+  runs.observe(session, { type: 'turn/start', data: { turn: 1 } })
+  assert.deepEqual(lines(runs, 's_1'), ['把剩下的两个 shard 做完'], 'the anchor survives the turn that claims it')
+
+  runs.observe(session, modelSaid('先看一眼。'))
+  runs.observe(session, turnEnded(1))
+  // A second turn, with nothing said in between: the anchor belongs to the run, not to a turn.
+  runs.observe(session, { type: 'turn/start', data: { turn: 2 } })
+  runs.observe(session, modelSaid('又看了一处。', { turn: 2 }))
+  runs.observe(session, turnEnded(2))
+
+  assert.deepEqual(lines(runs, 's_1'), [
+    '把剩下的两个 shard 做完',
+    '先看一眼。',
+    '又看了一处。',
+  ], 'and no later turn archives it')
+})
+
 test('a tool with no known kind is named, not guessed at', () => {
   const runs = record()
   const session = { id: 's_1' }

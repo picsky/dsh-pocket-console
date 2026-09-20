@@ -150,6 +150,16 @@ export function createRunRecord({ messages }) {
       /** The step those frames belong to, and the step whose message was already folded. */
       streamedStep: undefined,
       committedStep: undefined,
+      /**
+       * Whether the turn this record is following has been opened and not yet ended.
+       *
+       * This is what makes "a new turn started" decidable. The turn number cannot answer it — a
+       * session whose log was reset numbers its turns from one again — and "is anything in the run"
+       * cannot either, because a person's message lands before the turn that claims it. Left
+       * unsettled, a later turn's `turn/start` looks like the same turn, the run is never closed, and
+       * the message that opened the next turn is orphaned into a run nothing reads.
+       */
+      turnOpen: false,
       /** The last tool named, because a tool result names no tool of its own. */
       lastTool: undefined,
       /**
@@ -289,15 +299,19 @@ export function createRunRecord({ messages }) {
 
       if (type === 'turn/start') {
         // A **new** turn is a finished run, and it stays in the list so a frozen card keeps the
-        // sequence it always had. Compared by turn number rather than by "is anything in the run":
-        // a person's message arrives *before* the turn that claims it opens, so closing on content
-        // archived the very anchor the run is measured from, and the human's own words disappeared
-        // from the record of what they asked for.
+        // sequence it always had. "New" is asked as "was the previous turn closed", not as "is the
+        // number different" and not as "is anything in the run":
+        //
+        // - A person's message arrives *before* the turn that claims it opens, so closing on content
+        //   archived the very anchor a run is measured from and the human's own words disappeared
+        //   from the record of what they asked for.
+        // - Turn numbers are per session and start again in a session whose log was reset, so
+        //   comparing numbers alone misses a genuinely new turn and orphans the message that opened
+        //   it — the same loss by a different route.
         const starting = event.data?.turn
-        if (typeof starting === 'number' && typeof record.turn === 'number' && starting !== record.turn) {
-          closeTurn(record)
-        }
+        if (record.turnOpen === true) closeTurn(record)
         if (typeof starting === 'number') record.turn = starting
+        record.turnOpen = true
         return
       }
 
@@ -366,6 +380,8 @@ export function createRunRecord({ messages }) {
         return
       }
       if (type === 'turn/end') {
+        // The turn is over, so the next `turn/start` is a new run whatever its number says.
+        record.turnOpen = false
         // The card face shows only the newest fragments, so a run whose text arrived entirely as
         // live frames would close with a record that never saw most of it. What is folded is the
         // whole streamed step, and it is skipped when that step's committed message already went in.
