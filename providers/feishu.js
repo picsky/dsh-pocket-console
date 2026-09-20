@@ -681,6 +681,15 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
 
     const wsClient = new Lark.WSClient({ ...options, ...lifecycle(run) })
     connected = false
+    // What this connection expects to receive, said out loud once. Two names have to agree for a
+    // button press to arrive: the callback the app was created subscribed to, and the key the
+    // dispatcher below is registered under. They are separate strings in separate places, and a
+    // drift between them is silent in the worst way — every card still renders with its buttons, and
+    // pressing one simply does nothing, with no error on either side. Logging both makes that a
+    // comparison a deployment can make from its own log instead of a guess. The same line answers
+    // "is the long connection even subscribed to the thing I am pressing".
+    log.info(messages().logSubscribedCallbacks(CALLBACKS.join(', ')))
+    log.info(messages().logSubscribedEvents(TENANT_EVENTS.join(', ')))
     // Published before the handshake is asked for, because the callbacks that report
     // it can run synchronously inside `start()` — an error arrives there, and the
     // handler has to be able to give this connection up. Assigning afterwards meant

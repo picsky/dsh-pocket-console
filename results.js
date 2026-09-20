@@ -214,6 +214,15 @@ export function createResultNotifier({
   let restored = false
   /** Set while a restore is in flight, so the two triggers cannot both run it. */
   let restoring = false
+  /**
+   * How many human messages have arrived carrying the gateway's request id, and how many have not.
+   *
+   * Counted so the desk-presence rule can be checked from the log rather than only believed — see
+   * the one place `rpcId` is read, in {@link onEvent}.
+   */
+  let humanWithRequestId = 0
+  /** The other half of that count: human messages with no request id beside them. */
+  let humanWithoutRequestId = 0
 
   /**
    * The wait in force: the configured calm window, or none while the phone has the person.
@@ -792,7 +801,28 @@ export function createResultNotifier({
       // context that renders as folded text rather than as the reader's own words. `rpcId` is
       // therefore what separates a person typing at the desk from everything else, and it is read
       // defensively because it is not part of the declared source type.
-      if (typeof source.rpcId === 'string' && source.rpcId !== '') priority?.set(PRIORITY_DESK)
+      //
+      // That is the whole of the desk-presence rule, and it rests on a field the harness never
+      // promises — so it is the one mechanism here that can stop working without a symptom. The
+      // counts below are how the *deployment* answers "is it still working", because from inside
+      // this process a missing `rpcId` is indistinguishable from a person who is genuinely away:
+      // both look like a human message with nothing beside it. There is deliberately no warning —
+      // an absent marker is not evidence of a break, and crying wolf on every phone message would
+      // be worse than the silence it replaced. What is here is the count, which turns "the phone
+      // keeps interrupting me" into a fact that can be checked against it.
+      if (typeof source.rpcId === 'string' && source.rpcId !== '') {
+        humanWithRequestId += 1
+        if (humanWithRequestId === 1) log.info(messages().logDeskSignalSeen(humanWithoutRequestId))
+        priority?.set(PRIORITY_DESK)
+      } else {
+        humanWithoutRequestId += 1
+        if (humanWithoutRequestId === 1) {
+          // Said once, at the first human message of the process: if the deployment looks at the
+          // desk and reads this, the rule is alive. If it never appears, nothing human has reached
+          // this process directly — which is itself the answer to where the messages came from.
+          log.info(messages().logDeskSignalAbsentSoFar)
+        }
+      }
     }
     if (event.type === 'assistant/message' && event.surfaceOp === 'append') {
       const blocks = event.data?.message?.content ?? []
