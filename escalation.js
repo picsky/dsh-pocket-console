@@ -48,6 +48,7 @@ const titleFor = (settings, workspace, kind) => titleOf(`${settings.titlePrefix}
  */
 export function createEscalation({
   log, channel, settings, mirror, messages, workspaces, priority, isClosed = () => false,
+  diagnostics = () => {},
 }) {
   /** Live escalations keyed by the opaque id embedded in their action payloads. */
   const open = new Map()
@@ -231,7 +232,13 @@ export function createEscalation({
     // A channel that cannot deliver right now must not arm a timer: the desktop
     // chain stays authoritative and no request is left waiting on a message
     // that will never arrive.
-    if (closed || channel.available?.() === false || !escalatable(kind, request)) return desktop
+    if (closed || channel.available?.() === false || !escalatable(kind, request)) {
+      // One of three reasons, and from the desk they are indistinguishable: the plugin is unloaded,
+      // the return path is not up, or this request is not one a person can answer from a card. Said
+      // out loud because "the card never came" is otherwise the whole of what anyone can observe.
+      diagnostics?.(`升级：不发给手机（kind=${kind}，closed=${closed}，通道可用=${channel.available?.() !== false}，可升级=${escalatable(kind, request)}）。`)
+      return desktop
+    }
 
     const record = {
       id: randomUUID().replaceAll('-', '').slice(0, 20),

@@ -24,6 +24,7 @@
 #       resultNotifyCooldownSeconds: 0
 #       mirrorTtlSeconds: 60
 #       locale: zh
+#       debug: off
 
 - insert:
     - id: pocket-console

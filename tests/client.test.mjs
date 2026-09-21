@@ -567,7 +567,7 @@ test('the browser half loads through the module loader and registers its card', 
   assert.ok(projected.length >= 3, `the store projects its fields: ${projected.join(', ')}`)
   assert.deepEqual(
     projected,
-    ['delaySeconds', 'titlePrefix', 'resultNotify'],
+    ['delaySeconds', 'titlePrefix', 'resultNotify', 'debug'],
     'the projection follows the FIELDS list the card renders from',
   )
 

@@ -89,6 +89,18 @@ stateDiagram-v2
 | `resultNotifyCooldownSeconds` | `0` | Shortest gap between two result notices for one session |
 | `mirrorTtlSeconds` | `60` | How long a phone decision may still close the desktop composer |
 | `locale` | `zh` | Language of the cards sent to the phone (`zh` or `en`) |
+| `debug` | `off` | ★ `on` writes the plugin's decision about every card to the deployment log — why it was sent, edited, or skipped |
+
+`debug` is the switch to reach for when a card does something you cannot explain.
+A card that is **not** rewritten and a card whose rewrite **failed** look identical on the
+phone, and the branch that skips the rewrite is silent by design, so without this the only
+symptom is "nothing changed". With it on, each decision is named.
+
+It is deliberately two switches rather than one: this one controls what the **plugin** says,
+and the deployment's logger level controls what reaches your terminal —
+`<plugin> debug: on` plus a logger running at `debug`. A plugin that could make a
+deployment's log louder than the deployment asked for would be a plugin deciding how much
+noise its host emits.
 
 The rest are deployment-level: they exist so a deployment can retune the core, and a
 person never has to read about them.

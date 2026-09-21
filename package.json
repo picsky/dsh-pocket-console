@@ -17,6 +17,7 @@
     "activity.js",
     "work.js",
     "run-record.js",
+    "diagnostics.js",
     "identity.js",
     "priority.js",
     "workspaces.js",

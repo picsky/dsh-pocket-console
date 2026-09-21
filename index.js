@@ -21,6 +21,7 @@ import z from '@deepseek-ai/schemastery'
 import { createResultNotifier } from './results.js'
 import { createEscalation } from './escalation.js'
 import { createActivity } from './activity.js'
+import { createDiagnostics } from './diagnostics.js'
 import { createRunRecord } from './run-record.js'
 import { createWork } from './work.js'
 import { LOCALES, messagesFor } from './messages.js'
@@ -71,6 +72,27 @@ export const Config = z.object({
    */
   resultNotifyCooldownSeconds: z.natural().default(0),
   /**
+   * Whether the plugin narrates what it decides about every card.
+   *
+   * Off by default, and that default is the point: this is the switch a deployment turns on to find
+   * out *why* a card did or did not change, and a plugin that narrated everything all the time would
+   * bury its own warnings in its own noise. What it gates is a class of line this repository learned
+   * it needed the hard way — a card that is **not** rewritten is otherwise indistinguishable from one
+   * whose rewrite was attempted and failed, because the branch that skips it says nothing at all.
+   *
+   * It gates the plugin's own diagnostics, not the deployment's log level: Cordis exporters decide
+   * which levels reach a terminal, so a deployment that wants these lines must also run its logger at
+   * `debug`. Both are deliberate — the plugin should not be able to make a deployment's log louder
+   * than the deployment asked for.
+   *
+   * Spelled `'off' | 'on'` rather than as a boolean because the settings card is built from one
+   * control per field and its two kinds are a text box and a dropdown: a boolean field the card
+   * cannot render would be a setting reachable only by editing YAML, which is the opposite of what it
+   * is for.
+   * @default 'off'
+   */
+  debug: z.union(['off', 'on']).default('off'),
+  /**
    * Language of the cards sent to the phone, used until a browser tells the Host
    * which language the interface is in. A deployment that never opens the Web UI
    * keeps this copy.
@@ -104,6 +126,8 @@ const SectionSchema = z.object({
   titlePrefix: z.string().default('DSH'),
   /** Whether a stopped session's answer is offered to the channel. */
   resultNotify: z.union(['off', 'idle']).default('idle'),
+  /** Whether the plugin narrates what it decides about each card. */
+  debug: z.union(['off', 'on']).default('off'),
 })
 
 /**
@@ -284,16 +308,21 @@ export async function apply(ctx, config) {
     log.warn('priority restore failed', error)
   }
 
+  // Where the plugin says what it decided about a card, when the deployment asks to hear it. Built
+  // once and handed to the modules that decide, so "why did that card not change" has one answer in
+  // one place instead of three modules each inventing their own line.
+  const diagnostics = createDiagnostics({ settings: () => settings, log, messages })
+
   // The escalation machine owns the timer, the race, and the pending registry;
   // this file only wires it to the two seams and the channel's actions.
   escalation = createEscalation({
-    log, channel, settings: () => settings, mirror, messages, workspaces, priority,
+    log, channel, settings: () => settings, mirror, messages, workspaces, priority, diagnostics,
   })
 
   // The activity card follows a run while it runs, but only once the phone holds the person:
   // while the desk has them, the run is visible where they already are.
   const activity = createActivity({
-    ctx, log, channel, settings: () => settings, messages, priority, workspaces,
+    ctx, log, channel, settings: () => settings, messages, priority, workspaces, diagnostics,
   })
 
   // What each run did, kept on its own account rather than on a card: the result card shows it, so
@@ -316,6 +345,7 @@ export async function apply(ctx, config) {
     messages,
     workspaces,
     priority,
+    diagnostics,
     // The run the person last started, so the card carries what happened rather than only the last
     // thing said.
     runRecord,
