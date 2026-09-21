@@ -33,6 +33,18 @@ window.__ModuleLoader__.load({
     /** Same-origin route prefix the host half registers. */
     const ROUTE = '/__pocket'
 
+    /**
+     * How long one mirror poll may wait before it reads as a host that has stopped answering.
+     *
+     * The state route is a local read, so a response that takes longer than this is a host that is
+     * wedged, not one that is busy. The deadline matters twice: a poll that never settles would leave
+     * the single-flight flag raised, and every later tick returns on it — the mirror dies for good
+     * until the page is reloaded, which is exactly the silent death this window exists to prevent.
+     * Long enough that an ordinary slow response is never cut short, short enough that a wedged host
+     * stops the mirror for only this long between retries.
+     */
+    const MIRROR_FETCH_TIMEOUT_MS = 5_000
+
     /** Section fields this card edits, in render order. */
     const FIELDS = [
       { field: 'delaySeconds', kind: 'number' },
@@ -873,7 +885,7 @@ window.__ModuleLoader__.load({
        * @param sync - the phone's accepted decision, as the Host recorded it.
        * @returns null when it was applied, else why it could not be.
        */
-      const applySync = (sync) => {
+      const applySync = async (sync) => {
         if (sync === null || typeof sync !== 'object') return 'no decision'
         // Read through `get`: the browser half still works where the Session UI
         // is absent, and reading a service property without an `inject` throws.
@@ -919,18 +931,49 @@ window.__ModuleLoader__.load({
         // A composer that already settled is not a failure — the recorded answer
         // is the phone's either way, and there is nothing left to mirror. The
         // call can throw synchronously as well as reject, so both are caught.
+        //
+        // But a rejection is only proof of "already settled" when the composer is
+        // gone with it. If the composer is still pending, the answer genuinely
+        // failed — a transport or gateway error — and reporting "applied" would
+        // clear the decision the phone took, with nothing actually mirrored: the
+        // desktop composer keeps waiting and the answer is gone from both sides.
+        // So the rejection is classified by what the snapshot says *after* it,
+        // and only a composer that is no longer there counts as settled.
         try {
-          void Promise.resolve(pending.answer(sync.answer)).catch(() => {})
+          await Promise.resolve(pending.answer(sync.answer))
         } catch {
-          return 'the composer had already settled'
+          const still = [...snapshot.values()].some(candidate => matches(candidate))
+          if (still) return 'the composer rejected the answer while still pending'
+          return null
         }
         return null
       }
 
       /** Read the Host's last phone decision, or null when it offers none. */
       const readSync = async () => {
-        const response = await fetch(`${ROUTE}/state`, { headers: { accept: 'application/json' } })
-        return response.ok ? ((await response.json())?.sync ?? null) : null
+        // The deadline is the one thing that keeps a wedged host from taking the
+        // mirror down with it: without it, a poll that never settles leaves the
+        // single-flight flag raised and every later tick returns on it.
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), MIRROR_FETCH_TIMEOUT_MS)
+        try {
+          const response = await fetch(`${ROUTE}/state`, {
+            headers: { accept: 'application/json' },
+            signal: controller.signal,
+          })
+          if (!response.ok) {
+            // 404 carries a different meaning from a transient failure: the host
+            // does not serve these routes at all, which no retry is going to
+            // change. Named on the error so the poll loop can tell a version
+            // mismatch from a network problem.
+            const failure = new Error(`the host answered ${response.status}`)
+            failure.status = response.status
+            throw failure
+          }
+          return (await response.json())?.sync ?? null
+        } finally {
+          clearTimeout(timer)
+        }
       }
 
       /**
@@ -980,6 +1023,9 @@ window.__ModuleLoader__.load({
         let reported = null
         // A decision whose window has passed is said once and then left alone.
         let lapsed = null
+        // Whether the host's missing routes have been reported, so a page left
+        // open against an outdated host says it once instead of every second.
+        let reportedHostGone = false
         let inFlight = false
         const poll = async () => {
           // One poll at a time: two overlapping ticks could both read a decision
@@ -1001,7 +1047,7 @@ window.__ModuleLoader__.load({
             }
             let reason
             try {
-              reason = applySync(sync)
+              reason = await applySync(sync)
             } catch (error) {
               // A composer that answers by throwing — the already-settled case —
               // is not a transport failure: it means this composer is done, so the
@@ -1026,6 +1072,15 @@ window.__ModuleLoader__.load({
             const message = String(error?.message ?? error)
             console.info(`pocket-console: mirror poll failed — ${message}`)
             report('error', message)
+            // A host that does not serve these routes is not going to start on
+            // the next tick: it is a version mismatch, and a page reload is what
+            // changes that. Said once and stopped, so a page left open does not
+            // poll a 404 — or report one — every second for nothing.
+            if (error?.status === 404 && !reportedHostGone) {
+              reportedHostGone = true
+              console.warn('pocket-console: the host does not serve /__pocket — the mirror is stopped until this page is reloaded')
+              stopped = true
+            }
           } finally {
             inFlight = false
           }

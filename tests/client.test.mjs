@@ -391,6 +391,29 @@ test('the browser half loads through the module loader and registers its card', 
   await sleep(1100)
   assert.ok(reports.some(entry => entry.status === 'skipped' && entry.reason === 'no pending-interaction source'))
 
+  // A rejection is only "already settled" when the composer is gone with it. A
+  // composer that is still pending after the answer failed means the answer
+  // genuinely did not land — reporting "applied" would clear the decision with
+  // nothing mirrored, so the mirror reports the skip and keeps the decision on
+  // offer for the next tick.
+  const rejectingComposer = {
+    sessionId: 's_reject', kind: 'question', questions: [{ id: 'r' }],
+    answer: async () => { throw new Error('gateway refused the answer') },
+  }
+  uiSession.pendingInteractions.getSnapshot = () => new Map([['s_reject', rejectingComposer]])
+  served = { id: 'm5', sessionId: 's_reject', questions: ['r'], answer: phoneAnswer }
+  await sleep(1100)
+  assert.ok(
+    reports.some(entry => entry.status === 'skipped' && entry.syncId === 'm5'
+      && /rejected/.test(String(entry.reason ?? ''))),
+    `a rejected answer with the composer still pending is skipped, not applied: ${JSON.stringify(reports.slice(-3))}`,
+  )
+  assert.ok(
+    !reports.some(entry => entry.status === 'applied' && entry.syncId === 'm5'),
+    'and the decision is not reported as applied',
+  )
+  uiSession.pendingInteractions.getSnapshot = () => new Map([['s_agent', pending]])
+
   // Whether a composer is on screen is only observable in the page, so the
   // browser half reports the panel's own transitions: one shows, then it closes.
   assert.ok(
@@ -437,6 +460,37 @@ test('the browser half loads through the module loader and registers its card', 
     `a disposed mirror stops looking: ${JSON.stringify(reports)}`,
   )
   globalThis.fetch = previousFetch
+
+  // A host that does not serve the routes is a version mismatch, not a transient
+  // failure: the mirror says so once and stops, instead of polling a 404 every
+  // second for nothing. A fresh instance, because the one above is disposed.
+  served = null
+  const fetchBefore404 = globalThis.fetch
+  globalThis.fetch = async (url, options) => {
+    if (String(url).endsWith('/mirror')) {
+      reports.push(JSON.parse(options.body))
+      return { ok: true, json: async () => ({}) }
+    }
+    return { ok: false, status: 404, json: async () => ({}) }
+  }
+  const outdatedHost = applyTo(loaded.exports)
+  try {
+    const before = reports.length
+    await sleep(1200)
+    await sleep(1200)
+    const hostErrors = reports.slice(before).filter(entry => entry.status === 'error')
+    assert.ok(hostErrors.length >= 1, 'a missing route is reported as an error')
+    const count = reports.slice(before).filter(entry => entry.status === 'error').length
+    await sleep(2200)
+    assert.equal(
+      reports.slice(before).filter(entry => entry.status === 'error').length,
+      count,
+      'and said once, not every tick',
+    )
+  } finally {
+    globalThis.fetch = fetchBefore404
+    outdatedHost.effects[0]()
+  }
 
   // The shell publishes the active language on <html>; the card follows it. It is
   // asserted through the rendered tree, because reading the copy off a prop would
