@@ -200,6 +200,7 @@ const zh = {
   logNoticeRestoreEmpty: '上次运行没有留下结果通知。',
   logNoticeRestoreRetired: (rid, reason) => `恢复通知 ${rid} 时作废：${reason}`,
   logInstructionQueued: '已把手机上的指令排入会话。',
+  logInstructionSteered: '会话正在跑，已把手机上的指令作为 steer 送进当前这一轮。',
   logInstructionFailed: '指令注入失败',
 }
 
@@ -367,6 +368,7 @@ const en = {
   logNoticeRestoreEmpty: 'the last run left no result notices behind.',
   logNoticeRestoreRetired: (rid, reason) => `restored notice ${rid} was retired: ${reason}`,
   logInstructionQueued: 'the instruction from the phone was queued for the session.',
+  logInstructionSteered: 'the session was already running, so the instruction from the phone was steered into its current turn.',
   logInstructionFailed: 'injecting the instruction failed',
 }
 

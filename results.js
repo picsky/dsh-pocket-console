@@ -1001,7 +1001,7 @@ export function createResultNotifier({
       // reject — a deployment that cannot resolve the harness — which is why the failure below
       // is a real branch and not a formality.
       const { createUserMessage } = await import('@deepseek-ai/dsh-llm')
-      agent.followup(createUserMessage({
+      const message = createUserMessage({
         content: [{ type: 'text', text }],
         // Human input, minted by the surface the human is speaking through —
         // the same attribution the harness's own remote client gives a prompt
@@ -1010,8 +1010,21 @@ export function createResultNotifier({
         // carries human authority; a plugin-sourced one renders as folded
         // injected context instead.
         source: { kind: 'user' },
-      }))
-      log.info(messages().logInstructionQueued)
+      })
+      // Which of the two doors this instruction goes through depends on whether the session is
+      // already working, and the difference is not cosmetic: `followup` queues a turn of its own,
+      // and on the real machine a follow-up queued against a **running** session was never
+      // delivered — the notice was consumed, the card turned into a run, and no turn ever came of
+      // it. Steering is the harness's own answer for a person speaking while it works: the running
+      // driver consumes it at its next step boundary, and an idle one starts a turn. See issue #50.
+      if (agent.status === 'running' && typeof agent.steer === 'function') {
+        agent.steer(message)
+        log.info(messages().logInstructionSteered)
+        diagnostics(`回复：会话正在跑，指令以 steer 送进当前这一轮（消息 ${String(notice.handle ?? '')}）。`)
+      } else {
+        agent.followup(message)
+        log.info(messages().logInstructionQueued)
+      }
     } catch (error) {
       log.warn(messages().logInstructionFailed, error)
       return false
