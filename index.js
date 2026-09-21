@@ -311,7 +311,7 @@ export async function apply(ctx, config) {
   // Where the plugin says what it decided about a card, when the deployment asks to hear it. Built
   // once and handed to the modules that decide, so "why did that card not change" has one answer in
   // one place instead of three modules each inventing their own line.
-  const diagnostics = createDiagnostics({ settings: () => settings, log, messages })
+  const diagnostics = createDiagnostics({ settings: () => settings, log })
 
   // The escalation machine owns the timer, the race, and the pending registry;
   // this file only wires it to the two seams and the channel's actions.

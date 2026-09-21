@@ -96,11 +96,18 @@ A card that is **not** rewritten and a card whose rewrite **failed** look identi
 phone, and the branch that skips the rewrite is silent by design, so without this the only
 symptom is "nothing changed". With it on, each decision is named.
 
-It is deliberately two switches rather than one: this one controls what the **plugin** says,
-and the deployment's logger level controls what reaches your terminal —
-`<plugin> debug: on` plus a logger running at `debug`. A plugin that could make a
-deployment's log louder than the deployment asked for would be a plugin deciding how much
-noise its host emits.
+**Where the lines go:** to the deployment logger *and* to a file of its own —
+`$DSH_HOME/pocket-console-debug.log`, i.e. `~/.dsh/pocket-console-debug.log` unless
+`DSH_HOME` says otherwise. The file is there because the logger is not the plugin's to
+configure: Cordis lets an exporter set a per-name level and defaults to `info`, so
+`log.debug` reaches a terminal only when the **host** was started to show debug. A switch
+documented as "turn this on to see why" that showed nothing on a default deployment would
+teach you the plugin has nothing to say, which is worse than having no switch at all.
+
+So: turn `debug` on, reproduce, then read `~/.dsh/pocket-console-debug.log`. Its first lines
+name the mode at startup; each later line names one decision — a card created, a card edited,
+a card **skipped and why**, a rewrite that did not happen. A line that reports a *failure*
+is still a warning and visible without any of this.
 
 The rest are deployment-level: they exist so a deployment can retune the core, and a
 person never has to read about them.
