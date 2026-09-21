@@ -153,6 +153,30 @@ test('the sentence that opened the session is in the fold at all', async () => {
   assert.equal(record.includes('---'), false, 'and one turn means no boundary line')
 })
 
+test('a turn that opens with nobody speaking closes the previous group too', async () => {
+  // A turn can also open with no person's message between — a retry, a queued
+  // continuation. The boundary is the person speaking *or* a turn opening while
+  // the record is settled: without the second half, that group would stay open
+  // and the two turns would read as one in the fold.
+  const scaffolded = await phoneHoldsIt()
+  turn(scaffolded, 1, '第一轮', '答复一。')
+  await settle()
+  const emit = (event) => scaffolded.emitToAll('session/event', { id: 's_1' }, event)
+  emit({ type: 'turn/start', data: { turn: 2 } })
+  emit({
+    type: 'assistant/message',
+    surfaceOp: 'append',
+    data: { turn: 2, step: 1, message: { content: [{ type: 'text', text: '答复二。' }] } },
+  })
+  emit({ type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
+  await settle()
+
+  const record = foldedRecord(cardTitled(ACTIVITY_TITLE).card)
+  assert.equal(record.split('---').length, 2, 'two groups: the previous turn, and this one')
+  assert.match(record, /答复一/, 'the previous turn is closed as its own group')
+  assert.match(record, /答复二/, 'and this one is separate')
+})
+
 test('a person’s own line is the one the fold marks', async () => {
   const scaffolded = await phoneHoldsIt()
   turn(scaffolded, 1, '把测试修好', '我先看失败的用例。')
