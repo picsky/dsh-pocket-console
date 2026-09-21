@@ -51,6 +51,17 @@ export function isAnswer(message) {
 /** How many sessions are observed at once before the coldest are forgotten. */
 const TRACK_CAPACITY = 256
 
+/**
+ * The end reasons a phone card is still owed for, beyond `completed`.
+ *
+ * `error` and `max-tokens` both leave the work unfinished, and in both the person holding the phone
+ * is the one who decides whether it goes on — which is exactly the situation that used to end in a
+ * read-only card and a trip back to the desk. `aborted` is left out on purpose: it is the stop that
+ * a person or the loop has already decided on, and a card asking "what now?" a second after somebody
+ * pressed stop is noise. `blocked` is left out for the same reason.
+ */
+const UNFINISHED_REASONS = new Set(['error', 'max-tokens'])
+
 /** Bytes of UTF-8, which is what a size the platform counts and a size this code counts agree on. */
 const rawBytes = (value) => Buffer.byteLength(String(value ?? ''), 'utf8')
 
@@ -369,6 +380,25 @@ export function createResultNotifier({
     }
   }
 
+  /**
+   * What the card's face says.
+   *
+   * A turn that ran to the end has an answer, and that answer is the face. A turn that stopped short
+   * may have none — the message that called the tool that failed carries no text — and then the card
+   * has to say what happened, because an empty face above a reply box asks the reader to answer a
+   * question nobody asked. The newest words of the turn are the fallback before that: a run that
+   * spoke and then failed said something worth keeping in front of the reader.
+   * @param track - the session's observation.
+   * @returns the text the card's face starts with.
+   */
+  const faceOf = (track) => {
+    const said = isAnswer(track.message) ? track.message.text : (track.spoke ?? '')
+    if (said !== '') return said
+    const reason = track.reason
+    const why = reason?.kind === 'error' ? String(reason.error?.message ?? '') : ''
+    return messages().noticeUnfinished(reason?.kind, why)
+  }
+
   /** Offer the stopped session's answer, once the session is actually quiet. */
   const fire = async (session) => {
     const track = trackOf(session)
@@ -376,7 +406,13 @@ export function createResultNotifier({
     // Only a turn that ended and was not superseded: a newer turn means the
     // session kept working, and the newer one owns the next notice.
     if (!track.eligible || track.ended === undefined || track.ended !== track.turn) return
-    if (!isAnswer(track.message)) return
+    const unfinished = track.reason !== undefined && track.reason.kind !== 'completed'
+    // A turn that **ran to the end** is only worth a card when it ended on an answer: an intermediate
+    // round that ended on a tool call is process, not a result, and the card would be asking the
+    // reader to reply to something that was never said. A turn that **stopped short** is worth one
+    // whatever it ended on, because the news is that it stopped — and it very often ends on the
+    // message that called the tool that failed, which carries no text at all.
+    if (!unfinished && !isAnswer(track.message)) return
     const delay = settings().resultNotifyCooldownSeconds * 1000
     if (track.sentAt !== undefined && now() - track.sentAt < delay) {
       log.debug(messages().logNoticeCooling)
@@ -396,9 +432,10 @@ export function createResultNotifier({
     }
 
     const id = noticeId()
-    // A long result would otherwise be refused by the platform and the notice
+    // What the face says. A long result would otherwise be refused by the platform and the notice
     // would never arrive, which is worse than a clipped one that says so.
-    let answer = clipToBytes(track.message.text, messages().truncated)
+    const face = faceOf(track)
+    let answer = clipToBytes(face, messages().truncated)
     // One live notice per session: the newest result is the one worth replying
     // to, and an older card that still accepted a reply would inject an
     // instruction the reader wrote against a superseded answer.
@@ -481,7 +518,7 @@ export function createResultNotifier({
       const handle = await channel.deliver(card).catch(async (error) => {
         if (!looksLikeSizeRefusal(error)) throw error
         log.debug(messages().logNoticeTooLarge)
-        answer = clipToBytes(track.message.text, messages().truncated, Math.floor(CARD_TEXT_BUDGET / 2))
+        answer = clipToBytes(face, messages().truncated, Math.floor(CARD_TEXT_BUDGET / 2))
         card = cardFor(answer)
         // The fold is what does not fit, so the fold is what is given up. The offer is cheaper than
         // it looks and stays: dropping it would take away the one control a result is worth having.
@@ -872,24 +909,38 @@ export function createResultNotifier({
     }
     if (event.type === 'assistant/message' && event.surfaceOp === 'append') {
       const blocks = event.data?.message?.content ?? []
+      const text = blocks.filter(block => block.type === 'text').map(block => block.text).join('')
       track.message = {
         turn: event.data.turn,
-        text: blocks.filter(block => block.type === 'text').map(block => block.text).join(''),
+        text,
         hasToolCall: blocks.some(block => block.type === 'tool-call'),
       }
+      // The newest words of the turn, whatever else the message carried. Kept apart from
+      // `track.message` because that one is read as "is this an answer", and a message that both
+      // spoke and called a tool is not — while its words are still the best thing to put in front of
+      // a reader whose run then stopped short.
+      if (text !== '') track.spoke = text
       arm(session.id)
       return
     }
     if (event.type === 'turn/start') {
       track.turn = event.data?.turn
       track.message = undefined
+      track.spoke = undefined
       track.ended = undefined
+      track.reason = undefined
       arm(session.id)
       return
     }
     if (event.type === 'turn/end') {
-      if (event.data?.reason?.kind !== 'completed') return
+      const reason = event.data?.reason
+      // `completed` is what this card was written for; the reasons in {@link UNFINISHED_REASONS}
+      // are the ones where the work stopped and the reader is the one who decides what happens
+      // next. Everything else — a stop somebody already asked for — ends here, with no card: see
+      // that constant for why.
+      if (reason?.kind !== 'completed' && UNFINISHED_REASONS.has(reason?.kind) === false) return
       track.ended = event.data.turn
+      track.reason = reason
       arm(session.id)
     }
   }

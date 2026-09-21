@@ -200,6 +200,13 @@ const zh = {
   logNoticeRestoreEmpty: '上次运行没有留下结果通知。',
   logNoticeRestoreRetired: (rid, reason) => `恢复通知 ${rid} 时作废：${reason}`,
   logInstructionQueued: '已把手机上的指令排入会话。',
+  /** The face of a result card for a turn that stopped before it finished. */
+  noticeUnfinished: (kind, why) => {
+    const headline = kind === 'max-tokens'
+      ? '**输出达到上限而中断**，这一轮没有做完。'
+      : '**这一轮出错了**，没有跑完。'
+    return why === '' ? headline : `${headline}\n\n${why}`
+  },
   logInstructionFailed: '指令注入失败',
 }
 
@@ -367,6 +374,12 @@ const en = {
   logNoticeRestoreEmpty: 'the last run left no result notices behind.',
   logNoticeRestoreRetired: (rid, reason) => `restored notice ${rid} was retired: ${reason}`,
   logInstructionQueued: 'the instruction from the phone was queued for the session.',
+  noticeUnfinished: (kind, why) => {
+    const headline = kind === 'max-tokens'
+      ? '**The output hit its ceiling** and this turn was cut off before it finished.'
+      : '**This turn failed** and did not finish.'
+    return why === '' ? headline : `${headline}\n\n${why}`
+  },
   logInstructionFailed: 'injecting the instruction failed',
 }
 
