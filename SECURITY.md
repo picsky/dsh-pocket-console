@@ -45,7 +45,7 @@ cannot rotate.
 - **Anything that requires the attacker to already control the `DSH_HOME`
   directory.** The credential store is trusted input: whoever can write
   `$DSH_HOME/.credentials.yaml` can already bind a recipient or replace the app.
-- Known and documented limits, which are in the README's *Limitations* section
+- Known and documented limits, which are in the README's *How it breaks* section
   rather than vulnerabilities — for example that a phone answer needs an open
   desktop page to be mirrored onto it.
 
@@ -67,7 +67,7 @@ hold, it is a bug:
   press carries no directory, so a lost phone is not a way to run work in an arbitrary project, and
   the new session inherits that workspace and the deployment's model rather than a selection the
   press asked for. This is the one action larger than deciding a request: see the README's
-  *Limitations* for what it costs.
+  *How it breaks* for what it costs.
 - **An answer must be one the request offered.** A label no option carried is
   refused; a question id that is not in the request is refused.
 - **Secrets live in the credential store**, never in the process environment and

@@ -1,14 +1,127 @@
 # Changelog
 
-Notable changes, newest first. Versions are the published npm versions; each section
-names the point in the history it corresponds to, so `git log` can fill in the detail.
+Notable changes, newest first. A version names the point in the history it was cut from, so
+`git log` can fill in the detail. A version that was numbered in the working tree and never
+published says so, because its work ships with the next release that is.
 
 The project is pre-1.0: a minor bump can carry a behaviour change, and one is called
 out when it does.
 
-## Unreleased
+## 0.9.0
+
+**The first release since 0.8.1.** Two versions were numbered in this tree and never published —
+the registry's `latest` was 0.8.1 while the tree said 0.8.3 — so everything in this section and in
+the `0.8.2` section below reaches a reader for the first time here. It is a minor bump because it
+carries behaviour changes, and each is called out as one.
+
+### Added
+
+- **Every card names its session, not only its project.** Two sessions working in one project
+  produced two cards whose titles were identical, and a person holding the phone could not tell them
+  apart. The session's own name — which the harness already gives every session, from the first thing
+  a person said or from a generated title — now rides in the header's **subtitle**: `DSH 结果 · my-app`
+  above `会话：新会话任务与手机接管`. **The title itself is unchanged**, so nothing a reader already
+  recognized moved, and this was measured on the real tenant before it was built: the field is
+  accepted as `{ tag, content }` and refused as a bare string, it does not wrap, and `PATCH` moves it,
+  which is what lets a name that arrives late appear on a live card. A card whose session has no name
+  yet renders exactly as it did before this field existed — no empty line (`session-names.js`,
+  `providers/feishu.js`, [0025](docs/decisions/0025-the-subtitle-names-the-session.md)).
+
+- **The result card now carries what the run did, not only the last thing said.** A turn that ends
+  with a couple of confirmations ends on a confirmation, so the plan being confirmed was nowhere on
+  the phone and the person was left deciding the next step without the text it depends on. The run —
+  from the last thing they said to the moment it stopped — now travels in a **fold on the same card**,
+  so it costs no extra message, which is the promise that makes this card acceptable. When it does not
+  fit, whole kinds of content are given up in the order a reader would choose, and whatever goes is
+  named with a byte count — the tool lines merged into one, then dropped, then the person's own
+  message, and only then the oldest prose, because the newest output is what a decision rests on
+  (`results.js`, [0017](docs/decisions/0017-the-result-card-carries-the-run.md)).
+
+- **What one run did is recorded on its own account, whether or not a card was ever sent for it.**
+  The result card could only ever show the model's **last** message, and a turn that ends with a
+  couple of confirmations ends on a confirmation — so the plan being confirmed was nowhere on the
+  phone. The record a frozen card folds was held on the activity card's record, which exists only
+  while the phone holds the person, so a run at the desk had no record at all. A run is now recorded
+  per session from the last thing a person said, in `run-record.js`, independently of any card, and
+  what its bound leaves out is counted rather than silently lost (`run-record.js`, `index.js`).
+
+### Changed
+
+- **The card a person answered is the card that changes.** A reply from the phone used to leave
+  "已收到指令" on the result card while the run it started appeared on a **second** message — the
+  activity card, which the plugin had minted for a session the phone took over. The reader pressed one
+  card and watched another one move. The message a reply is typed on now **becomes that session's
+  card**: the run is shown there, and the run's own result is a new card of its own, so a result is
+  never welded into the progress that replaced it. The message count per run does not change — two for
+  a session's first turn, one for every turn after it — because the reply's card *is* the next turn's
+  card (`activity.js`, `results.js`,
+  [0021](docs/decisions/0021-the-card-you-pressed-is-the-one-that-moves.md)).
+
+- **A reply that arrives while the session is working goes into that turn.** It used to be queued as a
+  turn of its own, and on the real machine a queued instruction was **lost**: the notice was consumed,
+  the card turned into a run, the reader was told it had been sent, and no turn ever came of it. A
+  session that is running now takes the instruction as steering, at its next step boundary, which is
+  what the desktop composer already does; a session that is idle still gets a turn of its own. Which of
+  the two happened is named in the deployment log, because "did my sentence arrive" was otherwise
+  unanswerable (`results.js`,
+  [0023](docs/decisions/0023-a-reply-into-a-running-session-steers.md)).
+
+- **A run that stopped short still gets a card the reader can answer.** Two conditions had to hold for
+  a result to reach the phone: the turn had to end as `completed`, and its last message had to be an
+  answer with no tool call. A run that errored, or hit its output ceiling, satisfied neither — and it
+  usually ends on the very message that called the tool that failed, which carries no text at all. The
+  reader was left with the activity card alone, which has no controls by design, so the phone was a
+  dead end and getting the work moving again meant walking back to the desk. `error` and `max-tokens`
+  now notify with a reply box whatever they ended on; the face says which of the two it was, or
+  whatever the run managed to say before it stopped. A stop somebody already asked for (`aborted`)
+  still sends nothing (`results.js`,
+  [0024](docs/decisions/0024-an-unfinished-run-still-gets-a-card.md)).
+
+- **The fold is about one turn, and it marks what the person said.** The fold under a card was the
+  session's history — up to five finished turns — which, once a reply started reusing the card the
+  reader was holding, showed them work they had already read on earlier result cards. It also drew the
+  turn boundary at `turn/start`, which arrives *after* the person's message, so the sentence that
+  opened a turn was filed under the previous one; a session's first sentence was dropped entirely; and
+  neither the boundary nor the reader's own line could be told apart from the model's. Now the fold is
+  the turn the reply was made against plus the running one, the boundary is drawn when the person
+  speaks, the record is built on the way in, and their line is the only one marked (`**你**：`) on
+  either card (`activity.js`, `results.js`,
+  [0022](docs/decisions/0022-the-fold-is-one-turn-and-marks-what-you-said.md)).
+
+- **A card may carry about seven times what it was carrying, because the limit it was built to does
+  not exist.** Every long history was truncated, and the reason was a number copied from the platform's
+  documentation: 30 KB. Measured against the real tenant with this deployment's own app, a card body of
+  **131 KB is accepted** and 164 KB is refused — and what the platform does enforce is two other
+  ceilings, found the same way: **200 elements** per card (180 accepted) and roughly **51,000 Chinese
+  characters** of text (120,000 of Latin, 20,000 emoji). The text budget moves from 4.6 KB to 32 KB and
+  a new element budget joins it at 120, so a run a reader could actually want to read now arrives whole
+  instead of trimmed to a fifth (`budget.js`, `results.js`).
+
+- **When a run does not fit, whole kinds of content are given up before any text is.** The old rule
+  kept both ends and cut the middle out, which loses the one thing a reader came for whenever the plan
+  is long and the answer is long. Now the fold degrades in the order a reader would choose: merge the
+  tool lines into one block (same information, one element instead of many), then drop the tool lines,
+  then the person's own message, and only then the oldest prose — because the newest output is what a
+  reader is deciding on. Whatever goes is named with a byte count (`results.js`).
 
 ### Fixed
+
+- **The card state could be read back out of order.** The browser's poll of the deployment's state let
+  a slow response land after a newer one, so the card could settle on a state that had already been
+  superseded. Each tick now retires the request it started, and only the newest answer is applied
+  (`client.js`).
+
+- **Three ways the desktop mirror could go quiet.** A refusal from the page's composer was reported as
+  "settled" whatever it was, so a real failure was silently dropped and the desktop waited forever; the
+  poll had no timeout, so a hung host killed the mirror in silence; and a host too old to serve the
+  route spun once a second without saying so. A refusal is now classified by whether the composer is
+  still there (still there → keep the decision for it, gone → it settled), the poll has a deadline, and
+  a 404 is reported once and then stops (`client.js`).
+
+- **Four corrections to small assumptions.** A card that the activity record had been evicted from was
+  no longer recognized as the run's card, so a stale press could overwrite a live run; a refused
+  clipboard write still reported success; a failed credential adoption cleared the form the reader had
+  just filled in; and a parameter was passed by nobody (`activity.js`, `client.js`, `escalation.js`).
 
 - **A run showed an answer to a question it could not show.** A turn that ended was not recorded as
   ended, so the next turn's start looked like the same turn: the run was never closed, and the message
@@ -23,59 +136,16 @@ out when it does.
   only one was — under-reporting what the reader is missing, which is the one thing that number exists
   to get right. Entries are matched by position now (`results.js`).
 
-### Changed
-
-- **A card may carry twenty times what it was carrying, because the limit it was built to does not
-  exist.** Every long history was truncated, and the reason was a number copied from the platform's
-  documentation: 30 KB. Measured against the real tenant with this deployment's own app, a card body
-  of **131 KB is accepted** and 164 KB is refused — and what the platform does enforce is two other
-  ceilings, found the same way: **200 elements** per card (180 accepted) and roughly **51,000 Chinese
-  characters** of text (120,000 of Latin, 20,000 emoji). The text budget moves from 4.6 KB to 32 KB
-  and a new element budget joins it at 120, so a run a reader could actually want to read now arrives
-  whole instead of trimmed to a fifth (\udget.js\, \esults.js\).
-
-- **When a run does not fit, whole kinds of content are given up before any text is.** The old rule
-  kept both ends and cut the middle out, which loses the one thing a reader came for whenever the
-  plan is long and the answer is long. Now the fold degrades in the order a reader would choose:
-  merge the tool lines into one block (same information, one element instead of many), then drop the
-  tool lines, then the person's own message, and only then the oldest prose — because the newest
-  output is what a reader is deciding on. Whatever goes is named with a byte count
-  (\esults.js\).
-
-### Added
-
-- **The result card now carries what the run did, not only the last thing said.** A turn that ends
-  with a couple of confirmations ends on a confirmation, so the plan being confirmed was nowhere on
-  the phone and the person was left deciding the next step without the text it depends on. The run —
-  from the last thing they said to the moment it stopped — now travels in a **fold on the same card**,
-  so it costs no extra message, which is the promise that makes this card acceptable. When it does not
-  fit, **both ends are kept and the middle is given up by name**, with a byte count: the two things a
-  decision rests on are what the run set out to do and where it stopped, and those are its first and
-  last parts. A button to "read the rest" was refused — cards cannot link to each other, and opening a
-  page would mean serving one (`results.js`, [0017](docs/decisions/0017-the-result-card-carries-the-run.md)).
-
-- **What one run did is recorded on its own account, whether or not a card was ever sent for it.**
-  The result card could only ever show the model's **last** message, and a turn that ends with a
-  couple of confirmations ends on a confirmation — so the plan being confirmed was nowhere on the
-  phone. The record a frozen card folds was held on the activity card's record, which exists only
-  while the phone holds the person, so a run at the desk had no record at all. A run is now recorded
-  per session from the last thing a person said, in `run-record.js`, independently of any card, and
-  what its bound leaves out is counted rather than silently lost (`run-record.js`, `index.js`).
-
-### Fixed
-
-- **A run too long for the fold gave up the plan it was built to show.** A 60-step plan is a single
-  entry of about 1.9 KB, while half the room left after the marker is about 1.1 KB, so a rule that took
-  only what fit dropped the head every time a run opened with a plan. Each end now takes one entry
-  whatever it costs, clipped to the room that remains, and a case asserts it (`results.js`).
-
-- **The first run after the phone takes over was the one the phone could not show.** A session that
-  was already running when the person moved had no activity card, and the card was minted lazily on
-  the session's next event — which, for a run already in flight, may be its last. So the first thing
-  that run did after the move was exactly the thing somebody picked the phone up to look at. Moving
-  to the phone now takes on every session the registry still reports as running (`activity.js`).
+- **The first run after the phone takes over was the one the phone could not show.** A session that was
+  already running when the person moved had no activity card, and the card was minted lazily on the
+  session's next event — which, for a run already in flight, may be its last. So the first thing that
+  run did after the move was exactly the thing somebody picked the phone up to look at. Moving to the
+  phone now takes on every session the registry still reports as running (`activity.js`).
 
 ## 0.8.2
+
+**Never published.** This section describes work that was numbered 0.8.2 in the tree and then carried
+into 0.9.0, whose section above is where it actually ships.
 
 ### Added
 
@@ -175,7 +245,7 @@ out when it does.
   the title.
 
 - **Both READMEs were restructured around the order a reader needs things in.** The entrance is
-  now the install, the uninstall, and the three settings the Settings card exposes; security,
+  now the install, the uninstall, and the settings the Settings card exposes; security,
   what it deliberately does not do, and how it breaks follow; the comparison with the other
   kinds of plugin moved to the end. The implementation walkthrough — the request diagram,
   `prepend`, `next()`, the race — and the engineering limitations left the README altogether,

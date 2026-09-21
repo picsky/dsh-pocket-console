@@ -100,8 +100,9 @@ longer pass through `approval/request`, so there is nothing to escalate. Questio
 escalation still works.
 
 **Why did nothing arrive even though the session finished?**
-A result notice needs `resultNotify: idle`, a turn that produced an *answer* (a message
-that speaks without calling a tool), and `delaySeconds` of quiet. It is suppressed while
-the session is still working, during `resultNotifyCooldownSeconds` after the previous
-notice for that session, for delegated sessions, and for a session the host has already
-reclaimed.
+A result notice needs `resultNotify: idle` and `delaySeconds` of quiet, and a turn that
+either produced an *answer* (a message that speaks without calling a tool) or stopped
+short — an error or the output ceiling — which is offered whatever it ended on. It is
+suppressed while the session is still working, during `resultNotifyCooldownSeconds` after
+the previous notice for that session, for delegated sessions, and for a session the host
+has already reclaimed.

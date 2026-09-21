@@ -26,8 +26,10 @@ names the position when there is more than one question (`提问 · 第 2/4 题`
 
 This is the rhythm the desktop composer already uses — one question on screen, then the next —
 so both surfaces walk the same request the same way. It also settles the naming problem at the
-root: a card holds at most one form, so the names can no longer collide, and the mapping
-described in 0010 becomes a guarantee for the renderer rather than a load-bearing repair.
+root: a **question** card holds at most one form, so the names can no longer collide, and the mapping
+described in 0010 becomes a guarantee for the renderer rather than a load-bearing repair. The result
+card has carried two forms since [0019](0019-the-next-task-rides-the-result-card.md), and it still
+relies on 0010's naming map to tell them apart.
 
 The channel contract does not change. `deliver(view)` was already "deliver one message" and
 `update(handle, view)` already "replace an already-delivered message"; the fix is in what the

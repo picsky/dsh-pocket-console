@@ -11,23 +11,36 @@ branch, pull request, the four required checks, and a two-step release. It is en
 repository's rulesets rather than written down and hoped for —
 [ADR 0014](../docs/decisions/0014-the-process-binds-every-change.md).
 
-**The table is a 0.8.1 snapshot, and the tree has moved since.** Rows 2 and 3 were re-run when
-the process landed (83 cases; 26 published entries); the rest still describe the tree of that
-release, so re-run a row before relying on its number. A count in here is a claim about a
-moment, not a property of the repository.
+**Re-measured for 0.9.0**, on the release branch, 2026-09-21. A count in here is a claim about
+the moment it was taken, not a property of the repository: re-run a row before relying on its
+number.
 
 | # | Check | Command | Result |
 |---|---|---|---|
-| 1 | Field, default, and published-link parity | `npm run check:parity` | **pass** — 8 config fields across 6 places, every published document links only to published files, every rendered visual resolves |
-| 2 | Behaviour suite | `npm test` | **83/83 pass**, no network, no credentials |
-| 3 | Manifest covers what it promises | manifest and the tree | **pass** — 26 `files` entries all exist |
-| 4 | Bundled transport survives packing | `node scripts/verify-pack.mjs` | **pass** — 9 published modules close over their relative imports |
-| 5 | Tarball composition | `npm pack --dry-run` | 4.3 MB packed / 41.6 MB unpacked, 1152 files, 81 bundled deps; **16 docs files in, 0 `internal/`, 0 `assets/`** |
-| 6 | Local links | scan of every `*.md` | **83 links across 25 files, 0 broken** |
-| 7 | Diagrams render | mermaid's own parser | **5/5 valid** (4 sequence, 1 state) |
-| 8 | CI action pins exist | GitHub tags API | **verified** — `actions/checkout@v6`, `actions/setup-node@v6`, `pnpm/action-setup@v6` |
+| 1 | Field, default, and published-link parity | `npm run check:parity` | **pass** — 9 config fields agree across Config, SectionSchema, the card, both config pages and the bundle patch; every published document links only to published files; the quoted card-text budget matches `budget.js` |
+| 2 | Behaviour suite | `npm test` | **250/250 pass**, no network, no credentials |
+| 3 | Manifest covers what it promises | manifest and the tree | **pass** — 34 `files` entries all exist |
+| 4 | Bundled transport survives packing | `node scripts/verify-pack.mjs` | **pass** — 18 published modules close over their relative imports |
+| 5 | Tarball composition | `pnpm pack` | **4.27 MB packed, 1180 entries**, 81 bundled deps; **34 docs pages and 26 decision records in, 0 `internal/`, 0 `assets/`** |
+| 6 | Local links | scan of every `*.md` | **232 relative links across 54 files, 0 broken**; the two stale anchors this scan does not resolve (`assets/README.md` → `#what-it-does`, `docs/README.md` → `#quick-start`) were re-pointed in this release |
+| 7 | Diagrams render | mermaid's parser | **2 blocks** — `docs/configuration.md` (shipped) and `assets/README.md` (not shipped). **Not re-validated in this release**; the earlier 5/5 result described a tree whose walkthrough diagrams have since left the READMEs |
+| 8 | CI action pins exist | GitHub tags API | **verified** — `actions/checkout@v7`, `actions/setup-node@v7` (both have run green on this tree) |
 | 9 | CI matrix vs `engines` | — | `[22, 24]` against `^22.19.0 \|\| >=24.0.0` — consistent |
 | 10 | Publish cannot ship a broken tarball | `prepack` hook | `verify-pack.mjs` runs from `prepack`, so the tarball a release builds is refused before the registry ever sees it |
+
+## What the 0.9.0 release carries that has not been checked on a real phone
+
+The four required checks are green, and the batch landed with a second review
+([`review-2-2026-09.md`](review-2-2026-09.md)) on top of the first. Four things are nonetheless
+**verified only by tests**, and each has an entry in
+[`verification-checklist.md`](verification-checklist.md):
+
+- **G6** — the fold is one turn plus the one the reply was made against, and the person's line
+  carries `**你**：`.
+- **G7** — a reply that arrives while the session is running enters that turn rather than being
+  queued behind it.
+- **G8** — a run that errored or hit its output ceiling comes back with a reply box.
+- **G9** — two sessions in one project produce titles that differ in the subtitle line.
 
 ## What is not checked here, and why
 

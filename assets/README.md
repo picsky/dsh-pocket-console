@@ -1,9 +1,9 @@
 # README visual assets
 
 What goes in this folder, in what order, and how each one is captured. The root
-README has one insertion point today — the commented block under
-[What it does](../README.md#what-it-does) — and this file is what decides what
-fills it.
+README renders no image today — the commented block it once carried is gone — so
+the first insertion point this file fills is a new block in **How it breaks**;
+the section names below are the README's current headings.
 
 The rule this whole file follows: **an image has to answer a question the prose
 cannot answer faster.** A screenshot of a settings panel answers "what do I have
@@ -14,11 +14,11 @@ answers the other, and a third one of the same panel answers nothing.
 
 | # | Asset | The question it answers | Where it goes |
 |---|---|---|---|
-| 1 | `hero-pairing.png` | "What is this, in one look?" — the same request on the page and on the phone | Under the title, above **The problem** |
-| 2 | `demo.gif` | "Show me the whole loop once" — bind → walk away → approve on the phone → the page settles | The existing commented block under **What it does** |
-| 3 | `phone-questions.png`, `phone-result.png` | "What exactly arrives on my phone?" — two of the card shapes | **Answering questions from your phone** and **Result notices** |
-| 4 | `settings-card.png` | "How much work is setup?" — the panel, the QR | **Quick start**, step 1 |
-| 5 | a mermaid block (§7) | "Where does this sit in DSH?" — desktop-first, then the timer | **How it works** — shipped |
+| 1 | `hero-pairing.png` | "What is this, in one look?" — the same request on the page and on the phone | Under the title, before **Install and uninstall** |
+| 2 | `demo.gif` | "Show me the whole loop once" — bind → walk away → approve on the phone → the page settles | A new block under **Install and uninstall** |
+| 3 | `phone-questions.png`, `phone-result.png` | "What exactly arrives on my phone?" — two of the card shapes | **Tuning it** |
+| 4 | `settings-card.png` | "How much work is setup?" — the panel, the QR | **Install and uninstall**, step 1 |
+| 5 | a mermaid block (§7) | "Where does this sit in DSH?" — desktop-first, then the timer | not shipped — add it under **For developers**, where the READMEs' engineering material now lives |
 
 Order matters more than count. #1 buys the reader's next ten seconds; #2 buys the
 next minute. If only one thing gets made, make #1. If only two, add #2.
@@ -53,7 +53,7 @@ hero is not a screenshot of a feature. It is two surfaces, one request, one arro
 
 The arrow's label is the whole design: **"desktop first · phone after 120 s"**.
 Without that label the image reads like "we spam your phone", which is the exact
-misreading the **Why not just forward every request to my phone?** section exists
+misreading the **What it deliberately does not do** section exists
 to correct.
 
 **Build it from two captures, not from a drawing:** the approval dialog on the page, and
@@ -90,7 +90,7 @@ Rules for the recording:
   can take seconds; record it, then cut the dead middle out. The card's own
   "still waiting" state is a feature — if you want to show it, show it as a
   still, not as four seconds of a spinner.
-- **Keep every frame below the 30 KB card budget's visual cousin:** if the card
+- **Keep every frame below the 32 KB card-text budget's visual cousin:** if the card
   body would have been clipped in reality, do not show it unclipped in the GIF.
 - **Captions, not narration.** Five short lines total, one per shot, burned in with
   ScreenToGif or ShareX at the same y position in every shot. A GIF has no audio
@@ -189,8 +189,9 @@ participant is renamed, and it is a file to keep in step; a mermaid block is tex
 diffs, and GitHub renders it for free. The one diagram that earns its place is the block
 below — it shows the two things prose keeps having to re-explain: that the plugin calls
 `next()` **first**, and that the phone is reached by a **timer**, not by default. It is
-already in **How it works** of both READMEs, beside the ASCII waterfall that names the two
-seams.
+not shipped in either README yet; add it under **For developers**, where the READMEs'
+engineering material now lives, beside the sentence that names the two documented
+waterfalls the plugin registers on.
 
 ```mermaid
 sequenceDiagram
@@ -231,11 +232,11 @@ entry points show different screenshots is two projects.
 | Asset | English README | Chinese README |
 |---|---|---|
 | `hero-pairing.png` | after the badges and the unofficial notice | same place |
-| `demo.gif` | the existing commented block | same place |
-| `phone-questions.png` | **Answering questions from your phone** | same place |
-| `phone-result.png` | **Result notices** | same place |
-| `settings-card.png` | **Quick start**, step 1 | same place |
-| the mermaid block | **How it works** — already shipped in both | already shipped in both |
+| `demo.gif` | a new block under **Install and uninstall** | same place |
+| `phone-questions.png` | **Tuning it** | same place |
+| `phone-result.png` | **Tuning it** | same place |
+| `settings-card.png` | **Install and uninstall**, step 1 | same place |
+| the mermaid block | not shipped — add it under **For developers** | same place |
 
 A capture is **language-bound**: it shows whatever the deployment was running in. So a
 Chinese deployment's screenshots belong in `README.zh-CN.md` and a Chinese card in the

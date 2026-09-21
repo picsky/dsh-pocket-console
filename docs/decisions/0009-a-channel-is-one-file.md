@@ -4,8 +4,9 @@
 
 ## Context
 
-`providers/feishu.js` is the largest file in the repository at roughly 860 lines. It
-carries five things that a reviewer would normally expect to see separated:
+`providers/feishu.js` is one of the largest files in the repository, at just over a
+thousand lines. It carries five things that a reviewer would normally expect to see
+separated:
 
 - the credential check against the platform, and the error classification that turns a
   refusal into a sentence;
