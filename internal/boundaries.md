@@ -124,6 +124,8 @@
 | 该字段**没有任何类型声明**，只存在于运行时的对象上；失效时**静默** | **已验证**（搜遍所有 `.d.ts`）。**这是一处上游依赖风险** |
 | 工具结果可达数百 KB，且会话层**没有截断标记** | **已验证**（读实现） |
 | 浏览器 composer 的逐题进度够不到（store 是组件私有） | **已验证**（[0012](../docs/decisions/0012-the-desktop-composer-steps-without-the-phone.md)） |
+| **`agent.followup()` 排进一个正在跑的会话**，真机上**观察到未兑现** | ⚠️ **现象已验证，机理未明**（2026-09-21 真机）：`followup` 返回 void、不抛错，通知被消费、卡片也变了，但**没有开出那一轮**（`turnOutline` 里没有对应 turn，inbox 事后为空）。对照：**空闲时** `followup` 正常成轮。契约写的是"排成自己的一轮并唤醒 driver"（`followup(input) { this.send(input,'next-turn',true) }`），所以嫌疑在 inbox 的收回路径（轮结束时清掉 / `claim` 走却没开轮），**没有证死**。⇒ 插件在会话 running 时改用 `steer()`（[0023](../docs/decisions/0023-a-reply-into-a-running-session-steers.md)） |
+| `agent.steer()` 的契约 | **已验证**（类型原文）："Submit steering for the nearest step. An idle driver starts a turn; a running driver consumes it at its next step boundary." 取消或卸载**可能丢弃**未消费的 steering |
 
 ## 4. 渲染政策
 

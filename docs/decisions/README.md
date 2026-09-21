@@ -27,3 +27,4 @@ code. A change that contradicts a record here needs a new record, not a quiet ed
 | [0020](0020-a-phone-started-session-joins-its-workspace.md) | A phone-started session is created through its workspace, so the desk groups it where it belongs |
 | [0021](0021-the-card-you-pressed-is-the-one-that-moves.md) | The card a reply is answered on becomes the run's card, and the next result is a card of its own |
 | [0022](0022-the-fold-is-one-turn-and-marks-what-you-said.md) | The fold is one turn plus the one the reply was made against, and it marks the person's own line |
+| [0023](0023-a-reply-into-a-running-session-steers.md) | A reply that arrives while the session runs is steered into that turn, not queued behind it |

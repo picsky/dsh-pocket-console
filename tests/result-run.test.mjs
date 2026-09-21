@@ -324,6 +324,55 @@ test('a second press on the card the reply came from does not overwrite the run'
   assert.equal(followed.length, 1, 'and the second press sent nothing to the session')
 })
 
+test('a reply that arrives while the session is running is steered into it', async () => {
+  // A reply from the phone is a person speaking. If the session is already working, the instruction
+  // has to go **into** that work: `followup` queues a turn of its own, and on the real machine a
+  // follow-up queued against a running session was never delivered — the notice was consumed, the
+  // card turned into a run, and no turn ever came of it. See issue #50.
+  const { result, scaffolded, followed } = await afterARun()
+  const steered = []
+  const agent = scaffolded.agents.get('s_1')
+  agent.status = 'running'
+  agent.steer = (message) => { steered.push(message) }
+
+  const reply = callbackValues(result.card).find(value => value.submit === true)
+  const outcome = await clickCard(reply, { [reply.submits.value]: '先别改那个文件' }, { messageId: result.handle })
+
+  assert.match(String(outcome.toast.content), /已发送/, 'the press is accepted')
+  assert.equal(steered.length, 1, 'and the instruction went in as steering')
+  assert.equal(followed.length, 0, 'not as a turn queued behind the running one')
+  assert.equal(steered[0].content[0].text, '先别改那个文件', 'the words are the reader’s own')
+  assert.equal(steered[0].source.kind, 'user', 'and are attributed to the person who typed them')
+})
+
+test('a reply to a session that is not running waits as its own turn', async () => {
+  // The other half of the same rule, and the reason the branch is on the agent's status rather than
+  // on "steer exists": a finished run's answer is what the reader is replying to, and what comes
+  // next is a turn, not a correction to work that is over.
+  const { result, scaffolded, followed } = await afterARun()
+  const steered = []
+  scaffolded.agents.get('s_1').steer = (message) => { steered.push(message) }
+
+  const reply = callbackValues(result.card).find(value => value.submit === true)
+  await clickCard(reply, { [reply.submits.value]: '接着做' }, { messageId: result.handle })
+
+  assert.equal(steered.length, 0, 'an idle session is not steered')
+  assert.equal(followed.length, 1, 'its instruction is queued as the next turn')
+})
+
+test('a session whose agent cannot be steered still takes the instruction', async () => {
+  // A deployment whose agent predates `steer` keeps the old path rather than losing the reply: the
+  // queue is what every release before this one used, and refusing to send would be worse than the
+  // risk it avoids.
+  const { result, scaffolded, followed } = await afterARun()
+  scaffolded.agents.get('s_1').status = 'running'
+
+  const reply = callbackValues(result.card).find(value => value.submit === true)
+  await clickCard(reply, { [reply.submits.value]: '还在吗' }, { messageId: result.handle })
+
+  assert.equal(followed.length, 1, 'the instruction still reaches the session')
+})
+
 test('a reply that never reached the session is not reported as sent', async () => {
   // The failure this case exists for: the earlier version fired the hand-off and answered
   // "已发送给 agent" immediately. A reply that never arrived was reported as sent, so the reader
