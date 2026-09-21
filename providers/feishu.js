@@ -41,6 +41,29 @@ const TENANT_EVENTS = ['im.message.receive_v1']
 /** Callbacks this channel subscribes to. Button presses arrive here. */
 const CALLBACKS = ['card.action.trigger']
 
+/**
+ * How long one send or edit may take before it is given up on.
+ *
+ * A platform call that never answers is the one failure with no recovery path: the caller awaits it
+ * forever, so nothing downstream — not the handle, not the durable notice, not the record's `sending`
+ * flag — ever moves again, and the card stays frozen in whatever state it was in. Measured against
+ * the credential check, which has always had a deadline; delivery is bounded far more generously
+ * because a card is not a health check, but bounded.
+ */
+const SEND_TIMEOUT_MS = 20_000
+
+/**
+ * The rate this channel writes to one message, and why there is no gate here for it.
+ *
+ * The platform allows five updates a second to a single message. The only thing that edits a message
+ * is the activity card, it holds one record per session, and it writes each record at most once per
+ * flush with flushes a quarter second apart — so one message sees at most **four** writes a second by
+ * construction, under the allowance with a little room. A throttle in this file was tried and taken
+ * back out: it delayed the *first* send of every card for no measured gain, because the pacing it
+ * would have enforced already holds upstream. If a second writer ever appears, the floor belongs next
+ * to the per-message state it protects rather than bolted onto the transport.
+ */
+
 /** Button styles Feishu accepts. */
 const BUTTON_TYPES = new Set(['default', 'primary', 'danger'])
 
@@ -946,6 +969,23 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
    */
   const onOverBudget = (bytes) => { log.warn(messages().logCardOverBodyBudget(bytes, CARD_BODY_BUDGET)) }
 
+  /**
+   * One write to the platform, bounded by a deadline.
+   *
+   * This is the only thing that can end a call that never answers: without it the caller's `await`
+   * never returns, so no handle is assigned, no notice is stored and the record's `sending` flag never
+   * clears — the card stays frozen wherever it was, for as long as the process lives.
+   *
+   * @param call - makes the SDK call.
+   * @param what - what the write was for, for the failure message.
+   * @returns the platform's answer.
+   */
+  const writeBounded = async (call, what) => await withDeadline(
+    call(),
+    SEND_TIMEOUT_MS,
+    `feishu did not answer ${what} within ${SEND_TIMEOUT_MS} ms`,
+  )
+
   return {
     // Forms need a checker/input component; the SDK and cards support them.
     supportsForms: true,
@@ -988,7 +1028,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       // answer when the return path is not up yet.
       if (transport === undefined || !connected) throw new Error('feishu channel is not connected')
       const { id, type } = await recipient()
-      const response = await transport.client.im.message.create({
+      const response = await writeBounded(() => transport.client.im.message.create({
         params: { receive_id_type: type },
         data: {
           receive_id: id,
@@ -999,15 +1039,27 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
           // being notified a second time.
           ...(uuid === undefined ? {} : { uuid }),
         },
-      })
-      return response?.data?.message_id
+      }), 'a card')
+      const handle = response?.data?.message_id
+      // A send that does not name its message is a send this channel must not call successful. An
+      // `undefined` handle used to be passed back as one, and both callers then believed a card
+      // existed that they would never be able to find again: the activity record never edited it, and
+      // the result notice was remembered durably with nothing to rewrite, so its reply box could never
+      // be taken off. Throwing here sends them down the paths they already have for a card that did
+      // not arrive — which is the truth.
+      if (typeof handle !== 'string' || handle === '') {
+        throw new Error('feishu accepted the card without naming the message it created')
+      }
+      return handle
     },
     async update(handle, view) {
       if (handle === undefined) return
-      await transport?.client.im.message.patch({
+      // No handle is required of the answer: an edit creates no message, so there is no id for the
+      // platform to name. Only the deadline and the transport matter here.
+      await writeBounded(() => transport?.client.im.message.patch({
         path: { message_id: handle },
         data: { content: JSON.stringify(renderCard(view, messages, onOverBudget)) },
-      })
+      }), 'an edit')
     },
     close() {
       closed = true
