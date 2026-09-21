@@ -147,6 +147,25 @@ export function createActivity({
   const phoneHasIt = () => priority?.get() === PHONE
 
   /**
+   * Say that a run is being left alone because the desk has the person, once per stretch of that.
+   *
+   * The refresh loop this sits in runs every quarter second, so the same decision arrives over and
+   * over; what a reader wants is the moment the decision changed, not a count of how often it was
+   * re-taken. The first release of this line wrote unconditionally and produced hundreds of
+   * identical lines for one run — which hid the evidence it was added to find.
+   * @param record - the card being left alone.
+   * @param line - what to say the first time.
+   */
+  const noteSkip = (record, line) => {
+    if (record.saidSkip === true) return
+    record.saidSkip = true
+    diagnostics?.(line)
+  }
+
+  /** Forget that a skip was reported, so the next one says so again. */
+  const clearSkip = (record) => { record.saidSkip = false }
+
+  /**
    * Messages whose card outlived the record that owned it, keyed by session.
    *
    * Bounded like everything else here, and for the same reason: a session evicted from
@@ -586,10 +605,17 @@ export function createActivity({
         // a run, and taking it away would take away the answer to "what was it doing" — and one
         // that was never sent is not sent now, because a message the desk is not expecting is
         // exactly the notification this plugin does not send.
-        diagnostics?.(`活动卡：跳过「${record.session}」——桌面持有优先侧，这一轮不发卡。`)
+        //
+        // Said once per stretch, not once per refresh. This sits in a loop that runs every quarter
+        // second while a run streams, so a line written unconditionally here is written hundreds of
+        // times for one decision — and a diagnostic that floods the file it writes to is worse than
+        // no diagnostic: the first release of this line buried the very reply-path evidence it was
+        // added to find, and the log looked like it was working.
+        noteSkip(record, `活动卡：跳过「${record.session}」——桌面持有优先侧，这一轮不发卡。`)
         record.dirty = false
         continue
       }
+      clearSkip(record)
       record.dirty = false
       if (record.handle === undefined) {
         // A send the platform accepted but whose answer was lost is the one way this card could

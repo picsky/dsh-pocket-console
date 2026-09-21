@@ -443,6 +443,15 @@ export async function apply(ctx, config) {
       if (side === DESK) escalation.deskReturn()
     })
     const offAction = channel.subscribe(async (action) => {
+      // What arrived and who took it, said before anything decides. This is the one line that makes
+      // "the press did nothing" answerable: every decoder below is written to return `undefined` for
+      // what is not its own — which is correct and, until this line existed, completely silent, so a
+      // press that reached no handler at all and a press a handler rejected looked identical from
+      // both ends. The payload is printed because the interesting case is always a payload that does
+      // not carry what its decoder looks for.
+      diagnostics(
+        `收到动作：payload=${JSON.stringify(action?.payload ?? null)}，消息=${String(action?.messageId ?? '无')}。`,
+      )
       // The action carries the message the press came from, which is how a card whose
       // request is gone — after a restart, or once settled — is rewritten to stop
       // looking answerable. It reaches every decoder for that reason.
@@ -456,10 +465,20 @@ export async function apply(ctx, config) {
       // knows what the card already carried — the answer and the run fold, which a rewrite from the
       // wrong side would drop.
       const started = await work.handleAction(action, messageId => results.aftermath(messageId))
-      if (started !== undefined) return started
+      if (started !== undefined) {
+        diagnostics('动作由「开新任务」处理。')
+        return started
+      }
       const notice = await results.handleAction(action)
-      if (notice !== undefined) return notice
-      return escalation.handleAction(action)
+      if (notice !== undefined) {
+        diagnostics('动作由「结果卡」处理。')
+        return notice
+      }
+      const answered = escalation.handleAction(action)
+      diagnostics(answered === undefined
+        ? '动作没有任何处理器认领——它到此为止，什么也不会发生。'
+        : '动作由「审批/提问」处理。')
+      return answered
     })
 
     // Without a server there is no card to ask for a binding, so the

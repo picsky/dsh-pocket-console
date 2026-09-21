@@ -878,6 +878,10 @@ export function createResultNotifier({
   async function handleAction({ payload, values, messageId } = {}) {
     const id = typeof payload?.nid === 'string' ? payload.nid : undefined
     if (id === undefined) return undefined
+    // Every way this can end without sending is said out loud from here on. The whole path used to be
+    // silent until the very last branch, which meant "the reply did nothing" had no diagnostic at all
+    // in the common case: the reader pressed, the plugin returned early, and nothing anywhere said
+    // which of the five reasons it was.
     const notice = notices.get(id)
     if (notice === undefined) {
       // A press may only conclude that the notice is gone once this side has finished
@@ -886,7 +890,9 @@ export function createResultNotifier({
       // that is still valid, which is exactly what the durable record exists to prevent.
       // An early press therefore reports and changes nothing, leaving the card usable for
       // the moment the process can actually serve it.
-      if ((store.isOpen() && restored) || store.unavailable()) {
+      const settled = (store.isOpen() && restored) || store.unavailable()
+      diagnostics(`回复：通知 ${id} 不在这张进程里（${settled ? '结论为已失效' : '还在等存储打开，不做结论'}）。`)
+      if (settled) {
         // Even then the card says only what this side knows: it is not live here. It
         // cannot tell whether it was superseded, whether the reader moved the session on,
         // or whether the process that held it is gone — and an earlier rewrite may already
@@ -902,9 +908,15 @@ export function createResultNotifier({
     // under the name this side asked for.
     const submitted = values?.[payload?.submits?.[INSTRUCTION_FIELD] ?? INSTRUCTION_FIELD]
     const text = typeof submitted === 'string' ? submitted.trim() : ''
-    if (text === '') return { toast: messages().emptyInstruction, accepted: false }
+    if (text === '') {
+      // The channel renames the control and reports the mapping back; a mismatch here is a card and a
+      // decoder disagreeing about a name, which reaches the reader as a press that does nothing.
+      diagnostics(`回复：表单里的文字没读到（控件映射=${JSON.stringify(payload?.submits ?? {})}，收到的值=${JSON.stringify(values ?? {})}）。`)
+      return { toast: messages().emptyInstruction, accepted: false }
+    }
     const agent = ctx.get?.('agents')?.get?.(notice.session)
     if (agent === undefined) {
+      diagnostics(`回复：会话「${notice.session}」没有 agent，指令无处可去。`)
       return { toast: messages().noAgent, accepted: false }
     }
     // Claim before sending: the first submission wins and the rid dies here — durably
