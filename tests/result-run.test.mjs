@@ -201,44 +201,176 @@ test('the card carrying the run still fits the platform', async () => {
   }
 })
 
-test('replying keeps the answer and the run, and gives up only the box', async () => {
-  const { result, scaffolded, followed } = await afterARun()
-  const before = foldedRun(result.card)
-  assert.ok(before, 'the card came with the run')
+test('the reply turns the card it was answered on into the run’s own card', async () => {
+  const { result, followed } = await afterARun()
   const reply = callbackValues(result.card).find(value => value.submit === true)
-  assert.ok(reply, 'and with a box to reply in')
+  assert.ok(reply, 'the card came with a box to reply in')
   const field = reply.submits?.value
   assert.ok(typeof field === 'string', 'the reply control names itself: ' + JSON.stringify(reply.submits))
+  const sentBefore = observed.delivered.length
 
   await clickCard(reply, { [field]: '接着做下一步' }, { messageId: result.handle })
-  // The rewrite is deliberately not awaited by the press — the toast is answered first so the
-  // callback stays inside the platform's three-second window — and it loads the harness's message
-  // constructor before it writes. Waiting for the write, not for a fixed tick, is what keeps this
-  // case from passing or failing on how fast the machine is.
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    if (callbackValues(cardFrom(result.handle)).every(value => value.submit !== true)) break
+  // The run's card is written on the refresh window rather than inside the press — the toast is
+  // answered first so the callback stays inside the platform's three-second budget — and waiting for
+  // the write, not for a fixed tick, is what keeps this case from passing or failing on how fast the
+  // machine is.
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    if (String(cardFrom(result.handle)?.header?.title?.content ?? '').startsWith('DSH 执行中')) break
     await sleep(25)
   }
 
+  // The whole of the rule: the card that moves is the card the person touched. A reply used to leave
+  // "已收到指令" here and show the run on a **second** message, so the reader gave an instruction and
+  // watched the card in their hand stay still while the run went on somewhere else.
   const after = cardFrom(result.handle)
+  assert.equal(
+    after.header.title.content,
+    'DSH 执行中 · my-app',
+    'the card the reply came from became the run’s card, workspace and all',
+  )
+  assert.equal(observed.delivered.length, sentBefore, 'and no second message was sent for that run')
   assert.deepEqual(
     callbackValues(after).some(value => value.submit === true),
     false,
     'the box it was answered through is gone, so one answer cannot be sent twice',
   )
-  // The failure this case exists for: a reply is a small event, and rewriting the card into
-  // "已收到指令" was taking the answer and the fold with it — the reader answers, scrolls back, and
-  // the thing they were reading is gone.
-  assert.match(JSON.stringify(after), /已收到指令/, 'the card says the instruction arrived')
-  assert.match(JSON.stringify(after), /测试也过了/, 'and the answer it was reporting is still on it')
-  assert.equal(foldedRun(after), before, 'and the run it carried is unchanged')
-  // Copy that points at a control which is no longer there is the same lie as dropping the answer,
-  // only quieter. The reply hint and the whole next-task block were added at send time, so they
-  // belong to the layer that was just disposed of and leave with it.
+  // The face is the live run, not a sentence about the reply. Copy that points at a control which is
+  // no longer there is the same lie as dropping the answer, only quieter — the reply hint and the
+  // whole next-task block went with the box they belonged to.
   const words = after.body.elements.map(element => element.content ?? '').join('\n')
+  assert.match(words, /处理中/, 'the face says the run is going')
+  assert.equal(/已收到指令/.test(words), false, 'and not that the instruction arrived')
   assert.equal(/回复这条消息/.test(words), false, 'and nothing points at the reply box that is gone')
   assert.equal(/开下一段|新会话里开/.test(words), false, 'nor at the next-task form that is gone')
-  assert.equal(followed.at(-1).content[0].text, '接着做下一步')
+  assert.equal(followed.at(-1).content[0].text, '接着做下一步', 'while the instruction itself reached the session')
+})
+
+test('the result of the run a reply started is a card of its own', async () => {
+  const { result, scaffolded } = await afterARun()
+  const reply = callbackValues(result.card).find(value => value.submit === true)
+  const field = reply.submits.value
+  await clickCard(reply, { [field]: '接着做下一步' }, { messageId: result.handle })
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    if (String(cardFrom(result.handle)?.header?.title?.content ?? '').startsWith('DSH 执行中')) break
+    await sleep(25)
+  }
+  const afterReply = observed.delivered.length
+
+  // The second half of the rule, and the half that is easy to get wrong by being clever: the run that
+  // reply started reports itself on a card of its own, rather than folding its result back into the
+  // card the person is watching. "执行中" and "结果" are two different cards, and confusing them is
+  // what leaves an answer welded to the progress that replaced it.
+  const emit = (event) => scaffolded.emitToAll('session/event', { id: 's_1' }, event)
+  // The reply itself: the stub records the hand-off rather than replaying it as a session event, so
+  // the run that instruction starts is opened here the way the harness would open it.
+  emit({
+    type: 'user/message',
+    surfaceOp: 'append',
+    data: { source: { kind: 'user' }, content: [{ type: 'text', text: '接着做下一步' }] },
+  })
+  emit({ type: 'turn/start', data: { turn: 2 } })
+  emit({
+    type: 'assistant/message',
+    surfaceOp: 'append',
+    data: { turn: 2, step: 1, message: { content: [{ type: 'text', text: '第二步也做完了。' }] } },
+  })
+  emit({ type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
+  await sleep(1_400)
+
+  const again = cardTitled('DSH 结果')
+  assert.ok(again, 'the run’s result came to the phone')
+  assert.notEqual(again.handle, result.handle, 'as a card of its own, not the card the reply was made on')
+  assert.equal(observed.delivered.length, afterReply + 1, 'and it cost exactly one message')
+  const face = again.card.body.elements.filter(e => e.tag === 'markdown').map(e => e.content).join('\n')
+  assert.match(face, /第二步也做完了/, 'carrying what that run ended with')
+  // What the reader answered is still on a card: the one they replied on now shows the run it started,
+  // and that run's own record — including the turn before it — is what its fold holds.
+  assert.match(foldedRun(again.card) ?? '', /接着做下一步/, 'and the instruction it was answering')
+})
+
+test('a second press on the card the reply came from does not overwrite the run', async () => {
+  const { result, followed } = await afterARun()
+  const reply = callbackValues(result.card).find(value => value.submit === true)
+  const field = reply.submits.value
+  await clickCard(reply, { [field]: '接着做下一步' }, { messageId: result.handle })
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    if (String(cardFrom(result.handle)?.header?.title?.content ?? '').startsWith('DSH 执行中')) break
+    await sleep(25)
+  }
+
+  // The same press again, from the same card. Its rid died with the first answer, so this lands in the
+  // branch that tells a reader the card they are holding no longer takes replies — and that branch
+  // used to rewrite whatever message the press came from. The message it comes from is now the card
+  // the run is being shown in, so "此卡已失效" over it would replace the one thing on the phone that is
+  // still true with a sentence about a notice that is gone.
+  const again = await clickCard(reply, { [field]: '接着说' }, { messageId: result.handle })
+  assert.equal(again.toast.content, '该结果已过期', 'the press is refused, and said so')
+  await sleep(50)
+  const titles = observed.patched
+    .filter(entry => entry.path?.message_id === result.handle)
+    .map((entry) => {
+      try { return JSON.parse(entry.data.content).header.title.content } catch { return '' }
+    })
+  assert.equal(
+    titles.some(title => String(title).startsWith('DSH 结果')),
+    false,
+    'and the run’s card was not renamed back into a stale notice',
+  )
+  assert.equal(
+    cardFrom(result.handle).header.title.content,
+    'DSH 执行中 · my-app',
+    'the card still shows the run',
+  )
+  assert.equal(followed.length, 1, 'and the second press sent nothing to the session')
+})
+
+test('a reply that arrives while the session is running is steered into it', async () => {
+  // A reply from the phone is a person speaking. If the session is already working, the instruction
+  // has to go **into** that work: `followup` queues a turn of its own, and on the real machine a
+  // follow-up queued against a running session was never delivered — the notice was consumed, the
+  // card turned into a run, and no turn ever came of it. See issue #50.
+  const { result, scaffolded, followed } = await afterARun()
+  const steered = []
+  const agent = scaffolded.agents.get('s_1')
+  agent.status = 'running'
+  agent.steer = (message) => { steered.push(message) }
+
+  const reply = callbackValues(result.card).find(value => value.submit === true)
+  const outcome = await clickCard(reply, { [reply.submits.value]: '先别改那个文件' }, { messageId: result.handle })
+
+  assert.match(String(outcome.toast.content), /已发送/, 'the press is accepted')
+  assert.equal(steered.length, 1, 'and the instruction went in as steering')
+  assert.equal(followed.length, 0, 'not as a turn queued behind the running one')
+  assert.equal(steered[0].content[0].text, '先别改那个文件', 'the words are the reader’s own')
+  assert.equal(steered[0].source.kind, 'user', 'and are attributed to the person who typed them')
+})
+
+test('a reply to a session that is not running waits as its own turn', async () => {
+  // The other half of the same rule, and the reason the branch is on the agent's status rather than
+  // on "steer exists": a finished run's answer is what the reader is replying to, and what comes
+  // next is a turn, not a correction to work that is over.
+  const { result, scaffolded, followed } = await afterARun()
+  const steered = []
+  scaffolded.agents.get('s_1').steer = (message) => { steered.push(message) }
+
+  const reply = callbackValues(result.card).find(value => value.submit === true)
+  await clickCard(reply, { [reply.submits.value]: '接着做' }, { messageId: result.handle })
+
+  assert.equal(steered.length, 0, 'an idle session is not steered')
+  assert.equal(followed.length, 1, 'its instruction is queued as the next turn')
+})
+
+test('a session whose agent cannot be steered still takes the instruction', async () => {
+  // A deployment whose agent predates `steer` keeps the old path rather than losing the reply: the
+  // queue is what every release before this one used, and refusing to send would be worse than the
+  // risk it avoids.
+  const { result, scaffolded, followed } = await afterARun()
+  scaffolded.agents.get('s_1').status = 'running'
+
+  const reply = callbackValues(result.card).find(value => value.submit === true)
+  await clickCard(reply, { [reply.submits.value]: '还在吗' }, { messageId: result.handle })
+
+  assert.equal(followed.length, 1, 'the instruction still reaches the session')
 })
 
 test('a reply that never reached the session is not reported as sent', async () => {

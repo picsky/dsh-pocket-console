@@ -51,6 +51,17 @@ export function isAnswer(message) {
 /** How many sessions are observed at once before the coldest are forgotten. */
 const TRACK_CAPACITY = 256
 
+/**
+ * The end reasons a phone card is still owed for, beyond `completed`.
+ *
+ * `error` and `max-tokens` both leave the work unfinished, and in both the person holding the phone
+ * is the one who decides whether it goes on — which is exactly the situation that used to end in a
+ * read-only card and a trip back to the desk. `aborted` is left out on purpose: it is the stop that
+ * a person or the loop has already decided on, and a card asking "what now?" a second after somebody
+ * pressed stop is noise. `blocked` is left out for the same reason.
+ */
+const UNFINISHED_REASONS = new Set(['error', 'max-tokens'])
+
 /** Bytes of UTF-8, which is what a size the platform counts and a size this code counts agree on. */
 const rawBytes = (value) => Buffer.byteLength(String(value ?? ''), 'utf8')
 
@@ -104,10 +115,16 @@ function runGroups(entries, dropped, copy, budget, maxGroups) {
         at += 1
         continue
       }
-      lost += rawBytes(entry.text) + 2
+      // What a reader misses is the entry **as it would have been shown**, marker included: the one
+      // entry the fold marks is a person's own words, and counting them bare would under-report the
+      // loss by exactly the part that makes them findable.
+      lost += rawBytes(renderEntry(entry)) + 2
     }
     return lost
   }
+
+  /** One entry as the fold shows it. The only thing marked is a person's own words. */
+  const renderEntry = (entry) => (entry.kind === 'human' ? copy.humanLine(entry.text) : entry.text)
 
   /** Adjacent tool lines, joined; every other kind left as it is. */
   const mergeTools = (kept) => {
@@ -132,11 +149,12 @@ function runGroups(entries, dropped, copy, budget, maxGroups) {
   const shape = (kept, merge) => {
     const grouped = merge ? mergeTools(kept) : kept
     const omitted = dropped + lostBytes(kept)
-    const text = grouped.map(group => group.text).join('\n\n')
+    const rendered = grouped.map(renderEntry)
+    const text = rendered.join('\n\n')
     const body = omitted > 0 ? `${text}\n\n${copy.resultOmitted(omitted)}` : text
     if (rawBytes(body) > budget) return undefined
     if (grouped.length + (omitted > 0 ? 1 : 0) > maxGroups) return undefined
-    return grouped.map(group => group.text).concat(omitted > 0 ? [copy.resultOmitted(omitted)] : [])
+    return rendered.concat(omitted > 0 ? [copy.resultOmitted(omitted)] : [])
   }
 
   const prose = all.filter(entry => entry.kind !== 'tool' && entry.kind !== 'failure')
@@ -173,12 +191,13 @@ function runGroups(entries, dropped, copy, budget, maxGroups) {
 /**
  * Watch root sessions, then offer each stopped session's answer to the channel.
  * @param options - the host context, the logger, the channel, the settings, the copy, the workspace
- *   registry, the priority state, the record of what each run did, and the next-task offer that
- *   rides on a settled card instead of costing a message of its own.
+ *   registry, the priority state, the record of what each run did, the next-task offer that rides on
+ *   a settled card instead of costing a message of its own, and the activity card, which takes over
+ *   the message a reply was typed on.
  */
 export function createResultNotifier({
-  ctx, log, channel, settings, messages, workspaces, priority, runRecord, nextTask,
-  diagnostics = () => {}, now = () => Date.now(),
+  ctx, log, channel, settings, messages, workspaces, priority, runRecord, nextTask, activity,
+  sessionNames, diagnostics = () => {}, now = () => Date.now(),
 }) {
   /** Per-session observation: the newest turn, its last message, and when we last spoke. */
   const tracks = new Map()
@@ -233,6 +252,25 @@ export function createResultNotifier({
    * setting it configured.
    */
   const effectiveDelay = () => priority?.delaySeconds() ?? settings().delaySeconds
+
+  /**
+   * Give the message a reply was typed on to the run its instruction starts.
+   *
+   * The two modules are separate — one owns the run's card, one owns the card a result is offered
+   * on — and this is the single seam between them. It is a call rather than a shared map because
+   * only the run can say whether the message is free: a card whose first send is still in flight is
+   * about to have a handle of its own, and taking one over before that lands would leave the
+   * answer to that send editing a message nothing is looking at.
+   *
+   * Composed without the activity module, this is a no-op and the reply path keeps its own rewrite:
+   * the card then says "已收到指令" and the run shows on a card of its own, which is what every
+   * release before this one did.
+   * @param session - the session the reply was made against.
+   * @param handle - the message the reply came from.
+   * @returns whether the run took the card over.
+   */
+  const adoptCard = (session, handle) =>
+    handle !== undefined && activity?.adopt?.(session, handle) === true
 
   /**
    * The workspace one session belongs to, resolved once per notice.
@@ -349,6 +387,25 @@ export function createResultNotifier({
     }
   }
 
+  /**
+   * What the card's face says.
+   *
+   * A turn that ran to the end has an answer, and that answer is the face. A turn that stopped short
+   * may have none — the message that called the tool that failed carries no text — and then the card
+   * has to say what happened, because an empty face above a reply box asks the reader to answer a
+   * question nobody asked. The newest words of the turn are the fallback before that: a run that
+   * spoke and then failed said something worth keeping in front of the reader.
+   * @param track - the session's observation.
+   * @returns the text the card's face starts with.
+   */
+  const faceOf = (track) => {
+    const said = isAnswer(track.message) ? track.message.text : (track.spoke ?? '')
+    if (said !== '') return said
+    const reason = track.reason
+    const why = reason?.kind === 'error' ? String(reason.error?.message ?? '') : ''
+    return messages().noticeUnfinished(reason?.kind, why)
+  }
+
   /** Offer the stopped session's answer, once the session is actually quiet. */
   const fire = async (session) => {
     const track = trackOf(session)
@@ -356,7 +413,13 @@ export function createResultNotifier({
     // Only a turn that ended and was not superseded: a newer turn means the
     // session kept working, and the newer one owns the next notice.
     if (!track.eligible || track.ended === undefined || track.ended !== track.turn) return
-    if (!isAnswer(track.message)) return
+    const unfinished = track.reason !== undefined && track.reason.kind !== 'completed'
+    // A turn that **ran to the end** is only worth a card when it ended on an answer: an intermediate
+    // round that ended on a tool call is process, not a result, and the card would be asking the
+    // reader to reply to something that was never said. A turn that **stopped short** is worth one
+    // whatever it ended on, because the news is that it stopped — and it very often ends on the
+    // message that called the tool that failed, which carries no text at all.
+    if (!unfinished && !isAnswer(track.message)) return
     const delay = settings().resultNotifyCooldownSeconds * 1000
     if (track.sentAt !== undefined && now() - track.sentAt < delay) {
       log.debug(messages().logNoticeCooling)
@@ -376,9 +439,10 @@ export function createResultNotifier({
     }
 
     const id = noticeId()
-    // A long result would otherwise be refused by the platform and the notice
+    // What the face says. A long result would otherwise be refused by the platform and the notice
     // would never arrive, which is worse than a clipped one that says so.
-    let answer = clipToBytes(track.message.text, messages().truncated)
+    const face = faceOf(track)
+    let answer = clipToBytes(face, messages().truncated)
     // One live notice per session: the newest result is the one worth replying
     // to, and an older card that still accepted a reply would inject an
     // instruction the reader wrote against a superseded answer.
@@ -386,14 +450,18 @@ export function createResultNotifier({
     // Resolved once, then carried: this card is rewritten when the reader replies and
     // when a newer result supersedes it, and those rewrites must say the same thing.
     const workspace = workspaceOf(session)
+    // Resolved once and **carried on the notice** with the workspace, so every later rewrite of this
+    // card — the reply, a supersede, an expiry — says the same thing about which session it is.
+    const subtitle = sessionNames?.subtitle?.(session)
     const view = {
       title: titleOf(`${settings().titlePrefix} ${messages().resultTitle}`, workspace),
+      ...(subtitle === undefined ? {} : { subtitle }),
       tone: 'info',
       body: [answer, messages().replyHint],
       buttons: [],
       forms: [{ payload: { nid: id, submit: true }, fieldId: INSTRUCTION_FIELD, submitLabel: messages().sendToAgent }],
     }
-    noticeSet(id, { session, handle: undefined, workspace })
+    noticeSet(id, { session, handle: undefined, workspace, subtitle })
     track.ended = undefined
     track.sentAt = now()
     // What the run did, from the last thing a person said to the moment it stopped. The card face
@@ -461,7 +529,7 @@ export function createResultNotifier({
       const handle = await channel.deliver(card).catch(async (error) => {
         if (!looksLikeSizeRefusal(error)) throw error
         log.debug(messages().logNoticeTooLarge)
-        answer = clipToBytes(track.message.text, messages().truncated, Math.floor(CARD_TEXT_BUDGET / 2))
+        answer = clipToBytes(face, messages().truncated, Math.floor(CARD_TEXT_BUDGET / 2))
         card = cardFor(answer)
         // The fold is what does not fit, so the fold is what is given up. The offer is cheaper than
         // it looks and stays: dropping it would take away the one control a result is worth having.
@@ -666,7 +734,6 @@ export function createResultNotifier({
   }
 
   /**
-  /**
    * The card one notice was sent as, taken off the notice that owns it.
    *
    * A rewrite is asked for by the message it came from, and the notice is what knows the message —
@@ -707,8 +774,28 @@ export function createResultNotifier({
    * @param headline - what the card says instead.
    * @param workspace - the label the card was sent with, so the rewrite agrees with it.
    */
+  /**
+   * The small line a rewrite of an already-sent card must keep.
+   *
+   * Taken from the notice when this side still holds the card — that is the line it was actually sent
+   * with — and otherwise from the registry, because a card that outlived its notice still belongs to a
+   * session, and the platform can still be told which one. Undefined means the header this rewrite
+   * writes has no small line, exactly like a card whose session was never named.
+   * @param handle - the message being rewritten.
+   * @param known - the card as this side holds it, when it holds it.
+   * @returns the line, or undefined.
+   */
+  const subtitleFor = (handle, known) =>
+    known?.notice?.subtitle ?? sessionNames?.subtitle?.(workspaces?.sessionOf?.(handle))
+
   function retract(handle, headline, workspace) {
     if (handle === undefined || typeof channel.update !== 'function') return
+    // A message the activity card is being shown in belongs to a run, not to a notice. This became
+    // reachable the moment a reply turned the card it was made on into that run's card: a second
+    // press on the same card — the one the reply came from — used to reach here with a rid that is
+    // no longer live, and writing "this card no longer works" over it would replace a live run with
+    // a sentence about a notice that is gone.
+    if (activity?.owns?.(handle) === true) return
     const known = cardOf(handle)
     // With nothing appended, `RESULT_ENDS` is the end of the card and this keeps the whole face.
     const body = known === undefined
@@ -716,6 +803,10 @@ export function createResultNotifier({
       : [...known.view.body.slice(0, known.view[RESULT_ENDS] ?? known.view.body.length), headline]
     void Promise.resolve(channel.update(handle, {
       title: titleOf(`${settings().titlePrefix} ${messages().resultTitle}`, workspace),
+      // From the notice when this side still holds it — that is the line the card was sent with — and
+      // otherwise from the registry, because a card that outlived its notice still belongs to a
+      // session and the platform can still be told which one.
+      ...(subtitleFor(handle, known) === undefined ? {} : { subtitle: subtitleFor(handle, known) }),
       tone: 'muted',
       body,
       buttons: [],
@@ -846,24 +937,38 @@ export function createResultNotifier({
     }
     if (event.type === 'assistant/message' && event.surfaceOp === 'append') {
       const blocks = event.data?.message?.content ?? []
+      const text = blocks.filter(block => block.type === 'text').map(block => block.text).join('')
       track.message = {
         turn: event.data.turn,
-        text: blocks.filter(block => block.type === 'text').map(block => block.text).join(''),
+        text,
         hasToolCall: blocks.some(block => block.type === 'tool-call'),
       }
+      // The newest words of the turn, whatever else the message carried. Kept apart from
+      // `track.message` because that one is read as "is this an answer", and a message that both
+      // spoke and called a tool is not — while its words are still the best thing to put in front of
+      // a reader whose run then stopped short.
+      if (text !== '') track.spoke = text
       arm(session.id)
       return
     }
     if (event.type === 'turn/start') {
       track.turn = event.data?.turn
       track.message = undefined
+      track.spoke = undefined
       track.ended = undefined
+      track.reason = undefined
       arm(session.id)
       return
     }
     if (event.type === 'turn/end') {
-      if (event.data?.reason?.kind !== 'completed') return
+      const reason = event.data?.reason
+      // `completed` is what this card was written for; the reasons in {@link UNFINISHED_REASONS}
+      // are the ones where the work stopped and the reader is the one who decides what happens
+      // next. Everything else — a stop somebody already asked for — ends here, with no card: see
+      // that constant for why.
+      if (reason?.kind !== 'completed' && UNFINISHED_REASONS.has(reason?.kind) === false) return
       track.ended = event.data.turn
+      track.reason = reason
       arm(session.id)
     }
   }
@@ -878,6 +983,10 @@ export function createResultNotifier({
   async function handleAction({ payload, values, messageId } = {}) {
     const id = typeof payload?.nid === 'string' ? payload.nid : undefined
     if (id === undefined) return undefined
+    // Every way this can end without sending is said out loud from here on. The whole path used to be
+    // silent until the very last branch, which meant "the reply did nothing" had no diagnostic at all
+    // in the common case: the reader pressed, the plugin returned early, and nothing anywhere said
+    // which of the five reasons it was.
     const notice = notices.get(id)
     if (notice === undefined) {
       // A press may only conclude that the notice is gone once this side has finished
@@ -886,7 +995,9 @@ export function createResultNotifier({
       // that is still valid, which is exactly what the durable record exists to prevent.
       // An early press therefore reports and changes nothing, leaving the card usable for
       // the moment the process can actually serve it.
-      if ((store.isOpen() && restored) || store.unavailable()) {
+      const settled = (store.isOpen() && restored) || store.unavailable()
+      diagnostics(`回复：通知 ${id} 不在这张进程里（${settled ? '结论为已失效' : '还在等存储打开，不做结论'}）。`)
+      if (settled) {
         // Even then the card says only what this side knows: it is not live here. It
         // cannot tell whether it was superseded, whether the reader moved the session on,
         // or whether the process that held it is gone — and an earlier rewrite may already
@@ -902,9 +1013,15 @@ export function createResultNotifier({
     // under the name this side asked for.
     const submitted = values?.[payload?.submits?.[INSTRUCTION_FIELD] ?? INSTRUCTION_FIELD]
     const text = typeof submitted === 'string' ? submitted.trim() : ''
-    if (text === '') return { toast: messages().emptyInstruction, accepted: false }
+    if (text === '') {
+      // The channel renames the control and reports the mapping back; a mismatch here is a card and a
+      // decoder disagreeing about a name, which reaches the reader as a press that does nothing.
+      diagnostics(`回复：表单里的文字没读到（控件映射=${JSON.stringify(payload?.submits ?? {})}，收到的值=${JSON.stringify(values ?? {})}）。`)
+      return { toast: messages().emptyInstruction, accepted: false }
+    }
     const agent = ctx.get?.('agents')?.get?.(notice.session)
     if (agent === undefined) {
+      diagnostics(`回复：会话「${notice.session}」没有 agent，指令无处可去。`)
       return { toast: messages().noAgent, accepted: false }
     }
     // Claim before sending: the first submission wins and the rid dies here — durably
@@ -963,7 +1080,7 @@ export function createResultNotifier({
       // reject — a deployment that cannot resolve the harness — which is why the failure below
       // is a real branch and not a formality.
       const { createUserMessage } = await import('@deepseek-ai/dsh-llm')
-      agent.followup(createUserMessage({
+      const message = createUserMessage({
         content: [{ type: 'text', text }],
         // Human input, minted by the surface the human is speaking through —
         // the same attribution the harness's own remote client gives a prompt
@@ -972,8 +1089,21 @@ export function createResultNotifier({
         // carries human authority; a plugin-sourced one renders as folded
         // injected context instead.
         source: { kind: 'user' },
-      }))
-      log.info(messages().logInstructionQueued)
+      })
+      // Which of the two doors this instruction goes through depends on whether the session is
+      // already working, and the difference is not cosmetic: `followup` queues a turn of its own,
+      // and on the real machine a follow-up queued against a **running** session was never
+      // delivered — the notice was consumed, the card turned into a run, and no turn ever came of
+      // it. Steering is the harness's own answer for a person speaking while it works: the running
+      // driver consumes it at its next step boundary, and an idle one starts a turn. See issue #50.
+      if (agent.status === 'running' && typeof agent.steer === 'function') {
+        agent.steer(message)
+        log.info(messages().logInstructionSteered)
+        diagnostics(`回复：会话正在跑，指令以 steer 送进当前这一轮（消息 ${String(notice.handle ?? '')}）。`)
+      } else {
+        agent.followup(message)
+        log.info(messages().logInstructionQueued)
+      }
     } catch (error) {
       log.warn(messages().logInstructionFailed, error)
       return false
@@ -983,15 +1113,22 @@ export function createResultNotifier({
     // recoverable by reading the conversation — and reporting it as "not sent" would be a worse
     // lie than the stale box.
     try {
-      // The card keeps the answer and the fold, and loses the box it was answered through. The
-      // earlier version replaced the whole face with "已收到指令", which took away the answer the
-      // reader had just replied to and the run fold beside it — an edit that destroys text is worse
-      // than no edit at all. Rebuilt from the card as sent, so nothing else drifts either.
-      // Only for a card this side still holds. A notice that came back from the previous run has no
-      // view here, and guessing one would replace a result nobody has a copy of with a sentence
-      // about an instruction — the exact failure this branch exists to stop.
       const sent = notice[VIEW]
-      if (notice.session !== undefined && sent !== undefined) {
+      // The card the person just answered becomes the run's card, and this is the whole of the rule:
+      // the card that moves is the card they touched. Leaving "已收到指令" on this one and opening a
+      // second message somewhere else for the run that instruction starts is two cards for one
+      // press, and the one that moves is not the one they are looking at.
+      //
+      // Asked before anything is read off the notice, because it needs nothing but the message the
+      // reply came from — which is also the one case that had no rewrite at all until now: a notice
+      // restored from the previous run carries no view here, so its card could not be rebuilt, and a
+      // reply on it left the box the reader had just used sitting there.
+      if (adoptCard(notice.session, notice.handle)) {
+        log.info(messages().logReplyCardAdopted(String(notice.handle)))
+      } else if (notice.session !== undefined && sent !== undefined) {
+        // The fallback, for a deployment composed without the activity card: the card keeps the
+        // answer and the fold, and loses the box it was answered through, so at least the reply
+        // cannot be taken twice. Rebuilt from the card as sent, so nothing else drifts either.
         // Taken off the notice it belongs to, so there is no second place that has to be told.
         delete notice[VIEW]
         // Everything the offer appended goes with the controls it came with. Keeping the sentence

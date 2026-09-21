@@ -23,6 +23,7 @@ import { createEscalation } from './escalation.js'
 import { createActivity } from './activity.js'
 import { createDiagnostics } from './diagnostics.js'
 import { createRunRecord } from './run-record.js'
+import { createSessionNames } from './session-names.js'
 import { createWork } from './work.js'
 import { LOCALES, messagesFor } from './messages.js'
 import { createMirror } from './mirror.js'
@@ -313,16 +314,25 @@ export async function apply(ctx, config) {
   // one place instead of three modules each inventing their own line.
   const diagnostics = createDiagnostics({ settings: () => settings, log })
 
+  // What each session is called, for the small line under a card's title. A project with two sessions
+  // running in it makes two identical titles, and the name is the only thing that separates them —
+  // the harness already gives every session one, so this only has to remember it. Built here rather
+  // than beside the other registries because it reports through `diagnostics`, which is defined just
+  // above; every card producer below takes it, so nothing can be built before it exists.
+  const sessionNames = createSessionNames({ messages, log, diagnostics })
+
   // The escalation machine owns the timer, the race, and the pending registry;
   // this file only wires it to the two seams and the channel's actions.
   escalation = createEscalation({
-    log, channel, settings: () => settings, mirror, messages, workspaces, priority, diagnostics,
+    log, channel, settings: () => settings, mirror, messages, workspaces, priority, sessionNames,
+    diagnostics,
   })
 
   // The activity card follows a run while it runs, but only once the phone holds the person:
   // while the desk has them, the run is visible where they already are.
   const activity = createActivity({
-    ctx, log, channel, settings: () => settings, messages, priority, workspaces, diagnostics,
+    ctx, log, channel, settings: () => settings, messages, priority, workspaces, sessionNames,
+    diagnostics,
   })
 
   // What each run did, kept on its own account rather than on a card: the result card shows it, so
@@ -351,6 +361,11 @@ export async function apply(ctx, config) {
     runRecord,
     // The next-task offer, appended to the card this notifier is about to send.
     nextTask: work,
+    // The run's own card, so a reply can leave the run on the message it was typed on instead of
+    // opening another one.
+    activity,
+    // Which session each card belongs to, for the small line under its title.
+    sessionNames,
   })
 
   /** The card's status snapshot: what the section serves and what is open. */
@@ -430,6 +445,9 @@ export async function apply(ctx, config) {
     // the phone holds the person — and the run somebody asks about afterwards may well have happened
     // at the desk, or be the first one after the phone took over.
     const offRunRecord = ctx.on('session/event', (session, event) => { runRecord.observe(session, event) })
+    // Which session each card belongs to, read off the same firehose: the harness appends a
+    // `session/title` event when a session gets its name, and this is the only place that hears it.
+    const offSessionNames = ctx.on('session/event', (session, event) => { sessionNames.observe(session, event) })
     const offRunStream = ctx.on('agent/assistant-stream', ({ agent, frame }) => {
       runRecord.observeStream(agent?.id, frame)
     })
@@ -443,6 +461,15 @@ export async function apply(ctx, config) {
       if (side === DESK) escalation.deskReturn()
     })
     const offAction = channel.subscribe(async (action) => {
+      // What arrived and who took it, said before anything decides. This is the one line that makes
+      // "the press did nothing" answerable: every decoder below is written to return `undefined` for
+      // what is not its own — which is correct and, until this line existed, completely silent, so a
+      // press that reached no handler at all and a press a handler rejected looked identical from
+      // both ends. The payload is printed because the interesting case is always a payload that does
+      // not carry what its decoder looks for.
+      diagnostics(
+        `收到动作：payload=${JSON.stringify(action?.payload ?? null)}，消息=${String(action?.messageId ?? '无')}。`,
+      )
       // The action carries the message the press came from, which is how a card whose
       // request is gone — after a restart, or once settled — is rewritten to stop
       // looking answerable. It reaches every decoder for that reason.
@@ -456,10 +483,20 @@ export async function apply(ctx, config) {
       // knows what the card already carried — the answer and the run fold, which a rewrite from the
       // wrong side would drop.
       const started = await work.handleAction(action, messageId => results.aftermath(messageId))
-      if (started !== undefined) return started
+      if (started !== undefined) {
+        diagnostics('动作由「开新任务」处理。')
+        return started
+      }
       const notice = await results.handleAction(action)
-      if (notice !== undefined) return notice
-      return escalation.handleAction(action)
+      if (notice !== undefined) {
+        diagnostics('动作由「结果卡」处理。')
+        return notice
+      }
+      const answered = escalation.handleAction(action)
+      diagnostics(answered === undefined
+        ? '动作没有任何处理器认领——它到此为止，什么也不会发生。'
+        : '动作由「审批/提问」处理。')
+      return answered
     })
 
     // Without a server there is no card to ask for a binding, so the
@@ -475,6 +512,7 @@ export async function apply(ctx, config) {
       offResults()
       offActivity()
       offRunRecord()
+      offSessionNames()
       offRunStream()
       offPriority()
       offAction()

@@ -25,3 +25,8 @@ code. A change that contradicts a record here needs a new record, not a quiet ed
 | [0018](0018-the-status-board-is-a-pinned-card.md) | The persistent status board is a pinned card — and one with no controls, so it stays editable |
 | [0019](0019-the-next-task-rides-the-result-card.md) | The next task is a form on the result card, and a rewrite may not take the answer away |
 | [0020](0020-a-phone-started-session-joins-its-workspace.md) | A phone-started session is created through its workspace, so the desk groups it where it belongs |
+| [0021](0021-the-card-you-pressed-is-the-one-that-moves.md) | The card a reply is answered on becomes the run's card, and the next result is a card of its own |
+| [0022](0022-the-fold-is-one-turn-and-marks-what-you-said.md) | The fold is one turn plus the one the reply was made against, and it marks the person's own line |
+| [0023](0023-a-reply-into-a-running-session-steers.md) | A reply that arrives while the session runs is steered into that turn, not queued behind it |
+| [0024](0024-an-unfinished-run-still-gets-a-card.md) | A run that stopped short still gets a result card, because the phone is where the next decision is made |
+| [0025](0025-the-subtitle-names-the-session.md) | The session's name rides in the header's subtitle, which the tenant was measured accepting |

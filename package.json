@@ -19,6 +19,7 @@
     "run-record.js",
     "diagnostics.js",
     "identity.js",
+    "session-names.js",
     "priority.js",
     "workspaces.js",
     "notice-store.js",

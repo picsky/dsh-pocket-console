@@ -379,7 +379,18 @@ export function renderCard(view, messages, onFit = () => {}) {
     schema: '2.0',
     // A shared card is required for the post-decision rewrite.
     config: { update_multi: true },
-    header: { template: TEMPLATES[view.tone] ?? 'blue', title: plainText(view.title) },
+    header: {
+      template: TEMPLATES[view.tone] ?? 'blue',
+      title: plainText(view.title),
+      // The small line under the title, and **an object or nothing**: the platform was measured
+      // accepting `{ tag, content }` here and refusing a bare string with `230099` (card content
+      // invalid), which is how we know the field is recognized and strictly typed rather than
+      // silently ignored. Omitted entirely when there is nothing to say, so a card without a name
+      // keeps the exact header it had before this field existed.
+      ...(typeof view.subtitle === 'string' && view.subtitle !== ''
+        ? { subtitle: plainText(view.subtitle) }
+        : {}),
+    },
     body: { elements },
   }
   return fitCard(card, onFit)

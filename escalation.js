@@ -40,20 +40,33 @@ const FORM_CUSTOM_FIELD = 'custom'
  * @returns the title for the channel.
  */
 const titleFor = (settings, workspace, kind) => titleOf(`${settings.titlePrefix} ${kind}`, workspace)
+
 /**
  * Create the escalation state machine.
  * @param options - the logger, the channel, the settings, mirror, and copy
- *   thunks, and whether the channel is closed for new work.
+ *   thunks, whether the channel is closed for new work, and the session names.
  * @returns the answerer, the action router, the pending report, and disposal.
  */
 export function createEscalation({
-  log, channel, settings, mirror, messages, workspaces, priority, isClosed = () => false,
+  log, channel, settings, mirror, messages, workspaces, priority, sessionNames,
   diagnostics = () => {},
 }) {
   /** Live escalations keyed by the opaque id embedded in their action payloads. */
   const open = new Map()
   /** Set by close(): an escalation started after disposal must not arm a timer. */
   let closed = false
+
+  /**
+   * The small line under the title, naming the session this request came from.
+   *
+   * Read at render time rather than copied onto the record, because a session's title can arrive
+   * after the request does — the generator is asynchronous — and a card that is still being
+   * rewritten should pick the name up rather than keep the blank it started with. Absent means the
+   * header is exactly what it was before this line existed.
+   * @param session - the session id the request came from.
+   * @returns the line, or undefined.
+   */
+  const subtitleFor = (session) => sessionNames?.subtitle?.(session)
 
   /**
    * The wait in force: the configured head start, or none while the phone has the person.
@@ -101,6 +114,7 @@ export function createEscalation({
         : copy.approvalUpgraded(effectiveDelay()))
       return {
         title: titleFor(settings(), record.workspace, copy.approvalTitle),
+        subtitle: subtitleFor(record.session),
         tone: 'warning',
         body,
         buttons: [
@@ -200,6 +214,7 @@ export function createEscalation({
       title: questions.length > 1
         ? titleFor(settings(), record.workspace, copy.questionOf(position, questions.length))
         : titleFor(settings(), record.workspace, copy.questionTitle),
+      subtitle: subtitleFor(record.session),
       tone: 'info',
       body,
       buttons,
@@ -214,6 +229,7 @@ export function createEscalation({
       record.workspace,
       record.kind === 'approval' ? messages().approvalTitle : messages().questionTitle,
     ),
+    subtitle: subtitleFor(record.session),
     tone,
     body: [headline],
     buttons: [],
@@ -253,6 +269,16 @@ export function createEscalation({
        * stays what it said when it was sent.
        */
       workspace: workspaceLabel(request.agent?.session?.header?.cwd),
+      /**
+       * The session this request came from, so the card can say which one it is.
+       *
+       * Carried for the same reason the workspace is: a card is rewritten as its request is answered,
+       * and a rewrite starts from what the record holds rather than from the session, which may be
+       * gone by then. The *name* is looked up at render time instead of being copied here — a title
+       * can arrive after the request does (the generator is asynchronous), and a card that already
+       * exists should pick it up on its next rewrite rather than keep the blank it started with.
+       */
+      session: request.agent?.session?.id,
       handle: undefined,
       delivered: false,
       timer: undefined,
@@ -464,6 +490,9 @@ export function createEscalation({
       // The record this card belonged to is gone, so the workspace comes from what was
       // remembered against the message; a card that cannot be named is still retired.
       title: titleFor(settings(), workspaces?.lookup(handle), copy.requestGoneTitle),
+      // The session is remembered beside the message for the same reason the workspace is: this card
+      // outlived the record that could have named it.
+      subtitle: subtitleFor(workspaces?.sessionOf?.(handle)),
       tone: 'muted',
       body: [copy.requestGone],
       buttons: [],

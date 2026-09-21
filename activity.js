@@ -119,10 +119,17 @@ const rawBytes = (value) => Buffer.byteLength(String(value ?? ''), 'utf8')
 /**
  * How many finished turns one card's folded record keeps.
  *
- * A card lives as long as its session does, so the record would grow without end. The newest turns
- * are the ones a reader is looking for, and the oldest are the ones they have already read.
+ * **One, and that is the whole of the number.** The fold answers "what did the sentence I just sent
+ * do" — and the card it is on *is* the card the person answered (see
+ * `docs/decisions/0021-the-card-you-pressed-is-the-one-that-moves.md`). A running history of the
+ * session would show the reader work they have already read on the result cards of earlier turns,
+ * and bury the one thing they opened it for.
+ *
+ * The single turn kept is the one the reply was made against, and keeping it is not sentiment: the
+ * card face becomes the run, so without that turn the answer the reader was reading at the moment
+ * they answered it would be gone from the phone entirely.
  */
-const TURN_HISTORY = 5
+const TURN_HISTORY = 1
 
 /**
  * Create the activity card.
@@ -131,8 +138,8 @@ const TURN_HISTORY = 5
  * @returns installation, the event feed, and what a priority change does to the card.
  */
 export function createActivity({
-  ctx, log, channel, settings, messages, priority, workspaces, diagnostics = () => {},
-  now = () => Date.now(),
+  ctx, log, channel, settings, messages, priority, workspaces, sessionNames,
+  diagnostics = () => {}, now = () => Date.now(),
 }) {
   /** One record per session being shown: what it is doing, and the message its card lives in. */
   const activities = new Map()
@@ -145,6 +152,25 @@ export function createActivity({
 
   /** The side the person is on, which is the only condition that mints a card. */
   const phoneHasIt = () => priority?.get() === PHONE
+
+  /**
+   * Say that a run is being left alone because the desk has the person, once per stretch of that.
+   *
+   * The refresh loop this sits in runs every quarter second, so the same decision arrives over and
+   * over; what a reader wants is the moment the decision changed, not a count of how often it was
+   * re-taken. The first release of this line wrote unconditionally and produced hundreds of
+   * identical lines for one run — which hid the evidence it was added to find.
+   * @param record - the card being left alone.
+   * @param line - what to say the first time.
+   */
+  const noteSkip = (record, line) => {
+    if (record.saidSkip === true) return
+    record.saidSkip = true
+    diagnostics?.(line)
+  }
+
+  /** Forget that a skip was reported, so the next one says so again. */
+  const clearSkip = (record) => { record.saidSkip = false }
 
   /**
    * Messages whose card outlived the record that owned it, keyed by session.
@@ -315,6 +341,19 @@ export function createActivity({
   }
 
   /**
+   * One entry as the card shows it.
+   *
+   * The only thing marked is a person's own words, and that is deliberate: everything else in the
+   * fold is the run talking about itself, and marking all of it would leave nothing marked. A reader
+   * opening the fold is looking for the sentence they sent — the anchor the rest of it answers — and
+   * in a wall of model prose that sentence is otherwise the hardest thing on the card to find.
+   * @param entry - one recorded entry.
+   * @param copy - the copy table in force.
+   * @returns the text the card renders for it.
+   */
+  const renderEntry = (entry, copy) => (entry.kind === 'human' ? copy.humanLine(entry.text) : entry.text)
+
+  /**
    * Add one thing the run did to the record the frozen card will carry.
    *
    * The record is kept as a list of whole entries and its size as a running total, so nothing here
@@ -329,9 +368,12 @@ export function createActivity({
    * clipping its head would drop the part a reader came for.
    * @param record - the session's record.
    * @param line - one message's text, or one line about a failure.
+   * @param kind - whose line it is: `human`, `model`, or `tool`. Kept per entry because the fold
+   *   marks a person's own words and nothing else, and a bare string cannot say which it was.
    * @param keep - which end of an over-long entry survives.
    */
-  const note = (record, line, keep = 'head') => {
+  const note = (record, line, kind = 'model', keep = 'head') => {
+    const copy = messages()
     const text = String(line ?? '').trim()
     if (text === '') return
     // One entry is bounded on its own: a single enormous message would otherwise sit in memory at
@@ -339,13 +381,16 @@ export function createActivity({
     // bound is the record's own, measured the way the card will be sent rather than the way it is
     // held, because what the entry is for is being rendered.
     const bounded = keep === 'tail'
-      ? clipTailToBytes(text, messages().truncated, PROCESS_BUDGET)
-      : clipToBytes(text, messages().truncated, PROCESS_BUDGET)
-    record.process.push(bounded)
-    // The running total, on the other hand, is about what this process holds.
-    record.processSize += rawBytes(bounded)
+      ? clipTailToBytes(text, copy.truncated, PROCESS_BUDGET)
+      : clipToBytes(text, copy.truncated, PROCESS_BUDGET)
+    const entry = { text: bounded, kind }
+    record.process.push(entry)
+    // The running total is about what this process holds **as it will be rendered**: the marker a
+    // human line carries is part of what the card costs, and a total that left it out would let a
+    // record of nothing but human lines sit over the budget it is trimmed against.
+    record.processSize += rawBytes(renderEntry(entry, copy))
     while (record.processSize > PROCESS_BUDGET && record.process.length > 1) {
-      record.processSize -= rawBytes(record.process[0])
+      record.processSize -= rawBytes(renderEntry(record.process[0], copy))
       record.process.shift()
     }
   }
@@ -381,8 +426,10 @@ export function createActivity({
    */
   const detailsFor = (record, copy, budget = CARD_TEXT_BUDGET) => {
     if (!record.settled) return undefined
-    // This turn's record first, then what earlier turns left: a reader opening the fold is asking
-    // what happened, and the newest answer is the one they mean.
+    // The group being collected, after the one it followed: a reader opening the fold is asking what
+    // the sentence they sent did, and the group before it is there only because the card face no
+    // longer carries the answer they were reading when they sent it. One boundary, one extra group —
+    // see {@link TURN_HISTORY} for why there is no more history than that.
     const turns = [...record.turns, record.process].filter(entries => entries.length > 0)
     if (turns.length === 0) return undefined
     return {
@@ -391,7 +438,9 @@ export function createActivity({
       // reason to open it is to read what the run did. Clipped from the front, because the end of
       // a run is what a reader is looking for — the same reason the record drops old entries.
       blocks: [clipTailToBytes(
-        turns.map(entries => entries.join('\n\n')).join('\n\n---\n\n'),
+        turns
+          .map(entries => entries.map(entry => renderEntry(entry, copy)).join('\n\n'))
+          .join('\n\n---\n\n'),
         copy.truncatedOlder,
         budget,
       )],
@@ -417,25 +466,53 @@ export function createActivity({
   }
 
   /**
-   * Close the running turn's record and keep it on the card.
+   * File the group of entries being collected as a finished one.
    *
-   * The card is one message for a whole session, and the sequence of turns is what a reader
-   * scrolling back wants from it. Keeping only the newest turn's record would throw away the one
-   * thing this card is a record *of* — so a finished turn is appended to what the card already
-   * holds, and the fold is what makes room for it.
+   * A group is one stretch between two moments a person spoke. It is filed when the next one starts
+   * — which is the person speaking, or a turn opening with nobody having spoken in between.
+   *
+   * Deliberately **not** the whole of {@link resetFace}: a person can speak while a step is still
+   * streaming, and that splits the record without ending the step. Clearing the stream buffers there
+   * would drop the text of a step that is still going, which is the text the fold exists to end with.
    * @param record - the session's record.
    */
-  const closeTurn = (record) => {
-    if (record.process.length > 0) {
-      record.turns.push(record.process)
-      if (record.turns.length > TURN_HISTORY) record.turns.shift()
-    }
+  const archiveProcess = (record) => {
+    if (record.process.length === 0) return
+    record.turns.push(record.process)
+    if (record.turns.length > TURN_HISTORY) record.turns.shift()
     record.process = []
     // The running total describes `process`, so it goes back to zero with it. Carried over, the
     // next turn would start already over budget and lose its first entries for no reason.
     record.processSize = 0
+  }
+
+  /**
+   * Start a fresh turn on this record: nothing of the finished one is left on the card face.
+   *
+   * Called when a person speaks and when a reply is adopted, both of which are followed by a
+   * `turn/start` milliseconds later. Doing the reset here rather than waiting for that event is what
+   * keeps the card from showing the previous turn's step number, its last fragments of text and its
+   * elapsed clock under a heading that says the new instruction is running.
+   * @param record - the session's record.
+   */
+  const resetFace = (record) => {
+    record.turn = undefined
+    record.step = undefined
+    record.tool = undefined
+    record.fragments = []
     record.streamed = []
     record.streamSize = 0
+    record.streamedStep = undefined
+    record.committedStep = undefined
+    record.failed = undefined
+    record.settled = false
+    record.startedAt = now()
+  }
+
+  /** File the finished group and start a fresh turn on what is left. */
+  const openGroup = (record) => {
+    archiveProcess(record)
+    resetFace(record)
   }
 
   /**
@@ -468,8 +545,13 @@ export function createActivity({
     const text = record.fragments.join('')
     body.push(text === '' ? copy.activityNothingYet : clipToBytes(text, copy.truncated, budget))
     const details = detailsFor(record, copy, budget)
+    const subtitle = sessionNames?.subtitle?.(record.session)
     return {
       title: titleOf(`${settings().titlePrefix} ${copy.activityTitle}`, record.workspace),
+      // Which session this is, in the line under the title. Read on every render rather than kept on
+      // the record: a session's name can arrive after its first card does, and this card is rewritten
+      // continuously, so it picks the name up on the next write.
+      ...(subtitle === undefined ? {} : { subtitle }),
       tone: record.failed !== undefined ? 'danger' : record.settled ? 'muted' : 'info',
       body,
       // The record of what the run did, folded where the channel can fold it. Absent while the
@@ -586,10 +668,17 @@ export function createActivity({
         // a run, and taking it away would take away the answer to "what was it doing" — and one
         // that was never sent is not sent now, because a message the desk is not expecting is
         // exactly the notification this plugin does not send.
-        diagnostics?.(`活动卡：跳过「${record.session}」——桌面持有优先侧，这一轮不发卡。`)
+        //
+        // Said once per stretch, not once per refresh. This sits in a loop that runs every quarter
+        // second while a run streams, so a line written unconditionally here is written hundreds of
+        // times for one decision — and a diagnostic that floods the file it writes to is worse than
+        // no diagnostic: the first release of this line buried the very reply-path evidence it was
+        // added to find, and the log looked like it was working.
+        noteSkip(record, `活动卡：跳过「${record.session}」——桌面持有优先侧，这一轮不发卡。`)
         record.dirty = false
         continue
       }
+      clearSkip(record)
       record.dirty = false
       if (record.handle === undefined) {
         // A send the platform accepted but whose answer was lost is the one way this card could
@@ -597,7 +686,7 @@ export function createActivity({
         // what stops it: a channel that can carry one keeps the platform from accepting the same
         // card twice, and a channel that cannot is kept from a second *attempt* only by the
         // answer itself, which is why a delivered id is never sent again.
-        diagnostics?.(`活动卡：为「${record.session}」创建（尚无消息 id）。`)
+        diagnostics?.(`活动卡：为「${record.session}」创建——这一轮会响。`)
         record.sending = true
         record.uuid ??= randomUUID()
         void writeCard(record, view => channel.deliver(view, { uuid: record.uuid }))
@@ -610,6 +699,7 @@ export function createActivity({
             // after a restart — can still name the session it belongs to.
             workspaces?.record(handle, record.workspace)
             log.info(messages().logActivitySent)
+            diagnostics?.(`活动卡：「${record.session}」的卡是消息 ${String(handle)}。`)
           }).catch((error) => {
             record.sending = false
             // An answer that never arrived is the one failure worth retrying: the card may or may
@@ -622,6 +712,11 @@ export function createActivity({
       // A failed edit has to be retried, and this is the only place that can do it: the clock that
       // re-marks a live card dirty stops touching a settled one, so a final write that failed used
       // to leave the card saying "working" for good — the last state of a run nobody could correct.
+      //
+      // Whether this is a reuse or a brand-new message is the whole question behind "the card did
+      // not change", and it is not answerable from outside: an edit and a send look the same on the
+      // phone. Said here, once per write, because this is the only place that knows.
+      diagnostics?.(`活动卡：改写「${record.session}」的消息 ${String(record.handle)}（复用，不响）。`)
       void writeCard(record, view => channel.update(record.handle, view))
         .then(() => {
           record.attempts = 0
@@ -637,6 +732,90 @@ export function createActivity({
     if (disposed) return
     for (const record of activities.values()) record.dirty = true
     armRefresh()
+  }
+
+  /**
+   * Take a message somebody else sent and make it this session's card.
+   *
+   * This is what turns the card a person just answered into the card their answer runs on. Without
+   * it the run that a reply starts is shown on *another* message — the one this module minted when
+   * the session was first taken on — and the card the person is looking at, the one they pressed,
+   * says "已收到" and nothing else. Two messages for one press, and the one that moves is not the one
+   * they touched.
+   *
+   * The turn state is reset here, and not left to the `turn/start` that is about to arrive, because
+   * the write is armed below: the card has to be right from its first write, and an event that
+   * arrives after it would otherwise leave the reader looking at the previous turn's step number and
+   * its last few fragments of text under a heading that says the new instruction is running.
+   *
+   * Refused while a send is in flight. The answer to that send is the handle this record is waiting
+   * for, and it would land on top of the one just adopted — so the reply path keeps its own rewrite
+   * instead, which is the honest card for a session whose first card is still being created.
+   *
+   * @param session - the session whose card this is.
+   * @param handle - the message to take over, as the channel named it.
+   * @returns whether the card was taken over.
+   */
+  const adopt = (session, handle) => {
+    if (disposed || session === undefined || handle === undefined) return false
+    // The precondition {@link flush} writes under, checked rather than assumed: this module maintains
+    // a card **only** while the phone holds the person, and taking a message over outside that would
+    // leave a reader's reply sitting on a card this side quietly owns and never writes again — worse
+    // than the "已收到" rewrite it replaced, because that one at least lands. The reply path itself
+    // satisfies this (the reader is at the phone, and `send` moves the side before calling), so what
+    // this line is for is the next caller that has not thought about it.
+    if (!phoneHasIt()) return false
+    const known = activities.get(session)
+    if (known?.sending === true) return false
+    const record = recordOf(session)
+    // A settled record is about to describe a new turn, and the finished one is filed as the group
+    // the fold keeps — but only a settled one. A record still mid-turn is already describing a run
+    // in progress, and that is the truth to show.
+    if (record.settled) openGroup(record)
+    record.handle = handle
+    // The key belonged to a message that was never sent, and this one already exists: kept, it would
+    // be presented as the identity of a send that is not going to happen.
+    record.uuid = undefined
+    record.attempts = 0
+    record.retryAt = undefined
+    if (record.workspace === undefined) record.workspace = workspaceOf(session)
+    // Whether this record can carry the fold the card being taken over had. That fold came from the
+    // run record; this one is built from what *this* module followed, so nothing tracked means the
+    // answer and the run it belongs to leave the phone with the card face. It happens when the
+    // process started mid-turn, or when this session's record was evicted. Said out loud, because
+    // from the phone the result looks like any other run — a card whose fold simply holds less.
+    if (record.turns.length === 0 && record.process.length === 0) {
+      diagnostics?.(`活动卡：接过消息 ${String(handle)} 时没有「${session}」这一轮的记录——那张卡上的折叠接不过来。`)
+    }
+    record.dirty = true
+    diagnostics?.(`活动卡：接过消息 ${String(handle)} 作为「${session}」的卡——不再另发一张。`)
+    armRefresh()
+    return true
+  }
+
+  /**
+   * Whether a message is the card some session is being shown in.
+   *
+   * Asked by the result notifier before it rewrites a press that has nothing to answer, because the
+   * card a reply was made on *is* the run's card from that moment on: a stale press that wrote
+   * "此卡已失效" over it would replace the live run with a sentence about a notice that is gone.
+   *
+   * The eviction map is asked as well: a session's record may have been forgotten at the capacity
+   * bound while its card is still on the phone — the handle is remembered precisely so the card's
+   * life can outlast the record's. A handle only ever lands there because it was a card this module
+   * was showing, so it is still owned by a run, not by a notice.
+   * @param handle - the message to ask about.
+   * @returns whether this module is showing a session in it.
+   */
+  const owns = (handle) => {
+    if (handle === undefined) return false
+    for (const record of activities.values()) {
+      if (record.handle === handle) return true
+    }
+    for (const kept of orphaned.values()) {
+      if (kept === handle) return true
+    }
+    return false
   }
 
   /**
@@ -687,27 +866,27 @@ export function createActivity({
       // instead of opening a second card for it — the record is what the card is, and two
       // records for one turn would mean two messages about one thing.
       const record = recordOf(session.id)
-      // A turn that ended before this one left a record; it stays on the card. Nothing else holds
-      // it, so dropping it here would destroy the very thing a frozen card is.
-      if (record.settled) closeTurn(record)
+      // A turn that ended before this one left a record: its entries are filed as a group. Filing —
+      // not the whole face reset — because a turn can also open with nobody having spoken in between
+      // (a retry, a queued continuation), and that group has to be closed too or the two turns read
+      // as one.
+      if (record.settled) archiveProcess(record)
+      resetFace(record)
       record.turn = event.data?.turn
-      record.step = undefined
-      record.tool = undefined
-      record.fragments = []
-      record.streamed = []
-      record.streamSize = 0
-      record.streamedStep = undefined
-      record.committedStep = undefined
-      record.failed = undefined
-      record.settled = false
-      record.startedAt = now()
       if (record.workspace === undefined) record.workspace = workspaceOf(session.id)
       record.dirty = true
       if (phoneHasIt()) armRefresh()
       return
     }
 
+    // A person's own message builds the record if nothing has yet, because that sentence is the
+    // anchor of everything the card will show and the `turn/start` that follows cannot restore it.
+    // Only while the phone holds the person: a record exists to feed a card, and building one for
+    // every desk session would push live ones out of a map that is bounded on purpose.
     const record = activities.get(session.id)
+      ?? (type === 'user/message' && event.data?.source?.kind === 'user' && phoneHasIt()
+        ? recordOf(session.id)
+        : undefined)
     if (record === undefined) return
 
     // An event from a turn this card has already closed, or from one it has not opened yet. The
@@ -772,14 +951,23 @@ export function createActivity({
           textOf(block?.content),
           [failure?.name, failure?.code].filter(Boolean).join(' '),
         ].find(candidate => candidate !== '') ?? ''
-        note(record, messages().activityToolFailed(name, clipToBytes(reason, messages().truncated, 300)))
+        note(record, messages().activityToolFailed(name, clipToBytes(reason, messages().truncated, 300)), 'tool')
       }
       return
     }
     if (type === 'user/message') {
-      // What the person asked for belongs at the top of the record: it is the thing the rest of
-      // it is an answer to.
-      if (event.data?.source?.kind === 'user') note(record, textOf(event.data?.content))
+      // A person speaking is the boundary, and the `turn/start` that opens the turn arrives *after*
+      // this event: with the boundary drawn at that event instead, their sentence was appended to the
+      // group that was still open — the work they are *not* talking about — and the `---` between the
+      // two groups landed one message too late.
+      const opened = record.settled
+      archiveProcess(record)
+      // The face only starts over when the previous turn had ended. A person can also speak while a
+      // step is still streaming, and that splits the record without ending the step.
+      if (opened) resetFace(record)
+      // What the person asked for belongs at the top of the group: it is the thing the rest of it is
+      // an answer to, and the fold marks it so a reader can find it without reading the whole run.
+      if (event.data?.source?.kind === 'user') note(record, textOf(event.data?.content), 'human')
       return
     }
     if (type === 'assistant/message') {
@@ -824,7 +1012,7 @@ export function createActivity({
       // the two mistakes.
       const shown = record.streamed.join('')
       const alreadyFolded = record.streamedStep !== undefined && record.streamedStep === record.committedStep
-      if (shown !== '' && !alreadyFolded) note(record, shown, 'tail')
+      if (shown !== '' && !alreadyFolded) note(record, shown, 'model', 'tail')
       record.dirty = true
       if (phoneHasIt()) armRefresh()
     }
@@ -897,6 +1085,23 @@ export function createActivity({
     },
     observe,
     observeStream,
+    /**
+     * Make an already-delivered message this session's card.
+     *
+     * Called by the result notifier when a reply is accepted: the card the reply was typed on is the
+     * one the person is looking at, so the run their instruction starts belongs there rather than on
+     * a message of this module's own.
+     * @param session - the session the card belongs to.
+     * @param handle - the message to take over.
+     * @returns whether the card was taken over.
+     */
+    adopt,
+    /**
+     * Whether a message is the card this module is showing a session in.
+     * @param handle - the message to ask about.
+     * @returns whether some session is shown in it.
+     */
+    owns,
     /**
      * React to the person moving between the desk and the phone.
      *

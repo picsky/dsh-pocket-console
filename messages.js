@@ -61,6 +61,15 @@ const zh = {
   notePlaceholder: '补充说明（可选）',
   appDescription: '把 DeepSeek Harness 的工具审批与提问送到飞书',
   resultTitle: '结果',
+  /**
+   * The small line under a card's title, naming the session it belongs to.
+   *
+   * The title says what the card is and which project it belongs to; two sessions in one project make
+   * two identical titles, and this is the line that tells them apart. The label is spelled out
+   * because the line sits under a title with no other context.
+   */
+  sessionLine: name => `会话：${name}`,
+  logSessionNamed: (session, name) => `会话名：${session} → ${name}`,
   replyHint: '**回复这条消息**即可把下一步交给这个会话。',
   /** Label over the folded record of what this run did, on the result card. */
   resultProcess: '思考过程',
@@ -144,6 +153,8 @@ const zh = {
   activityFrozen: '已结束',
   /** One failed tool call, in the folded record of a finished run. */
   activityToolFailed: (name, reason) => `**工具失败**：\`${name}\`${reason === '' ? '' : ` — ${reason}`}`,
+  /** A person's own words inside a folded record: the one entry the fold marks. */
+  humanLine: text => `**你**：${text}`,
   activityTitle: '执行中',
   logActivitySent: '已为这次运行发出活动卡。',
   logActivitySendFailed: '活动卡发送失败',
@@ -186,6 +197,7 @@ const zh = {
   logNoticeSendFailed: '结果发送失败',
   logNoticeCardFailed: '结果卡片改写失败',
   logReplyCardRewritten: handle => `已把回复后的结果卡改写为「已收到指令」（消息 ${handle}）。`,
+  logReplyCardAdopted: handle => `回复后的结果卡（消息 ${handle}）已交给执行中的卡：接下来这一段跑在同一张卡上，不再另发。`,
   logReplyCardNotRewritten: state => `回复已被接受，但结果卡没有改写：会话=${state.session ? '有' : '无'}、发出时的卡=${state.view ? '有' : '无'}、消息=${state.handle || '无'}。`,
   logNoticeRetired: headline => `结果通知失效：${headline}`,
   logNoticeStoreUnavailable: '结果通知的持久存储不可用，重启后这些通知将不再有效。',
@@ -199,6 +211,14 @@ const zh = {
   logNoticeRestoreEmpty: '上次运行没有留下结果通知。',
   logNoticeRestoreRetired: (rid, reason) => `恢复通知 ${rid} 时作废：${reason}`,
   logInstructionQueued: '已把手机上的指令排入会话。',
+  logInstructionSteered: '会话正在跑，已把手机上的指令作为 steer 送进当前这一轮。',
+  /** The face of a result card for a turn that stopped before it finished. */
+  noticeUnfinished: (kind, why) => {
+    const headline = kind === 'max-tokens'
+      ? '**输出达到上限而中断**，这一轮没有做完。'
+      : '**这一轮出错了**，没有跑完。'
+    return why === '' ? headline : `${headline}\n\n${why}`
+  },
   logInstructionFailed: '指令注入失败',
 }
 
@@ -245,6 +265,8 @@ const en = {
   notePlaceholder: 'Extra note (optional)',
   appDescription: 'DeepSeek Harness tool approvals and questions, delivered to Feishu',
   resultTitle: 'Result',
+  sessionLine: name => `Session: ${name}`,
+  logSessionNamed: (session, name) => `session name: ${session} → ${name}`,
   replyHint: '**Reply to this message** to hand the next step to this session.',
   resultProcess: 'Thinking',
   resultOmitted: bytes => `**…… about ${bytes} bytes left out in the middle ……**`,
@@ -310,6 +332,7 @@ const en = {
   activityProcess: 'What this run did',
   activityFrozen: 'Finished',
   activityToolFailed: (name, reason) => `**Tool failed**: \`${name}\`${reason === '' ? '' : ` — ${reason}`}`,
+  humanLine: text => `**You**: ${text}`,
   activityTitle: 'Running',
   logActivitySent: 'sent the activity card for this run.',
   logActivitySendFailed: 'sending the activity card failed',
@@ -352,6 +375,7 @@ const en = {
   logNoticeSendFailed: 'sending the result failed',
   logNoticeCardFailed: 'rewriting the result card failed',
   logReplyCardRewritten: handle => `rewrote the replied-to result card to say the instruction arrived (message ${handle})`,
+  logReplyCardAdopted: handle => `handed the replied-to result card (message ${handle}) to the activity card: this run is shown on that same message instead of a new one`,
   logReplyCardNotRewritten: state => `the reply was accepted but the result card was not rewritten: session=${state.session ? 'yes' : 'no'}, card-as-sent=${state.view ? 'yes' : 'no'}, message=${state.handle || 'none'}`,
   logNoticeRetired: headline => `result notice retired: ${headline}`,
   logNoticeStoreUnavailable: 'durable storage for result notices is unavailable; after a restart these notices will no longer be valid.',
@@ -365,6 +389,13 @@ const en = {
   logNoticeRestoreEmpty: 'the last run left no result notices behind.',
   logNoticeRestoreRetired: (rid, reason) => `restored notice ${rid} was retired: ${reason}`,
   logInstructionQueued: 'the instruction from the phone was queued for the session.',
+  logInstructionSteered: 'the session was already running, so the instruction from the phone was steered into its current turn.',
+  noticeUnfinished: (kind, why) => {
+    const headline = kind === 'max-tokens'
+      ? '**The output hit its ceiling** and this turn was cut off before it finished.'
+      : '**This turn failed** and did not finish.'
+    return why === '' ? headline : `${headline}\n\n${why}`
+  },
   logInstructionFailed: 'injecting the instruction failed',
 }
 
