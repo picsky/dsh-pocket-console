@@ -118,21 +118,6 @@ const STREAM_BUDGET = PROCESS_BUDGET
 const rawBytes = (value) => Buffer.byteLength(String(value ?? ''), 'utf8')
 
 /**
- * How many finished turns one card's folded record keeps.
- *
- * **One, and that is the whole of the number.** The fold answers "what did the sentence I just sent
- * do" — and the card it is on *is* the card the person answered (see
- * `docs/decisions/0021-the-card-you-pressed-is-the-one-that-moves.md`). A running history of the
- * session would show the reader work they have already read on the result cards of earlier turns,
- * and bury the one thing they opened it for.
- *
- * The single turn kept is the one the reply was made against, and keeping it is not sentiment: the
- * card face becomes the run, so without that turn the answer the reader was reading at the moment
- * they answered it would be gone from the phone entirely.
- */
-const TURN_HISTORY = 1
-
-/**
  * Create the activity card.
  * @param options - the logger, the channel, the settings, copy, priority, and the workspace
  *   registry every delivered card is remembered in.
@@ -257,6 +242,9 @@ export function createActivity({
        * Kept for the frozen card's folded record: it is what a reader opens when they want to
        * know what a finished run actually did, and it is built while the run goes because there
        * is nothing to re-read it from afterwards.
+       *
+       * **One run, and one run only** — it starts at the sentence a person sent and ends when the
+       * next person speaks. Nothing earlier is kept beside it; see {@link detailsFor}.
        */
       process: [],
       /**
@@ -267,14 +255,6 @@ export function createActivity({
        * every comparison against the budget is then false, and the record grows without a bound.
        */
       processSize: 0,
-      /**
-       * Each finished turn's record, oldest first.
-       *
-       * The card is a session's one message, so what a reader scrolls back to is the sequence of
-       * turns it has shown. `process` is the turn being followed now; this is what earlier ones
-       * left behind, and it is the only copy there is.
-       */
-      turns: [],
       workspace: undefined,
       turn: undefined,
       step: undefined,
@@ -420,6 +400,14 @@ export function createActivity({
    * Only a settled card carries it: while a run is going the live fragments are the point, and a
    * panel that changed under the reader's thumb would be worse than no panel. A frozen card is
    * the one place a reader goes looking for what actually happened.
+   *
+   * **One run, and no history.** The fold answers "what did the sentence I just sent do", and the
+   * card it is on is the card the person answered
+   * (`docs/decisions/0021-the-card-you-pressed-is-the-one-that-moves.md`). An earlier run is on the
+   * result card that reported it — keeping a copy of it here as well put work the reader had already
+   * read and answered under a heading about something else, and the only thing telling the two apart
+   * was a `---`, which the model's own markdown also contains. Measured before this was decided: with
+   * the turn before kept, that turn was 72% of the fold.
    * @param record - the session's record.
    * @param copy - the copy table in force.
    * @param budget - the byte budget for this render, halved on a size refusal.
@@ -427,21 +415,15 @@ export function createActivity({
    */
   const detailsFor = (record, copy, budget = CARD_TEXT_BUDGET) => {
     if (!record.settled) return undefined
-    // The group being collected, after the one it followed: a reader opening the fold is asking what
-    // the sentence they sent did, and the group before it is there only because the card face no
-    // longer carries the answer they were reading when they sent it. One boundary, one extra group —
-    // see {@link TURN_HISTORY} for why there is no more history than that.
-    const turns = [...record.turns, record.process].filter(entries => entries.length > 0)
-    if (turns.length === 0) return undefined
+    const run = record.process
+    if (run.length === 0) return undefined
     return {
       title: copy.activityProcess,
       // Folded content gets the whole card's room: nothing else has to fit beside it, and the
       // reason to open it is to read what the run did. Clipped from the front, because the end of
       // a run is what a reader is looking for — the same reason the record drops old entries.
       blocks: [clipTailToBytes(
-        turns
-          .map(entries => entries.map(entry => renderEntry(entry, copy)).join('\n\n'))
-          .join('\n\n---\n\n'),
+        run.map(entry => renderEntry(entry, copy)).join('\n\n'),
         copy.truncatedOlder,
         budget,
       )],
@@ -467,23 +449,17 @@ export function createActivity({
   }
 
   /**
-   * File the group of entries being collected as a finished one.
+   * Start a fresh run on this record: what the last one did is dropped.
    *
-   * A group is one stretch between two moments a person spoke. It is filed when the next one starts
-   * — which is the person speaking, or a turn opening with nobody having spoken in between.
-   *
-   * Deliberately **not** the whole of {@link resetFace}: a person can speak while a step is still
-   * streaming, and that splits the record without ending the step. Clearing the stream buffers there
-   * would drop the text of a step that is still going, which is the text the fold exists to end with.
+   * A run is bounded by a person speaking, and dropping the one before is the same rule the fold
+   * reads under — the result card that reported it is still in the chat, so nothing here is the only
+   * copy of anything.
    * @param record - the session's record.
    */
-  const archiveProcess = (record) => {
-    if (record.process.length === 0) return
-    record.turns.push(record.process)
-    if (record.turns.length > TURN_HISTORY) record.turns.shift()
+  const clearRun = (record) => {
     record.process = []
     // The running total describes `process`, so it goes back to zero with it. Carried over, the
-    // next turn would start already over budget and lose its first entries for no reason.
+    // next run would start already over budget and lose its first entries for no reason.
     record.processSize = 0
   }
 
@@ -510,9 +486,9 @@ export function createActivity({
     record.startedAt = now()
   }
 
-  /** File the finished group and start a fresh turn on what is left. */
-  const openGroup = (record) => {
-    archiveProcess(record)
+  /** Start a fresh run on what is left: the entries go, and so does the card's face. */
+  const startRun = (record) => {
+    clearRun(record)
     resetFace(record)
   }
 
@@ -769,10 +745,10 @@ export function createActivity({
     const known = activities.get(session)
     if (known?.sending === true) return false
     const record = recordOf(session)
-    // A settled record is about to describe a new turn, and the finished one is filed as the group
-    // the fold keeps — but only a settled one. A record still mid-turn is already describing a run
-    // in progress, and that is the truth to show.
-    if (record.settled) openGroup(record)
+    // A settled record is about to describe a new run: the finished one goes — the fold is about the
+    // run in front of the reader — and the face starts over. A record still mid-turn is already
+    // describing a run in progress, and that is the truth to show.
+    if (record.settled) startRun(record)
     record.handle = handle
     // The key belonged to a message that was never sent, and this one already exists: kept, it would
     // be presented as the identity of a send that is not going to happen.
@@ -780,14 +756,6 @@ export function createActivity({
     record.attempts = 0
     record.retryAt = undefined
     if (record.workspace === undefined) record.workspace = workspaceOf(session)
-    // Whether this record can carry the fold the card being taken over had. That fold came from the
-    // run record; this one is built from what *this* module followed, so nothing tracked means the
-    // answer and the run it belongs to leave the phone with the card face. It happens when the
-    // process started mid-turn, or when this session's record was evicted. Said out loud, because
-    // from the phone the result looks like any other run — a card whose fold simply holds less.
-    if (record.turns.length === 0 && record.process.length === 0) {
-      diagnostics?.(`活动卡：接过消息 ${String(handle)} 时没有「${session}」这一轮的记录——那张卡上的折叠接不过来。`)
-    }
     record.dirty = true
     diagnostics?.(`活动卡：接过消息 ${String(handle)} 作为「${session}」的卡——不再另发一张。`)
     armRefresh()
@@ -874,11 +842,10 @@ export function createActivity({
       // instead of opening a second card for it — the record is what the card is, and two
       // records for one turn would mean two messages about one thing.
       const record = recordOf(session.id)
-      // A turn that ended before this one left a record: its entries are filed as a group. Filing —
-      // not the whole face reset — because a turn can also open with nobody having spoken in between
-      // (a retry, a queued continuation), and that group has to be closed too or the two turns read
-      // as one.
-      if (record.settled) archiveProcess(record)
+      // The entries are **not** closed here. One sentence can take several turns — a subagent
+      // settling, a retry, a queued continuation all open a turn nobody asked for — and every one of
+      // them is the rest of the same answer. Only a person speaking starts a new run, which is the
+      // boundary `run-record.js` draws too, so both folds are about the same run.
       resetFace(record)
       record.turn = event.data?.turn
       if (record.workspace === undefined) record.workspace = workspaceOf(session.id)
@@ -964,18 +931,24 @@ export function createActivity({
       return
     }
     if (type === 'user/message') {
+      // Only a person's own words start a run. Every other `user/message` — a subagent settling, an
+      // agent-to-agent message, the injected runtime context — is part of what this run was *told*,
+      // not a new thing it was asked: closing the run there would cut one answer into pieces and could
+      // drop the sentence that anchors it. `run-record.js` reads them the same way, so the two folds
+      // stay about the same run.
+      if (event.data?.source?.kind !== 'user') return
       // A person speaking is the boundary, and the `turn/start` that opens the turn arrives *after*
       // this event: with the boundary drawn at that event instead, their sentence was appended to the
-      // group that was still open — the work they are *not* talking about — and the `---` between the
-      // two groups landed one message too late.
+      // run that was still open — the work they are *not* talking about.
       const opened = record.settled
-      archiveProcess(record)
+      clearRun(record)
       // The face only starts over when the previous turn had ended. A person can also speak while a
-      // step is still streaming, and that splits the record without ending the step.
+      // step is still streaming, and clearing the stream buffers there would drop the text of a step
+      // that is still going — the text the fold exists to end with.
       if (opened) resetFace(record)
-      // What the person asked for belongs at the top of the group: it is the thing the rest of it is
+      // What the person asked for belongs at the top of the run: it is the thing the rest of it is
       // an answer to, and the fold marks it so a reader can find it without reading the whole run.
-      if (event.data?.source?.kind === 'user') note(record, textOf(event.data?.content), 'human')
+      note(record, textOf(event.data?.content), 'human')
       return
     }
     if (type === 'assistant/message') {

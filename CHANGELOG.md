@@ -9,6 +9,22 @@ out when it does.
 
 ## Unreleased
 
+### Changed
+
+- **The fold is this run, and nothing before it.** The activity card's "本次执行过程" kept the run the
+  reader had replied to as well, on the reasoning that the card face stops carrying that answer the
+  moment the card becomes the run's. On a real session that turn was **72% of the fold** — work the
+  reader had just read and already answered, under a heading about this run. The two cards also
+  disagreed about how much history they show (the result card's fold has always been one run), and the
+  only thing separating the two turns was a `---`, which the model's own markdown also contains. The
+  fold now covers **one run**: from the sentence a person sent to the end of what it started, including
+  the turns nobody asked for in between (a subagent settling, a retry, a queued continuation). A
+  `user/message` nobody wrote is no longer a boundary either, so the sentence that anchors a run can no
+  longer be dropped from the run's own fold. **The answer you replied against no longer comes back on
+  the phone** — it stays on the desk, and in the result card the previous run reported itself on
+  (decision 0027). The dead five-turn reader in `run-record.js` goes with it, which also stops the
+  result card's "省略 N 字节" from counting whole discarded runs.
+
 ### Fixed
 
 - **One instruction no longer arrives as several cards.** A session a run **delegated** work to was
