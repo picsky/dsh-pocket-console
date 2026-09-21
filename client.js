@@ -593,8 +593,10 @@ window.__ModuleLoader__.load({
           const enrollment = await response.json()
           setRuntime(previous => ({ ...previous, enrollment }))
           setFailure(null)
+          return true
         } catch (error) {
           setFailure(String(error?.message ?? error))
+          return false
         } finally {
           setBusy(false)
         }
@@ -725,10 +727,17 @@ window.__ModuleLoader__.load({
                   h('div', { style: { ...S.actions, alignItems: 'center' } },
                     h('a', { href: verifyUrl, target: '_blank', rel: 'noreferrer', style: S.link }, copy.open),
                     button(copied ? copy.copied : copy.copy, () => {
-                      void navigator.clipboard?.writeText(verifyUrl).then(() => {
-                        setCopied(true)
-                        setTimeout(() => { setCopied(false) }, 2000)
-                      })
+                      // The clipboard is a permission, and a page without it must
+                      // not claim the link was copied: the card keeps the link on
+                      // screen, and a refusal just leaves the button un-copied.
+                      const write = navigator.clipboard?.writeText
+                      if (write === undefined) return
+                      void write.call(navigator.clipboard, verifyUrl)
+                        .then(() => {
+                          setCopied(true)
+                          setTimeout(() => { setCopied(false) }, 2000)
+                        })
+                        .catch(() => { setCopied(false) })
                     })))
               : null,
             enrollment.state === 'failed' && enrollment.message !== undefined
@@ -780,9 +789,11 @@ window.__ModuleLoader__.load({
                   setAskingAppId(false)
                   // The secret lives in the form only until it has been handed
                   // over; a failure is reported by the channel, which is where
-                  // the reason comes from.
+                  // the reason comes from. The form is only cleared on success —
+                  // a pair the platform refused would otherwise cost the reader
+                  // the secret they just retyped, twice.
                   void run('/adopt', { appId: existing.appId.trim(), appSecret: existing.appSecret.trim() })
-                    .then(() => { setExisting({ appId: '', appSecret: '' }) })
+                    .then((ok) => { if (ok) setExisting({ appId: '', appSecret: '' }) })
                 }, {
                   disabled: busy || existing.appId.trim() === '' || existing.appSecret.trim() === '',
                   primary: true,

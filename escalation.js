@@ -49,7 +49,7 @@ const titleFor = (settings, workspace, kind) => titleOf(`${settings.titlePrefix}
  */
 export function createEscalation({
   log, channel, settings, mirror, messages, workspaces, priority, sessionNames,
-  isClosed = () => false, diagnostics = () => {},
+  diagnostics = () => {},
 }) {
   /** Live escalations keyed by the opaque id embedded in their action payloads. */
   const open = new Map()

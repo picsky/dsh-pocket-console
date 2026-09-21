@@ -799,6 +799,11 @@ export function createActivity({
    * Asked by the result notifier before it rewrites a press that has nothing to answer, because the
    * card a reply was made on *is* the run's card from that moment on: a stale press that wrote
    * "此卡已失效" over it would replace the live run with a sentence about a notice that is gone.
+   *
+   * The eviction map is asked as well: a session's record may have been forgotten at the capacity
+   * bound while its card is still on the phone — the handle is remembered precisely so the card's
+   * life can outlast the record's. A handle only ever lands there because it was a card this module
+   * was showing, so it is still owned by a run, not by a notice.
    * @param handle - the message to ask about.
    * @returns whether this module is showing a session in it.
    */
@@ -806,6 +811,9 @@ export function createActivity({
     if (handle === undefined) return false
     for (const record of activities.values()) {
       if (record.handle === handle) return true
+    }
+    for (const kept of orphaned.values()) {
+      if (kept === handle) return true
     }
     return false
   }
