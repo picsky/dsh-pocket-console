@@ -103,10 +103,11 @@ repository classified as tag-leeching and filtered out of the auto-curated lists
 
 ## 3. Publishing, in order
 
-Do not launch before a clean release exists. The tree holds unreleased fixes, including a
-hang and a security fix, so the published 0.8.1 is **not** what a new installer would
-want — they would get a build that can strand a request and whose binding can be taken
-over by any account that can message the bot. (0.9.0 supersedes it imminently.)
+**0.9.0 is published, which discharges the warning this section used to carry.** The tree's
+unreleased fixes are now what a new installer gets. Until that release, the published 0.8.1 was
+**not** what a new installer wanted: it could strand a request, and its binding could be taken
+over by any account that could message the bot. (0.8.2 and 0.8.3 were numbered in the tree and
+never published — the registry's `latest` stood at 0.8.1 the whole time.)
 
 **Verified before the first tag**, so these are not things to re-discover during a
 release:
