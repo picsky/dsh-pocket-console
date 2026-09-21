@@ -42,13 +42,14 @@ dsh plugin --profile web remove dsh-pocket-console
 
 ## Tuning it
 
-It works out of the box: the Settings card exposes three settings and nothing else.
+It works out of the box: the Settings card exposes four settings and nothing else.
 
 | Setting | Default | Meaning |
 |---|---|---|
 | Desktop head start (seconds) | `120` | The request goes to the phone only if the desktop has not answered by then. `0` sends it immediately |
 | Title prefix | `DSH` | Prefix on every phone message title |
 | Result notices | `When idle` | After a session stops, the turn result goes to the phone with a box you can reply in. Its send delay reuses the desktop head start above |
+| Debug mode | `Off` | `On` writes the plugin's decision about every card to `$DSH_HOME/pocket-console-debug.log` — why a card was sent, edited, or skipped |
 
 Every row can be **Reset**, and an edit has to be saved (the card marks it **Unsaved** first).
 
@@ -67,6 +68,7 @@ Every row can be **Reset**, and an edit has to be saved (the card marks it **Uns
     resultNotifyCooldownSeconds: 0
     mirrorTtlSeconds: 60
     locale: zh
+    debug: off
 ```
 
 That is every key at the value the code already ships, so copying it changes nothing. [Every setting](docs/configuration.md) documents the rest.
@@ -97,7 +99,7 @@ These are honest gaps, not choices.
 
 - **Mirroring to the desktop needs the page open.** After a phone answer, the open page settles the way a click there would; with no page open the answer still reaches the model and the session log, but a page opened later will not replay it — the mirror is valid for one minute.
 - **One Feishu app serves one DSH instance.** Long-connection events are not broadcast, so two instances sharing one bot send approvals to a random side.
-- **Card text is limited by bytes, not characters.** The documented cap is 30 KB, and **that figure is wrong**: measured against a real tenant, this plugin's own app accepted a **131 KB** request body and was refused at 164 KB. What the body carries is also not the text's own size — the text is escaped into the card JSON and the card JSON is escaped again, so a quote or a backslash costs more each time. Text is therefore held under **32 KB as the request will count it**, which is measured rather than copied, and it is truncated explicitly when it does not fit. That is roughly **11,000 Chinese characters** at the measured rate (a 60-step plan costs about 4.6 KB), so a long plan arrives whole rather than as a fragment.
+- **Card text is limited by bytes, not characters.** The documented cap is 30 KB, and **that figure is wrong**: measured against a real tenant, this plugin's own app accepted a **131 KB** request body and was refused at 164 KB. What the body carries is also not the text's own size — the text is escaped into the card JSON and the card JSON is escaped again, so a quote or a backslash costs more each time. Text is therefore held under **32 KB as the request will count it**, which is measured rather than copied, and it is truncated explicitly when it does not fit. That is roughly **11,000 Chinese characters** at the measured rate (a 60-step plan costs about 3 KB), so a long plan arrives whole rather than as a fragment.
 
 ## Which of these is this?
 

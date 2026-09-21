@@ -15,7 +15,7 @@ npm test
 
 ## The suite
 
-Nothing to install first: the suite replaces its five production dependencies through a
+Nothing to install first: the suite replaces its seven production dependencies through a
 Node module resolution hook (`tests/fixtures/hooks.mjs`), so it needs no credentials and no
 network. Cases live under `tests/`, one file per domain over the shared harness in
 `tests/support/harness.mjs`; the hook and the dependency stubs it installs sit in
@@ -35,7 +35,7 @@ network. Cases live under `tests/`, one file per domain over the shared harness 
 | `notices-memory.test.mjs` | The per-session record's bound, which is what keeps a weeks-long process flat |
 | `client.test.mjs` | The browser half: module-table load, the settings card, the desktop mirror, and its accessibility |
 
-71 cases. A file beginning `_` is scratch — it is ignored by the suite's glob and is
+250 cases. A file beginning `_` is scratch — it is ignored by the suite's glob and is
 not part of the project; delete it rather than commit it. What the cases cover, in one
 line each, is enumerated in [CHANGELOG.md](../CHANGELOG.md)'s most recent entry and in
 the git history of `tests/` — the suite is meant to be read as the specification of the
@@ -53,8 +53,8 @@ packs the tree with `pnpm` — the tool a release publishes with, so the tarball
 installs is the one a release builds — installs that tarball into a scratch `DSH_HOME`,
 then boots the real `dsh web` and exchanges its launch token for the browser cookie. That
 is the only check that proves the plugin **activates** inside the real Loader. It needs
-`pnpm install` first (the tarball bundles its transport) and the `dsh` release named in
-[CONTRIBUTING.md](../CONTRIBUTING.md).
+`pnpm install` first (the tarball bundles its transport) and the `dsh` release CI pins
+(`.github/workflows/ci.yml`).
 
 ## Debugging against a live deployment
 

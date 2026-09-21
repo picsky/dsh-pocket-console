@@ -51,8 +51,9 @@ non-breaking rather than a silent break for every message already sent.
   author reads it, because it is the one way to get this wrong now.
 - Both decoders — the escalation and the result notice — read through the map, so a control's
   name can change with the card without changing either decoder. The notice path reads the map
-  too even though its card holds a single form, because a second naming regime is a trap for
-  whoever later puts a second form on that card.
+  too, because the notice path's card now carries **two** forms (the reply box and the next-task box,
+  see [0019](0019-the-next-task-rides-the-result-card.md)), and the map is the only thing keeping
+  their names apart.
 - `tests/notices.test.mjs` and `tests/questions.test.mjs` read control names off the card instead
   of hard-coding them. The harness can only pass a form value under a key the caller chose, so a
   test that hard-codes `value` asserts nothing about the card: it passed while every real reply

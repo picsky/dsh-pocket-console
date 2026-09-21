@@ -30,10 +30,12 @@ the one task the log exists for.
 **Host log lines that describe the deployment come from the same dictionary the cards
 do**, keyed `log…` so they are visibly a different audience from the card copy.
 
-**Lines about the plugin's own internals stay English.** `index.js` logs exactly three
-things — a failed channel resume, a missing `webServer`, a failed channel close — and
-each is about the harness's composition rather than the deployment's state. Those are
-developer diagnostics on the same footing as the harness's own English log, and
+**Lines about the plugin's own internals stay English.** `index.js` logs its composition
+failures in English — a failed channel resume, a failed priority restore, a missing
+`webServer`, a failed channel close — each of which is about the harness's composition
+rather than the deployment's state, and routes the one deployment-facing line, a failed
+notice restore, through the dictionary. Those are developer diagnostics on the same
+footing as the harness's own English log, and
 translating them would imply a reader who does not exist.
 
 The split is therefore by audience, not by file: the deployment's story is localized,

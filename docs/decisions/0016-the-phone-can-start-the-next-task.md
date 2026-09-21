@@ -29,7 +29,9 @@ types.** It is the narrowest form of starting work, and each narrowing is delibe
   next is something the desk can already see, and a card sent while somebody is sitting there is the
   push this plugin says it does not do.
 - **It is one message per result, carrying one form.** No browsing, no session list, no history, no
-  workspace picker. Those are the desk's job and stay there.
+  workspace picker. Those are the desk's job and stay there. As of
+  [0019](0019-the-next-task-rides-the-result-card.md) this entry rides the result card as a second
+  form; there is no separate new-task card.
 
 Two properties are load-bearing, and both fail silently if they are wrong:
 
@@ -55,7 +57,9 @@ Two properties are load-bearing, and both fail silently if they are wrong:
 - A phone-started session is a session like any other: it appears in the desk's session list, its
   result notice arrives the same way, and it can be answered from the desk.
 - The new-task card retires itself once used, because a form left in place invites a second press
-  that would start a second session for one decision.
+  that would start a second session for one decision. As of
+  [0019](0019-the-next-task-rides-the-result-card.md) this entry rides the result card as a second
+  form; there is no separate new-task card.
 - The card is only ever a *new session*. "Continue this session" already has a home — the result
   card's reply box — so this does not become a second way to do the same thing.
 

@@ -29,8 +29,9 @@ of ending them.**
   cost the others. Under that layout a key becomes a path segment, which makes the rid's
   grammar load-bearing: it is `n` plus twenty hex characters, path-safe on every platform, and a
   test pins that rather than leaving it to look like a coincidence.
-- A record holds `{ session, handle, seq, sentAt }`: the session to instruct, the message to
-  rewrite, the session's last event seq when the card went out, and when it went out.
+- A record holds `{ session, handle, seq, workspace, sentAt }`: the session to instruct, the message to
+  rewrite, the session's last event seq when the card went out, and when it went out. `workspace` is
+  optional: a rewrite after a restart uses it to keep naming the same project.
 - It is written **after the card is delivered** — a card that never arrived has nothing to put
   back — and deleted durably wherever a notice stops being live: consumed, superseded, or
   retired. So single use survives a restart, which is the property that makes persisting a

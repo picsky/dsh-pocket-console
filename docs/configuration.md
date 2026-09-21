@@ -26,6 +26,7 @@ Settings live in your own profile layer. A patch **replaces the row's entire
     resultNotifyCooldownSeconds: 0
     mirrorTtlSeconds: 60
     locale: zh
+    debug: off        # on = write the plugin's decision about every card to $DSH_HOME/pocket-console-debug.log
 ```
 
 The example above shows every key at the value the code already ships, so copying it
@@ -36,7 +37,7 @@ promise.
 
 ## Settings you can change at runtime
 
-Three settings are the **settings namespace**: they are editable from the Settings
+Four settings are the **settings namespace**: they are editable from the Settings
 card (Settings → Plugins → Plugin configuration → "Pocket console"), marked ★ in the
 table below, and take effect on the next decision with no restart.
 

@@ -209,8 +209,8 @@ store, referenced by name.
 - Plain ESM JavaScript, no TypeScript and no bundler. This is deliberate: it is
   what keeps the package itself free of build scripts, so installing it from
   npm, a tarball, or a raw git URL never builds it. Dependencies are still gated
-  by pnpm ≥11 — the Quick start carries the one `allowBuilds` entry the Feishu
-  SDK's `protobufjs` needs.
+  by pnpm ≥11 — `protobufjs` needs one `allowBuilds` entry in the profile's
+  `pnpm-workspace.yaml`, which [troubleshooting](docs/troubleshooting.md) covers.
 - Comment the contract, not the code. Say what a caller must know — ownership,
   failure, timing — and delete anything that restates the line below it.
 - Prefer a clear name over a clever one.
