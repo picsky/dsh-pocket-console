@@ -213,7 +213,7 @@ function disposePrevious() {
  *   medium survives from the previous scaffold (a restart), and whether the
  *   storage medium is held shut so a case can press a card before it answers.
  */async function scaffold(configOverrides = {}, {
-  services = ['settings', 'webServer', 'storageDomain', 'sessionQuery', 'sessionController'],
+  services = ['settings', 'webServer', 'storageDomain', 'sessionQuery', 'sessionController', 'sessionTitle'],
   stored = {},
   refuseWrites = false,
   tenantToken,
@@ -256,6 +256,31 @@ function disposePrevious() {
   const routes = []
   const sections = new Map()
   const agents = new Map()
+  /**
+   * The agent registry the deployment and the cases see.
+   *
+   * The real registry always hands back a session that carries its own id; the fake stores agents
+   * without one, so the id is supplied on the way in. The map is wrapped rather than copied on `get`,
+   * because a case mutates an agent in place to model a session that starts working mid-turn
+   * (`agents.get(id).status = 'running'`) and a copy would hide that from the deployment.
+   */
+  const withSessionId = (id, agent) => ({ ...agent, session: { id, ...agent.session } })
+  const registry = {
+    set: (id, agent) => { agents.set(id, withSessionId(id, agent)); return registry },
+    get: (id) => agents.get(id),
+    list: () => [...agents.values()],
+    has: (id) => agents.has(id),
+    delete: (id) => agents.delete(id),
+    clear: () => agents.clear(),
+    get size() { return agents.size },
+  }
+  /**
+   * The folded session titles the title service answers with, by session id.
+   *
+   * Empty unless a case fills it: a deployment's sessions have titles the plugin never saw an event
+   * for, and this is how a case models that.
+   */
+  const titles = new Map()
   const storageDomain = createStorageDomain()
   /**
    * A gate a case can hold shut to model a medium that has not answered yet — the window
@@ -289,7 +314,7 @@ function disposePrevious() {
       // What `ensureSession` does in the Host: the session exists and has an agent, so the first
       // prompt has somewhere to go. The recorded follow-ups are what a case inspects.
       const agent = { status: 'idle', followed: [], followup: (message) => { agent.followed.push(message) } }
-      agents.set(id, agent)
+      registry.set(id, agent)
       return { sessionId: id }
     },
   }
@@ -461,13 +486,7 @@ function disposePrevious() {
       // that is already running when the person moves to the phone. The fake agents are stored
       // without a `session.id`, so it is supplied here the way the real one always has it.
       if (name === 'agents') {
-        return {
-          get: (id) => agents.get(id),
-          list: () => [...agents.entries()].map(([id, agent]) => ({
-            ...agent,
-            session: { id, ...agent.session },
-          })),
-        }
+        return { get: registry.get, list: registry.list }
       }
       if (!composed.has(name)) return undefined
       if (name === 'webServer') return webServer
@@ -475,6 +494,9 @@ function disposePrevious() {
       if (name === 'storageDomain') return storageDomain
       if (name === 'sessionQuery') return sessionQuery
       if (name === 'sessionController') return sessionController
+      // The title service reads one session's folded title, which is what a card falls back to when
+      // the plugin never saw that session's `session/title` event.
+      if (name === 'sessionTitle') return { get: (session) => titles.get(session?.id) }
       // The browser surface's trust fence: present in a GUI deployment, and the
       // routes must ask it before answering anything.
       if (name === 'connection') return { requestRejection: () => rejection }
@@ -562,7 +584,7 @@ function disposePrevious() {
   return {
     bound, setRejection: (status) => { rejection = status },
     config, ctx, listeners, disposers, warnings, infos, debugs, values, records,
-    routes, sections, route, json, state, listenerOf, compose, agents, emitToAll, emitFrame,
+    routes, sections, route, json, state, listenerOf, compose, agents: registry, titles, emitToAll, emitFrame,
     lastDelivered, cardFrom, cardsSent, cardTitled,
     sessionQuery, storageDomain, sessionController,
     /** Let a held medium answer, so the pending open and restore can finish. */

@@ -12,9 +12,10 @@
  * permission, and no configuration.
  *
  * **Read from the firehose**, because the plugin already watches that stream for everything else and
- * the title arrives on it. A session whose title event predates this process simply has no name here,
- * and its cards render exactly as they did before this module existed — the property that makes the
- * whole feature safe to add.
+ * the title arrives on it — and, when a session's title event predates this process (every session
+ * that existed before a restart), **read once from the harness's title service** the first time a card
+ * asks. Without that second source, "the card says which session it is" would quietly stop being true
+ * for every existing session after every restart.
  *
  * @module pocket-console/session-names
  */
@@ -35,9 +36,49 @@ const CAPACITY = 256
  * @param options - the copy table in force, for the line a card shows.
  * @returns following the title events, and the line a card shows for one session.
  */
-export function createSessionNames({ messages, log, diagnostics = () => {} }) {
+export function createSessionNames({ ctx, messages, log, diagnostics = () => {} }) {
   /** One name per session, oldest key forgotten first. */
   const names = new Map()
+
+  /**
+   * Remember one name, oldest key forgotten first.
+   *
+   * Re-inserted so the first key is the coldest one — but only while there is room to move it: at the
+   * cap, moving a key that is already last would first remove it and then find no room to put it back,
+   * which is how a live name would be lost for good.
+   *
+   * Both ways of learning a name go through here, so a name read from the harness is remembered
+   * exactly like one that arrived on the firehose — and both say so out loud, which is the only way
+   * "why has this card no small line" is answerable from outside.
+   * @param session - the session id.
+   * @param name - the normalized name.
+   */
+  const remember = (session, name) => {
+    if (names.size < CAPACITY) names.delete(session)
+    else if (!names.has(session)) names.delete(names.keys().next().value)
+    names.set(session, name)
+    log?.debug?.(messages().logSessionNamed(session, name))
+    diagnostics?.(`会话名：${session} → ${name}`)
+  }
+
+  /**
+   * Read one session's folded title, for a session whose `session/title` event this process never saw.
+   *
+   * An event is the live truth and this is only a starting point, which is why it runs **only when
+   * nothing is remembered**: a title that later arrives on the firehose — including a rename —
+   * overwrites whatever was read here. Without it, every session that was already named when this
+   * process started would keep a nameless card for the rest of the deployment's life.
+   *
+   * The title service is optional and read through `get`, so a deployment that does not mount it
+   * simply never learns a name this way: no small line, and no failure either.
+   * @param session - the session id.
+   * @returns the name, or undefined when nothing can be read.
+   */
+  const learn = (session) => {
+    const live = ctx?.get?.('agents')?.get?.(session)?.session
+    if (live === undefined) return undefined
+    return sessionName(ctx?.get?.('sessionTitle')?.get?.(live)?.title)
+  }
 
   return {
     /**
@@ -56,17 +97,7 @@ export function createSessionNames({ messages, log, diagnostics = () => {} }) {
       if (id === undefined) return
       const name = sessionName(event.data?.title)
       if (name === undefined) return
-      // Re-inserted so the first key is the coldest one — but only while there is room to move it:
-      // at the cap, moving a key that is already last would first remove it and then find no room to
-      // put it back, which is how a live name would be lost for good.
-      if (names.size < CAPACITY) names.delete(id)
-      else if (!names.has(id)) names.delete(names.keys().next().value)
-      names.set(id, name)
-      log?.debug?.(messages().logSessionNamed(id, name))
-      // Said out loud for the same reason every other silent decision is: a card with no small line
-      // and a card whose session was never named look identical on the phone, and this is the only
-      // place that knows which of the two happened — or that the name changed under a live card.
-      diagnostics?.(`会话名：${id} → ${name}`)
+      remember(id, name)
     },
     /**
      * The name of one session, as a card's small line, or undefined when there is none to show.
@@ -78,7 +109,15 @@ export function createSessionNames({ messages, log, diagnostics = () => {} }) {
      * @returns the line, or undefined.
      */
     subtitle(session) {
-      const name = names.get(session)
+      let name = names.get(session)
+      // Nothing remembered means nothing has been heard about this session in *this* process, which is
+      // the ordinary state of every session that already existed when the deployment started. Read it
+      // once, and only once: from then on the firehose — including a rename — is the only thing that
+      // can change it.
+      if (name === undefined) {
+        name = learn(session)
+        if (name !== undefined) remember(session, name)
+      }
       return name === undefined ? undefined : messages().sessionLine(name)
     },
     /**

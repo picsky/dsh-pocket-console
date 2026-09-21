@@ -201,6 +201,26 @@ test('a title that arrives after the card does is picked up by the next write', 
   )
 })
 
+test('a card for a session titled before this process started still names it', async () => {
+  // The case the small line was missing from in the field: the session existed before the deployment
+  // started, so its `session/title` event is already in the log and will never be appended again. The
+  // name is read once from the harness's title service instead.
+  const scaffolded = await phoneHoldsIt()
+  scaffolded.titles.set('s_1', { title: NAME })
+  turn(scaffolded)
+  await sleep(1_500)
+
+  const result = cardsSent()
+    .filter(entry => String(entry.card?.header?.title?.content ?? '').startsWith(RESULT_TITLE))
+    .at(-1)
+  assert.ok(result, 'the result came to the phone')
+  assert.deepEqual(
+    headerOf(result.card).subtitle,
+    { tag: 'plain_text', content: LINE },
+    'the name the service holds reaches the card with no event at all',
+  )
+})
+
 test('a renamed session is re-labelled rather than frozen at its first name', async () => {
   const scaffolded = await phoneHoldsIt()
   emitTitle(scaffolded, '旧名字')
