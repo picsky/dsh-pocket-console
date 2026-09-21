@@ -85,3 +85,21 @@ export function titleOf(base, label) {
   const name = label.trim()
   return name === '' ? base : `${base} · ${name}`
 }
+
+/**
+ * A session's name, as a card can put it in one line.
+ *
+ * The harness normalizes a session title before committing it (one terminal-safe line, capped in
+ * bytes by configuration), so this is **not** a second normalization and deliberately not a clip: a
+ * name that is too long for the small line is the platform's business, and it truncates it there
+ * where the width is actually known. What is left here is the one guarantee a card needs and an
+ * event cannot make — that what reaches a card title is a single line — plus the rule that nothing
+ * to show means no line at all rather than an empty one.
+ * @param title - the title text, as the session log carries it.
+ * @returns the name, or undefined when there is nothing to show.
+ */
+export function sessionName(title) {
+  if (typeof title !== 'string') return undefined
+  const name = title.replace(/\s+/gu, ' ').trim()
+  return name === '' ? undefined : name
+}

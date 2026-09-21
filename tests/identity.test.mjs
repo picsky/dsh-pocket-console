@@ -6,7 +6,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { titleOf, workspaceLabel } from '../identity.js'
+import { sessionName, titleOf, workspaceLabel } from '../identity.js'
 
 test('a workspace label names the directory a session runs in', () => {
   // Every case is written as a literal and expected to hold on any platform. The first
@@ -60,4 +60,22 @@ test('a title keeps what the card is, and adds the workspace when there is one',
   assert.equal(titleOf('DSH 结果', ''), 'DSH 结果', 'an empty label is no label')
   assert.equal(titleOf('DSH 结果', 'my-app'), 'DSH 结果 · my-app', 'a workspace is named beside it')
   assert.equal(titleOf('Result', 'my-app'), 'Result · my-app', 'and the join does not depend on the language')
+})
+
+test('a session name is one line, and nothing to show is no line', () => {
+  // A header line holds one line. The harness normalizes a title before committing it, so this is not
+  // a second normalization — it is the guarantee a *card* needs and an event cannot make.
+  assert.equal(sessionName('新会话任务与手机接管'), '新会话任务与手机接管', 'a plain name is kept')
+  assert.equal(sessionName('  两行\n名字\t带空白  '), '两行 名字 带空白', 'whitespace of every kind becomes one space')
+  assert.equal(sessionName('a\r\nb'), 'a b', 'a carriage return is whitespace too')
+  assert.equal(sessionName('名字'), '名字', 'a name that is not Latin survives')
+  assert.equal(sessionName(''), undefined, 'an empty title names nothing')
+  assert.equal(sessionName('   \n  '), undefined, 'whitespace alone names nothing')
+  assert.equal(sessionName(undefined), undefined, 'no title event leaves no name')
+  assert.equal(sessionName(null), undefined, 'a title that is not a string is no name')
+  assert.equal(sessionName(42), undefined, 'and neither is a number')
+  // Deliberately not clipped here: a name too long for the small line is truncated by the platform,
+  // which is the only place that knows how wide the line is. See `internal/boundaries.md`.
+  const long = '名'.repeat(60)
+  assert.equal(sessionName(long), long, 'a long name is passed through rather than clipped here')
 })

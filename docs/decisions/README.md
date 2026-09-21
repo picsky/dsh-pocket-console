@@ -26,3 +26,4 @@ code. A change that contradicts a record here needs a new record, not a quiet ed
 | [0019](0019-the-next-task-rides-the-result-card.md) | The next task is a form on the result card, and a rewrite may not take the answer away |
 | [0020](0020-a-phone-started-session-joins-its-workspace.md) | A phone-started session is created through its workspace, so the desk groups it where it belongs |
 | [0021](0021-the-card-you-pressed-is-the-one-that-moves.md) | The card a reply is answered on becomes the run's card, and the next result is a card of its own |
+| [0025](0025-the-subtitle-names-the-session.md) | The session's name rides in the header's subtitle, which the tenant was measured accepting |

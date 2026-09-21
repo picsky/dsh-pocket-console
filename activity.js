@@ -131,8 +131,8 @@ const TURN_HISTORY = 5
  * @returns installation, the event feed, and what a priority change does to the card.
  */
 export function createActivity({
-  ctx, log, channel, settings, messages, priority, workspaces, diagnostics = () => {},
-  now = () => Date.now(),
+  ctx, log, channel, settings, messages, priority, workspaces, sessionNames,
+  diagnostics = () => {}, now = () => Date.now(),
 }) {
   /** One record per session being shown: what it is doing, and the message its card lives in. */
   const activities = new Map()
@@ -487,8 +487,13 @@ export function createActivity({
     const text = record.fragments.join('')
     body.push(text === '' ? copy.activityNothingYet : clipToBytes(text, copy.truncated, budget))
     const details = detailsFor(record, copy, budget)
+    const subtitle = sessionNames?.subtitle?.(record.session)
     return {
       title: titleOf(`${settings().titlePrefix} ${copy.activityTitle}`, record.workspace),
+      // Which session this is, in the line under the title. Read on every render rather than kept on
+      // the record: a session's name can arrive after its first card does, and this card is rewritten
+      // continuously, so it picks the name up on the next write.
+      ...(subtitle === undefined ? {} : { subtitle }),
       tone: record.failed !== undefined ? 'danger' : record.settled ? 'muted' : 'info',
       body,
       // The record of what the run did, folded where the channel can fold it. Absent while the
