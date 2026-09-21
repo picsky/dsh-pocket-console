@@ -173,11 +173,12 @@ function runGroups(entries, dropped, copy, budget, maxGroups) {
 /**
  * Watch root sessions, then offer each stopped session's answer to the channel.
  * @param options - the host context, the logger, the channel, the settings, the copy, the workspace
- *   registry, the priority state, the record of what each run did, and the next-task offer that
- *   rides on a settled card instead of costing a message of its own.
+ *   registry, the priority state, the record of what each run did, the next-task offer that rides on
+ *   a settled card instead of costing a message of its own, and the activity card, which takes over
+ *   the message a reply was typed on.
  */
 export function createResultNotifier({
-  ctx, log, channel, settings, messages, workspaces, priority, runRecord, nextTask,
+  ctx, log, channel, settings, messages, workspaces, priority, runRecord, nextTask, activity,
   diagnostics = () => {}, now = () => Date.now(),
 }) {
   /** Per-session observation: the newest turn, its last message, and when we last spoke. */
@@ -233,6 +234,25 @@ export function createResultNotifier({
    * setting it configured.
    */
   const effectiveDelay = () => priority?.delaySeconds() ?? settings().delaySeconds
+
+  /**
+   * Give the message a reply was typed on to the run its instruction starts.
+   *
+   * The two modules are separate — one owns the run's card, one owns the card a result is offered
+   * on — and this is the single seam between them. It is a call rather than a shared map because
+   * only the run can say whether the message is free: a card whose first send is still in flight is
+   * about to have a handle of its own, and taking one over before that lands would leave the
+   * answer to that send editing a message nothing is looking at.
+   *
+   * Composed without the activity module, this is a no-op and the reply path keeps its own rewrite:
+   * the card then says "已收到指令" and the run shows on a card of its own, which is what every
+   * release before this one did.
+   * @param session - the session the reply was made against.
+   * @param handle - the message the reply came from.
+   * @returns whether the run took the card over.
+   */
+  const adoptCard = (session, handle) =>
+    handle !== undefined && activity?.adopt?.(session, handle) === true
 
   /**
    * The workspace one session belongs to, resolved once per notice.
@@ -709,6 +729,12 @@ export function createResultNotifier({
    */
   function retract(handle, headline, workspace) {
     if (handle === undefined || typeof channel.update !== 'function') return
+    // A message the activity card is being shown in belongs to a run, not to a notice. This became
+    // reachable the moment a reply turned the card it was made on into that run's card: a second
+    // press on the same card — the one the reply came from — used to reach here with a rid that is
+    // no longer live, and writing "this card no longer works" over it would replace a live run with
+    // a sentence about a notice that is gone.
+    if (activity?.owns?.(handle) === true) return
     const known = cardOf(handle)
     // With nothing appended, `RESULT_ENDS` is the end of the card and this keeps the whole face.
     const body = known === undefined
@@ -995,15 +1021,22 @@ export function createResultNotifier({
     // recoverable by reading the conversation — and reporting it as "not sent" would be a worse
     // lie than the stale box.
     try {
-      // The card keeps the answer and the fold, and loses the box it was answered through. The
-      // earlier version replaced the whole face with "已收到指令", which took away the answer the
-      // reader had just replied to and the run fold beside it — an edit that destroys text is worse
-      // than no edit at all. Rebuilt from the card as sent, so nothing else drifts either.
-      // Only for a card this side still holds. A notice that came back from the previous run has no
-      // view here, and guessing one would replace a result nobody has a copy of with a sentence
-      // about an instruction — the exact failure this branch exists to stop.
       const sent = notice[VIEW]
-      if (notice.session !== undefined && sent !== undefined) {
+      // The card the person just answered becomes the run's card, and this is the whole of the rule:
+      // the card that moves is the card they touched. Leaving "已收到指令" on this one and opening a
+      // second message somewhere else for the run that instruction starts is two cards for one
+      // press, and the one that moves is not the one they are looking at.
+      //
+      // Asked before anything is read off the notice, because it needs nothing but the message the
+      // reply came from — which is also the one case that had no rewrite at all until now: a notice
+      // restored from the previous run carries no view here, so its card could not be rebuilt, and a
+      // reply on it left the box the reader had just used sitting there.
+      if (adoptCard(notice.session, notice.handle)) {
+        log.info(messages().logReplyCardAdopted(String(notice.handle)))
+      } else if (notice.session !== undefined && sent !== undefined) {
+        // The fallback, for a deployment composed without the activity card: the card keeps the
+        // answer and the fold, and loses the box it was answered through, so at least the reply
+        // cannot be taken twice. Rebuilt from the card as sent, so nothing else drifts either.
         // Taken off the notice it belongs to, so there is no second place that has to be told.
         delete notice[VIEW]
         // Everything the offer appended goes with the controls it came with. Keeping the sentence

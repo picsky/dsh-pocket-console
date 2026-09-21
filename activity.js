@@ -623,7 +623,7 @@ export function createActivity({
         // what stops it: a channel that can carry one keeps the platform from accepting the same
         // card twice, and a channel that cannot is kept from a second *attempt* only by the
         // answer itself, which is why a delivered id is never sent again.
-        diagnostics?.(`活动卡：为「${record.session}」创建（尚无消息 id）。`)
+        diagnostics?.(`活动卡：为「${record.session}」创建——这一轮会响。`)
         record.sending = true
         record.uuid ??= randomUUID()
         void writeCard(record, view => channel.deliver(view, { uuid: record.uuid }))
@@ -636,6 +636,7 @@ export function createActivity({
             // after a restart — can still name the session it belongs to.
             workspaces?.record(handle, record.workspace)
             log.info(messages().logActivitySent)
+            diagnostics?.(`活动卡：「${record.session}」的卡是消息 ${String(handle)}。`)
           }).catch((error) => {
             record.sending = false
             // An answer that never arrived is the one failure worth retrying: the card may or may
@@ -648,6 +649,11 @@ export function createActivity({
       // A failed edit has to be retried, and this is the only place that can do it: the clock that
       // re-marks a live card dirty stops touching a settled one, so a final write that failed used
       // to leave the card saying "working" for good — the last state of a run nobody could correct.
+      //
+      // Whether this is a reuse or a brand-new message is the whole question behind "the card did
+      // not change", and it is not answerable from outside: an edit and a send look the same on the
+      // phone. Said here, once per write, because this is the only place that knows.
+      diagnostics?.(`活动卡：改写「${record.session}」的消息 ${String(record.handle)}（复用，不响）。`)
       void writeCard(record, view => channel.update(record.handle, view))
         .then(() => {
           record.attempts = 0
@@ -663,6 +669,95 @@ export function createActivity({
     if (disposed) return
     for (const record of activities.values()) record.dirty = true
     armRefresh()
+  }
+
+  /**
+   * Take a message somebody else sent and make it this session's card.
+   *
+   * This is what turns the card a person just answered into the card their answer runs on. Without
+   * it the run that a reply starts is shown on *another* message — the one this module minted when
+   * the session was first taken on — and the card the person is looking at, the one they pressed,
+   * says "已收到" and nothing else. Two messages for one press, and the one that moves is not the one
+   * they touched.
+   *
+   * The turn state is reset here, and not left to the `turn/start` that is about to arrive, because
+   * the write is armed below: the card has to be right from its first write, and an event that
+   * arrives after it would otherwise leave the reader looking at the previous turn's step number and
+   * its last few fragments of text under a heading that says the new instruction is running.
+   *
+   * Refused while a send is in flight. The answer to that send is the handle this record is waiting
+   * for, and it would land on top of the one just adopted — so the reply path keeps its own rewrite
+   * instead, which is the honest card for a session whose first card is still being created.
+   *
+   * @param session - the session whose card this is.
+   * @param handle - the message to take over, as the channel named it.
+   * @returns whether the card was taken over.
+   */
+  const adopt = (session, handle) => {
+    if (disposed || session === undefined || handle === undefined) return false
+    // The precondition {@link flush} writes under, checked rather than assumed: this module maintains
+    // a card **only** while the phone holds the person, and taking a message over outside that would
+    // leave a reader's reply sitting on a card this side quietly owns and never writes again — worse
+    // than the "已收到" rewrite it replaced, because that one at least lands. The reply path itself
+    // satisfies this (the reader is at the phone, and `send` moves the side before calling), so what
+    // this line is for is the next caller that has not thought about it.
+    if (!phoneHasIt()) return false
+    const known = activities.get(session)
+    if (known?.sending === true) return false
+    const record = recordOf(session)
+    // A settled record is about to describe a new turn, and the finished one is folded away exactly
+    // as the next `turn/start` would do it — but only a settled one. A record still mid-turn is
+    // already describing run in progress, and that is the truth to show.
+    if (record.settled) {
+      closeTurn(record)
+      record.turn = undefined
+      record.step = undefined
+      record.tool = undefined
+      record.fragments = []
+      record.streamed = []
+      record.streamSize = 0
+      record.streamedStep = undefined
+      record.committedStep = undefined
+      record.failed = undefined
+      record.settled = false
+      record.startedAt = now()
+    }
+    record.handle = handle
+    // The key belonged to a message that was never sent, and this one already exists: kept, it would
+    // be presented as the identity of a send that is not going to happen.
+    record.uuid = undefined
+    record.attempts = 0
+    record.retryAt = undefined
+    if (record.workspace === undefined) record.workspace = workspaceOf(session)
+    // Whether this record can carry the fold the card being taken over had. That fold came from the
+    // run record; this one is built from what *this* module followed, so nothing tracked means the
+    // answer and the run it belongs to leave the phone with the card face. It happens when the
+    // process started mid-turn, or when this session's record was evicted. Said out loud, because
+    // from the phone the result looks like any other run — a card whose fold simply holds less.
+    if (record.turns.length === 0 && record.process.length === 0) {
+      diagnostics?.(`活动卡：接过消息 ${String(handle)} 时没有「${session}」这一轮的记录——那张卡上的折叠接不过来。`)
+    }
+    record.dirty = true
+    diagnostics?.(`活动卡：接过消息 ${String(handle)} 作为「${session}」的卡——不再另发一张。`)
+    armRefresh()
+    return true
+  }
+
+  /**
+   * Whether a message is the card some session is being shown in.
+   *
+   * Asked by the result notifier before it rewrites a press that has nothing to answer, because the
+   * card a reply was made on *is* the run's card from that moment on: a stale press that wrote
+   * "此卡已失效" over it would replace the live run with a sentence about a notice that is gone.
+   * @param handle - the message to ask about.
+   * @returns whether this module is showing a session in it.
+   */
+  const owns = (handle) => {
+    if (handle === undefined) return false
+    for (const record of activities.values()) {
+      if (record.handle === handle) return true
+    }
+    return false
   }
 
   /**
@@ -923,6 +1018,23 @@ export function createActivity({
     },
     observe,
     observeStream,
+    /**
+     * Make an already-delivered message this session's card.
+     *
+     * Called by the result notifier when a reply is accepted: the card the reply was typed on is the
+     * one the person is looking at, so the run their instruction starts belongs there rather than on
+     * a message of this module's own.
+     * @param session - the session the card belongs to.
+     * @param handle - the message to take over.
+     * @returns whether the card was taken over.
+     */
+    adopt,
+    /**
+     * Whether a message is the card this module is showing a session in.
+     * @param handle - the message to ask about.
+     * @returns whether some session is shown in it.
+     */
+    owns,
     /**
      * React to the person moving between the desk and the phone.
      *

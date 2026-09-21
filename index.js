@@ -351,6 +351,9 @@ export async function apply(ctx, config) {
     runRecord,
     // The next-task offer, appended to the card this notifier is about to send.
     nextTask: work,
+    // The run's own card, so a reply can leave the run on the message it was typed on instead of
+    // opening another one.
+    activity,
   })
 
   /** The card's status snapshot: what the section serves and what is open. */

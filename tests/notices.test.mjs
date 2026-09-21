@@ -330,7 +330,7 @@ test('a card the phone presses after its notice is gone is still named', async (
   assert.match(JSON.stringify(stale), /不再有效/, 'while saying only what this side knows')
 })
 
-test('a notice rewritten when the reader replies keeps the workspace', async () => {
+test('the card the reader replied on is renamed in place, keeping the workspace', async () => {
   const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle' })
   await bind(route)
   agents.set('s_ws', {
@@ -348,12 +348,17 @@ test('a notice rewritten when the reader replies keeps the workspace', async () 
 
   const settled = await clickCard(submit, { [answer]: '接着补文档' })
   assert.equal(settled.toast.content, '已发送给 agent')
-  await sleep(20)
+  // The run's card is written on the refresh window, not inside the press.
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    if (observed.patched.length > 0) break
+    await sleep(25)
+  }
 
-  // The rewrite is what the reader is left looking at, so it has to agree with the
-  // card it replaces rather than becoming anonymous the moment it is answered.
+  // The rewrite is what the reader is left looking at, so it has to agree with the card it replaces
+  // rather than becoming anonymous the moment it is answered — and the card it is now is the one the
+  // run it started is shown in.
   const rewritten = JSON.parse(observed.patched.at(-1).data.content)
-  assert.equal(rewritten.header.title.content, 'DSH 结果 · my-app', 'the confirmation keeps the workspace')
+  assert.equal(rewritten.header.title.content, 'DSH 执行中 · my-app', 'the card keeps the workspace')
 })
 
 test('the notice copy follows the deployment language', async () => {
