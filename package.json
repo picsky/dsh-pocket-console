@@ -17,6 +17,7 @@
     "activity.js",
     "work.js",
     "run-record.js",
+    "delegated.js",
     "diagnostics.js",
     "identity.js",
     "session-names.js",

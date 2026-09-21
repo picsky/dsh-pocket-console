@@ -22,6 +22,7 @@ import { createResultNotifier } from './results.js'
 import { createEscalation } from './escalation.js'
 import { createActivity } from './activity.js'
 import { createDiagnostics } from './diagnostics.js'
+import { isDelegated } from './delegated.js'
 import { createRunRecord } from './run-record.js'
 import { createSessionNames } from './session-names.js'
 import { createWork } from './work.js'
@@ -444,7 +445,13 @@ export async function apply(ctx, config) {
     // the same firehose rather than part of the activity card, because the card only exists while
     // the phone holds the person — and the run somebody asks about afterwards may well have happened
     // at the desk, or be the first one after the phone took over.
-    const offRunRecord = ctx.on('session/event', (session, event) => { runRecord.observe(session, event) })
+    //
+    // A delegated session is not recorded: no card of its own is ever built from this, and the map
+    // is bounded at {@link module:pocket-console/run-record}'s capacity — so a fan-out of subagents
+    // could otherwise push the real session's fold out of it.
+    const offRunRecord = ctx.on('session/event', (session, event) => {
+      if (!isDelegated(session)) runRecord.observe(session, event)
+    })
     // Which session each card belongs to, read off the same firehose: the harness appends a
     // `session/title` event when a session gets its name, and this is the only place that hears it.
     const offSessionNames = ctx.on('session/event', (session, event) => { sessionNames.observe(session, event) })

@@ -32,10 +32,10 @@ network. Cases live under `tests/`, one file per domain over the shared harness 
 | `notices.test.mjs` | Result notices: delivery, suppression, cooldown, supersession |
 | `notices-memory.test.mjs` | The per-session record's bound, which is what keeps a weeks-long process flat |
 | `messages.test.mjs` | Both dictionaries carrying the same keys, and dead copy staying dead |
-| `notices-memory.test.mjs` | The per-session record's bound, which is what keeps a weeks-long process flat |
+| `delegated-sessions.test.mjs` | A session a run delegated to gets no card of its own, and a fork still does |
 | `client.test.mjs` | The browser half: module-table load, the settings card, the desktop mirror, and its accessibility |
 
-250 cases. A file beginning `_` is scratch — it is ignored by the suite's glob and is
+264 cases. A file beginning `_` is scratch — it is ignored by the suite's glob and is
 not part of the project; delete it rather than commit it. What the cases cover, in one
 line each, is enumerated in [CHANGELOG.md](../CHANGELOG.md)'s most recent entry and in
 the git history of `tests/` — the suite is meant to be read as the specification of the

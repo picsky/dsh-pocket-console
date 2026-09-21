@@ -30,6 +30,7 @@
  */
 
 import { CARD_TEXT_BUDGET, clipTailToBytes, clipToBytes, looksLikeSizeRefusal } from './budget.js'
+import { isDelegated } from './delegated.js'
 import { titleOf, workspaceLabel } from './identity.js'
 import { PHONE } from './priority.js'
 
@@ -860,6 +861,13 @@ export function createActivity({
     if (disposed || session?.id === undefined) return
     const type = event?.type
 
+    // A session a run delegated to is never carded, so it is not followed at all: no record, and
+    // therefore nothing for the takeover below to mint a card from. The question is put to the
+    // session rather than to the event, because a delegate's first event is a `{ kind: 'user' }`
+    // message shaped exactly like a person's — which is how these sessions came to be carded in the
+    // first place. See {@link module:pocket-console/delegated}.
+    if (isDelegated(session)) return
+
     if (type === 'turn/start') {
       // Recorded whatever the side is. A turn that starts while the desk has the person is
       // tracked without a card, so that taking the phone over mid-turn continues *that* run
@@ -1110,7 +1118,8 @@ export function createActivity({
      * is created on the next session event, which for a run already in flight may be its last. So
      * the first thing a run did after the phone took over was the one thing the phone could not
      * show, which is precisely the run somebody picks the phone up to look at. Every session the
-     * registry still reports as running is taken on here instead.
+     * registry still reports as running is taken on here instead — except the ones a run delegated
+     * to, which are not conversations this side reports on at all.
      */
     onPriority() {
       if (!phoneHasIt()) return
@@ -1120,6 +1129,10 @@ export function createActivity({
         // every event is filed under.
         const session = agent?.session?.id
         if (session === undefined || agent?.status !== 'running') continue
+        // A delegate is not taken on. It never had a card, and taking one on here is how a single
+        // instruction became several cards — all of them ringing, all in the same millisecond. The
+        // agent's own session is what gets asked, because the header is on it.
+        if (isDelegated(agent?.session)) continue
         // Whichever comes first: a session already followed keeps its card, and one that was not is
         // taken on now so the rest of its turn is recorded.
         if (!activities.has(session)) tookOn = true
