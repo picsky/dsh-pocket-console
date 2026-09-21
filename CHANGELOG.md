@@ -7,7 +7,13 @@ published says so, because its work ships with the next release that is.
 The project is pre-1.0: a minor bump can carry a behaviour change, and one is called
 out when it does.
 
-## Unreleased
+## 0.9.1
+
+**Three fixes since 0.9.0, and two of them change behaviour**: a session a run *delegated* work to no
+longer gets cards of its own, and a frozen card's fold no longer carries the run before it. Both are
+called out below rather than left to the number — the first is a promise the troubleshooting docs
+already made and the code never kept, the second removes something a reader used to have, so neither
+should arrive unread.
 
 ### Changed
 
