@@ -319,7 +319,7 @@ export async function apply(ctx, config) {
   // the harness already gives every session one, so this only has to remember it. Built here rather
   // than beside the other registries because it reports through `diagnostics`, which is defined just
   // above; every card producer below takes it, so nothing can be built before it exists.
-  const sessionNames = createSessionNames({ messages, log, diagnostics })
+  const sessionNames = createSessionNames({ ctx, messages, log, diagnostics })
 
   // The escalation machine owns the timer, the race, and the pending registry;
   // this file only wires it to the two seams and the channel's actions.

@@ -7,6 +7,20 @@ published says so, because its work ships with the next release that is.
 The project is pre-1.0: a minor bump can carry a behaviour change, and one is called
 out when it does.
 
+## Unreleased
+
+### Fixed
+
+- **Every card names its session, including the sessions that already had one.** The small line came
+  from the firehose's `session/title` event, and that event is only appended when a session gets its
+  first fallback title, when a generator finishes, or when somebody renames it — **none of which
+  happens again for a session that already existed**. So after every restart the line was quietly
+  missing from every existing session's cards, which is a feature doing nothing rather than a feature
+  failing: the reader saw exactly what they saw before it shipped. The name is now read once from the
+  harness's title service the first time a card asks, and only while nothing has been heard on the
+  firehose — so an event, including a rename, still wins, and a deployment without that service
+  behaves as it did before (`session-names.js`).
+
 ## 0.9.0
 
 **The first release since 0.8.1.** Two versions were numbered in this tree and never published —
