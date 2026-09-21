@@ -130,6 +130,11 @@
 | 浏览器 composer 的逐题进度够不到（store 是组件私有） | **已验证**（[0012](../docs/decisions/0012-the-desktop-composer-steps-without-the-phone.md)） |
 | **`agent.followup()` 排进一个正在跑的会话**，真机上**观察到未兑现** | ⚠️ **现象已验证，机理未明**（2026-09-21 真机）：`followup` 返回 void、不抛错，通知被消费、卡片也变了，但**没有开出那一轮**（`turnOutline` 里没有对应 turn，inbox 事后为空）。对照：**空闲时** `followup` 正常成轮。契约写的是"排成自己的一轮并唤醒 driver"（`followup(input) { this.send(input,'next-turn',true) }`），所以嫌疑在 inbox 的收回路径（轮结束时清掉 / `claim` 走却没开轮），**没有证死**。⇒ 插件在会话 running 时改用 `steer()`（[0023](../docs/decisions/0023-a-reply-into-a-running-session-steers.md)） |
 | `agent.steer()` 的契约 | **已验证**（类型原文）："Submit steering for the nearest step. An idle driver starts a turn; a running driver consumes it at its next step boundary." 取消或卸载**可能丢弃**未消费的 steering |
+| 会话的**创建头** `session.header` 公开且**始终存在**（`Session` 的一个字段，注释写明"总是存在"）；其中 `origin` 的校验**只接受 `"subagent"`** 这一个值 | **已验证**（读实现：`dsh-session/lib/types/index.js:337-353` 的字段声明、`:55-56` 的校验；本机 82 个会话头实测都写着 `"origin":"subagent"`）⇒ 判"这是不是委派会话"不需要任何状态，插件启动前就存在的会话也判得出来 |
+| `session/event` 的第二个参数**就是 `Session` 实例**（firehose `callbackArgs = [this, event]`），因此 `session.header` 在事件处理里直接可读 | **已验证**（读实现；插件早在读 `session.header.cwd` 取工作区名） |
+| **子代理的派发提示词以 `{ kind: 'user' }` 送达**，与真人消息同形（只差只有桌面手敲才有的 `rpcId`） | **已验证**（真机会话日志：子代理 `seq 9 source={"kind":"user"}`）⇒ **靠 source 判"这是不是人开的会话"不可能**，这是 #62 的根因 |
+| 子代理会话的**第一条事件**是 `subagent/descriptor`（seq 0，早于 `turn/start` 的 seq 5），且属于 session 日志的已知事件类型 | **已验证**（真机会话日志 + `dsh-session` 的 known-event-types 列表）⇒ 若上游有一天不再写 `origin`，这是退路 |
+| `fork()` 造出的会话**带 `parentSession` 但不带 `origin`** | **已验证**（读实现：`dsh-session/lib/index.js:1670-1678`）⇒ 判据只能用 `origin`；用 `parentSession` 会把 fork 一起静音，而 fork 是人在用的会话 |
 
 ## 4. 渲染政策
 

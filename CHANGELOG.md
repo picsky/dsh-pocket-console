@@ -11,6 +11,18 @@ out when it does.
 
 ### Fixed
 
+- **One instruction no longer arrives as several cards.** A session a run **delegated** work to was
+  treated exactly like a conversation a person was having, so a task that fanned out to subagents put
+  a card on the phone for each of them — and because a card that has no message yet is *sent*, every
+  one of them rang. Measured on a real deployment: two delegates of one instruction produced two
+  `创建` lines in the same millisecond, and then a result card each as their turns ended. The two
+  producers were both asking a question the prompt could not answer — a delegate's prompt is delivered
+  as a `{ kind: 'user' }` message, the same shape a person's has — so the question is now put to the
+  session's own creation header, where `origin` is a field the harness refuses to set to anything but
+  `"subagent"`. A delegate gets no activity card, no result card, and is not taken on when the phone
+  changes hands; the session that asked for the work is still reported as before. A **fork** is not a
+  delegate and keeps its card (`delegated.js`, decision 0026). The troubleshooting docs had already
+  listed delegated sessions among the reasons nothing arrives — the code simply never implemented it.
 - **Every card names its session, including the sessions that already had one.** The small line came
   from the firehose's `session/title` event, and that event is only appended when a session gets its
   first fallback title, when a generator finishes, or when somebody renames it — **none of which

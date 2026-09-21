@@ -30,3 +30,4 @@ code. A change that contradicts a record here needs a new record, not a quiet ed
 | [0023](0023-a-reply-into-a-running-session-steers.md) | A reply that arrives while the session runs is steered into that turn, not queued behind it |
 | [0024](0024-an-unfinished-run-still-gets-a-card.md) | A run that stopped short still gets a result card, because the phone is where the next decision is made |
 | [0025](0025-the-subtitle-names-the-session.md) | The session's name rides in the header's subtitle, which the tenant was measured accepting |
+| [0026](0026-a-delegated-session-is-not-a-conversation.md) | A session a run delegated to gets no card at all: its header says so, and one instruction must not become several cards |

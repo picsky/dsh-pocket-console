@@ -17,6 +17,7 @@
  */
 
 import { CARD_ELEMENT_BUDGET, CARD_TEXT_BUDGET, clipTailToBytes, clipToBytes, looksLikeSizeRefusal } from './budget.js'
+import { isDelegated } from './delegated.js'
 import { titleOf, workspaceLabel } from './identity.js'
 import { PHONE as PRIORITY_PHONE, DESK as PRIORITY_DESK } from './priority.js'
 import { RESTORE_LIMIT, createNoticeStore } from './notice-store.js'
@@ -273,6 +274,17 @@ export function createResultNotifier({
     handle !== undefined && activity?.adopt?.(session, handle) === true
 
   /**
+   * The live session behind an id, when the agent registry still holds one.
+   *
+   * An id is all a stored notice carries, and the two questions this module asks about a session it
+   * did not see start — which workspace it belongs to, and whether it was delegated to — are both
+   * answered by the session itself rather than by anything remembered here.
+   * @param session - the session id.
+   * @returns the session, or undefined when no agent is loaded for it.
+   */
+  const agentSession = (session) => ctx.get?.('agents')?.get?.(session)?.session
+
+  /**
    * The workspace one session belongs to, resolved once per notice.
    *
    * Read through the live agent, which is what this process is watching: the workspace
@@ -283,7 +295,7 @@ export function createResultNotifier({
    * @param session - the session id.
    * @returns the label, or undefined when there is nothing to show.
    */
-  const workspaceOf = (session) => workspaceLabel(ctx.get?.('agents')?.get?.(session)?.session?.header?.cwd)
+  const workspaceOf = (session) => workspaceLabel(agentSession(session)?.header?.cwd)
 
   /**
    * One session's observation state.
@@ -697,6 +709,13 @@ export function createResultNotifier({
         retireRestored(record, messages().noticeGone)
         continue
       }
+      if (isDelegated(agentSession(record.session))) {
+        // A notice stored before delegates were turned away. Its card can never be written again —
+        // this module no longer follows that session at all — so it stops taking replies here,
+        // rather than standing there as an offer that would answer into a card nobody moves.
+        retireRestored(record, messages().noticeDelegated)
+        continue
+      }
       if (kept >= RESTORE_LIMIT) {
         // More outstanding notices than a reader could act on: the oldest are retired
         // rather than left as a growing pile of cards that all claim to be live.
@@ -894,11 +913,22 @@ export function createResultNotifier({
   /** Observe one session event. */
   const onEvent = (session, event) => {
     if (session?.id === undefined) return
-    const track = trackOf(session.id)
     const source = event.data?.source ?? event.data?.message?.source
+    // Only a session a person started is worth reporting; a delegated one is reported through the
+    // session that asked for it. That sentence used to stand over a test of `source.kind === 'user'`
+    // alone, which a delegate's prompt passes — it is delivered as a `{ kind: 'user' }` message with
+    // no `rpcId`, exactly like a person's. So the question is put to the session instead, and the
+    // whole session is turned away before any of it is tracked.
+    if (isDelegated(session)) {
+      // Once per prompt, because "why did that session never get a card of its own" is otherwise
+      // answered only by the absence of one — and the absence is the confusing part.
+      if (event.type === 'user/message' && source?.kind === 'user') {
+        diagnostics(`结果卡：跳过「${session.id}」——这是被委派出去的会话，结果由发起它的会话汇报。`)
+      }
+      return
+    }
+    const track = trackOf(session.id)
     if (event.type === 'user/message' && source?.kind === 'user') {
-      // Only a session a person started is worth reporting; a delegated one is
-      // reported through the session that asked for it.
       track.eligible = true
       // Somebody spoke — at the desk or from the phone. Whatever the notice
       // carried is no longer the session's latest word, so it stops taking
