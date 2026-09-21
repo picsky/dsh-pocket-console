@@ -320,6 +320,9 @@ export function createEscalation({
     }
 
     record.onAbort = () => { record.complete(undefined, messages().cancelled, 'muted') }
+    // Attached so {@link close} can abandon a record through the one function that knows everything
+    // it holds — the timer, its registry slot, and the listener it put on the request's signal.
+    record.release = release
     if (request.signal?.aborted === true) {
       record.complete(undefined, undefined, 'muted')
       return desktop
@@ -634,13 +637,20 @@ export function createEscalation({
      *
      * Called on disposal: the desktop branch of each race stays authoritative, so
      * a still-open GUI can answer normally.
+     *
+     * Each record goes through {@link release} rather than repeating what it does. The hand-written
+     * version cleared the timer and dropped the registry slot but left the record's `abort` listener
+     * on the request's signal — so a retired plugin went on reacting to aborts, and a long-lived
+     * signal accumulated listeners (`MaxListenersExceededWarning` after enough of them). Release is
+     * the one place that knows everything a record holds, which is why it exists.
      */
     close() {
       closed = true
       for (const record of [...open.values()]) {
-        if (record.timer !== undefined) clearTimeout(record.timer)
+        // Set first, because release() is only about what the record holds: the race must not settle
+        // an answer nobody gave, and the desktop branch is what the caller keeps waiting on.
         record.finished = true
-        open.delete(record.id)
+        record.release?.()
       }
     },
     /**

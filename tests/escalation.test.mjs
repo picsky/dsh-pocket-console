@@ -153,6 +153,37 @@ test('disposal removes the route, stops the connection, and abandons escalations
   desktop.resolve('unavailable')
 })
 
+test('disposal takes back the abort listener it put on the request', async () => {
+  // Disposal used to clear each record's timer and drop its registry slot by hand, and leave the
+  // listener it had added to the request's signal. A retired plugin then went on reacting to aborts,
+  // and a signal that outlives many requests accumulated listeners until Node warned about it. Every
+  // record holds three things — a timer, a slot, and that listener — and only one function in the
+  // module knows all three, so disposal goes through it.
+  const { route, listenerOf, disposers } = await scaffold()
+  await bind(route)
+  const controller = new AbortController()
+  const desktop = Promise.withResolvers()
+
+  let adds = 0
+  let removes = 0
+  const add = controller.signal.addEventListener.bind(controller.signal)
+  const remove = controller.signal.removeEventListener.bind(controller.signal)
+  controller.signal.addEventListener = (...args) => { adds += 1; return add(...args) }
+  controller.signal.removeEventListener = (...args) => { removes += 1; return remove(...args) }
+
+  void listenerOf('approval/request').handler(
+    { toolName: 'pwsh', signal: controller.signal },
+    () => desktop.promise,
+  )
+  await sleep(20)
+  assert.equal(adds, 1, 'the escalation listened for the request being withdrawn')
+
+  for (const dispose of disposers) dispose()
+
+  assert.equal(removes, 1, 'and disposal takes that listener back')
+  desktop.resolve('unavailable')
+})
+
 
 test('reports what is still pending, and whether the phone already has it', async () => {
   const { route, state, listenerOf } = await scaffold({ delaySeconds: 1 })

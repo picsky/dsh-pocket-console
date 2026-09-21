@@ -142,8 +142,31 @@ export function createActivity({
   /** Set once the module is disposed, so a pending edit does not outlive it. */
   let disposed = false
 
-  /** Whether the phone holds the person, which is the only condition that mints a card. */
+  /** The side the person is on, which is the only condition that mints a card. */
   const phoneHasIt = () => priority?.get() === PHONE
+
+  /**
+   * Messages whose card outlived the record that owned it, keyed by session.
+   *
+   * Bounded like everything else here, and for the same reason: a session evicted from
+   * {@link activities} is one nobody has run for a while, so a handle for it is worth holding only
+   * long enough for the session to come back. An entry that is never claimed ages out with the
+   * coldest-first rule.
+   */
+  const orphaned = new Map()
+
+  /** Remember which message a session's card is, so a re-taken session edits it instead of resending. */
+  const rememberHandle = (session, handle) => {
+    if (orphaned.size >= CAPACITY) orphaned.delete(orphaned.keys().next().value)
+    orphaned.set(session, handle)
+  }
+
+  /** Take back the message a session's card is, if one was remembered. */
+  const claimedHandle = (session) => {
+    const handle = orphaned.get(session)
+    if (handle !== undefined) orphaned.delete(session)
+    return handle
+  }
 
   /**
    * One session's record, created on first sight.
@@ -170,10 +193,22 @@ export function createActivity({
     }
 
     // A session nobody is following yet: make room for it, then take the newest place.
-    if (activities.size >= CAPACITY) activities.delete(activities.keys().next().value)
+    //
+    // The place that has to be given up may be one whose card is already on the phone, and dropping
+    // the record would drop the only thing that knows which message that card is: the session's next
+    // event would find no handle and **send a second card for one run**, which is a notification this
+    // plugin promised not to produce. So the message is kept beside the map rather than inside the
+    // record — a handle is a short string, and remembering it is what makes the card's life outlast
+    // the record's.
+    if (activities.size >= CAPACITY) {
+      const evicted = activities.keys().next().value
+      const going = activities.get(evicted)
+      if (going?.handle !== undefined) rememberHandle(evicted, going.handle)
+      activities.delete(evicted)
+    }
     const record = {
       session,
-      handle: undefined,
+      handle: claimedHandle(session),
       sending: false,
       dirty: false,
       /** When a failed send may be tried again, so a dead channel is not hammered. */
