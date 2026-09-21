@@ -144,6 +144,8 @@ const zh = {
   activityFrozen: '已结束',
   /** One failed tool call, in the folded record of a finished run. */
   activityToolFailed: (name, reason) => `**工具失败**：\`${name}\`${reason === '' ? '' : ` — ${reason}`}`,
+  /** A person's own words inside a folded record: the one entry the fold marks. */
+  humanLine: text => `**你**：${text}`,
   activityTitle: '执行中',
   logActivitySent: '已为这次运行发出活动卡。',
   logActivitySendFailed: '活动卡发送失败',
@@ -311,6 +313,7 @@ const en = {
   activityProcess: 'What this run did',
   activityFrozen: 'Finished',
   activityToolFailed: (name, reason) => `**Tool failed**: \`${name}\`${reason === '' ? '' : ` — ${reason}`}`,
+  humanLine: text => `**You**: ${text}`,
   activityTitle: 'Running',
   logActivitySent: 'sent the activity card for this run.',
   logActivitySendFailed: 'sending the activity card failed',

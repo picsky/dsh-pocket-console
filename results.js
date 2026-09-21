@@ -104,10 +104,16 @@ function runGroups(entries, dropped, copy, budget, maxGroups) {
         at += 1
         continue
       }
-      lost += rawBytes(entry.text) + 2
+      // What a reader misses is the entry **as it would have been shown**, marker included: the one
+      // entry the fold marks is a person's own words, and counting them bare would under-report the
+      // loss by exactly the part that makes them findable.
+      lost += rawBytes(renderEntry(entry)) + 2
     }
     return lost
   }
+
+  /** One entry as the fold shows it. The only thing marked is a person's own words. */
+  const renderEntry = (entry) => (entry.kind === 'human' ? copy.humanLine(entry.text) : entry.text)
 
   /** Adjacent tool lines, joined; every other kind left as it is. */
   const mergeTools = (kept) => {
@@ -132,11 +138,12 @@ function runGroups(entries, dropped, copy, budget, maxGroups) {
   const shape = (kept, merge) => {
     const grouped = merge ? mergeTools(kept) : kept
     const omitted = dropped + lostBytes(kept)
-    const text = grouped.map(group => group.text).join('\n\n')
+    const rendered = grouped.map(renderEntry)
+    const text = rendered.join('\n\n')
     const body = omitted > 0 ? `${text}\n\n${copy.resultOmitted(omitted)}` : text
     if (rawBytes(body) > budget) return undefined
     if (grouped.length + (omitted > 0 ? 1 : 0) > maxGroups) return undefined
-    return grouped.map(group => group.text).concat(omitted > 0 ? [copy.resultOmitted(omitted)] : [])
+    return rendered.concat(omitted > 0 ? [copy.resultOmitted(omitted)] : [])
   }
 
   const prose = all.filter(entry => entry.kind !== 'tool' && entry.kind !== 'failure')
