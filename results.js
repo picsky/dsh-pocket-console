@@ -60,7 +60,7 @@ const TRACK_CAPACITY = 256
  * a person or the loop has already decided on, and a card asking "what now?" a second after somebody
  * pressed stop is noise. `blocked` is left out for the same reason.
  */
-const UNFINISHED_REASONS = new Set(['error', 'max-tokens'])
+const UNFINISHED_REASONS = new Set(['error'])
 
 /** Bytes of UTF-8, which is what a size the platform counts and a size this code counts agree on. */
 const rawBytes = (value) => Buffer.byteLength(String(value ?? ''), 'utf8')
@@ -197,7 +197,7 @@ function runGroups(entries, dropped, copy, budget, maxGroups) {
  */
 export function createResultNotifier({
   ctx, log, channel, settings, messages, workspaces, priority, runRecord, nextTask, activity,
-  diagnostics = () => {}, now = () => Date.now(),
+  sessionNames, diagnostics = () => {}, now = () => Date.now(),
 }) {
   /** Per-session observation: the newest turn, its last message, and when we last spoke. */
   const tracks = new Map()
@@ -450,14 +450,18 @@ export function createResultNotifier({
     // Resolved once, then carried: this card is rewritten when the reader replies and
     // when a newer result supersedes it, and those rewrites must say the same thing.
     const workspace = workspaceOf(session)
+    // Resolved once and **carried on the notice** with the workspace, so every later rewrite of this
+    // card — the reply, a supersede, an expiry — says the same thing about which session it is.
+    const subtitle = sessionNames?.subtitle?.(session)
     const view = {
       title: titleOf(`${settings().titlePrefix} ${messages().resultTitle}`, workspace),
+      ...(subtitle === undefined ? {} : { subtitle }),
       tone: 'info',
       body: [answer, messages().replyHint],
       buttons: [],
       forms: [{ payload: { nid: id, submit: true }, fieldId: INSTRUCTION_FIELD, submitLabel: messages().sendToAgent }],
     }
-    noticeSet(id, { session, handle: undefined, workspace })
+    noticeSet(id, { session, handle: undefined, workspace, subtitle })
     track.ended = undefined
     track.sentAt = now()
     // What the run did, from the last thing a person said to the moment it stopped. The card face
@@ -730,7 +734,6 @@ export function createResultNotifier({
   }
 
   /**
-  /**
    * The card one notice was sent as, taken off the notice that owns it.
    *
    * A rewrite is asked for by the message it came from, and the notice is what knows the message —
@@ -771,6 +774,20 @@ export function createResultNotifier({
    * @param headline - what the card says instead.
    * @param workspace - the label the card was sent with, so the rewrite agrees with it.
    */
+  /**
+   * The small line a rewrite of an already-sent card must keep.
+   *
+   * Taken from the notice when this side still holds the card — that is the line it was actually sent
+   * with — and otherwise from the registry, because a card that outlived its notice still belongs to a
+   * session, and the platform can still be told which one. Undefined means the header this rewrite
+   * writes has no small line, exactly like a card whose session was never named.
+   * @param handle - the message being rewritten.
+   * @param known - the card as this side holds it, when it holds it.
+   * @returns the line, or undefined.
+   */
+  const subtitleFor = (handle, known) =>
+    known?.notice?.subtitle ?? sessionNames?.subtitle?.(workspaces?.sessionOf?.(handle))
+
   function retract(handle, headline, workspace) {
     if (handle === undefined || typeof channel.update !== 'function') return
     // A message the activity card is being shown in belongs to a run, not to a notice. This became
@@ -786,6 +803,10 @@ export function createResultNotifier({
       : [...known.view.body.slice(0, known.view[RESULT_ENDS] ?? known.view.body.length), headline]
     void Promise.resolve(channel.update(handle, {
       title: titleOf(`${settings().titlePrefix} ${messages().resultTitle}`, workspace),
+      // From the notice when this side still holds it — that is the line the card was sent with — and
+      // otherwise from the registry, because a card that outlived its notice still belongs to a
+      // session and the platform can still be told which one.
+      ...(subtitleFor(handle, known) === undefined ? {} : { subtitle: subtitleFor(handle, known) }),
       tone: 'muted',
       body,
       buttons: [],

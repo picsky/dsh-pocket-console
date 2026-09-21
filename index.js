@@ -23,6 +23,7 @@ import { createEscalation } from './escalation.js'
 import { createActivity } from './activity.js'
 import { createDiagnostics } from './diagnostics.js'
 import { createRunRecord } from './run-record.js'
+import { createSessionNames } from './session-names.js'
 import { createWork } from './work.js'
 import { LOCALES, messagesFor } from './messages.js'
 import { createMirror } from './mirror.js'
@@ -313,16 +314,25 @@ export async function apply(ctx, config) {
   // one place instead of three modules each inventing their own line.
   const diagnostics = createDiagnostics({ settings: () => settings, log })
 
+  // What each session is called, for the small line under a card's title. A project with two sessions
+  // running in it makes two identical titles, and the name is the only thing that separates them —
+  // the harness already gives every session one, so this only has to remember it. Built here rather
+  // than beside the other registries because it reports through `diagnostics`, which is defined just
+  // above; every card producer below takes it, so nothing can be built before it exists.
+  const sessionNames = createSessionNames({ messages, log, diagnostics })
+
   // The escalation machine owns the timer, the race, and the pending registry;
   // this file only wires it to the two seams and the channel's actions.
   escalation = createEscalation({
-    log, channel, settings: () => settings, mirror, messages, workspaces, priority, diagnostics,
+    log, channel, settings: () => settings, mirror, messages, workspaces, priority, sessionNames,
+    diagnostics,
   })
 
   // The activity card follows a run while it runs, but only once the phone holds the person:
   // while the desk has them, the run is visible where they already are.
   const activity = createActivity({
-    ctx, log, channel, settings: () => settings, messages, priority, workspaces, diagnostics,
+    ctx, log, channel, settings: () => settings, messages, priority, workspaces, sessionNames,
+    diagnostics,
   })
 
   // What each run did, kept on its own account rather than on a card: the result card shows it, so
@@ -354,6 +364,8 @@ export async function apply(ctx, config) {
     // The run's own card, so a reply can leave the run on the message it was typed on instead of
     // opening another one.
     activity,
+    // Which session each card belongs to, for the small line under its title.
+    sessionNames,
   })
 
   /** The card's status snapshot: what the section serves and what is open. */
@@ -433,6 +445,9 @@ export async function apply(ctx, config) {
     // the phone holds the person — and the run somebody asks about afterwards may well have happened
     // at the desk, or be the first one after the phone took over.
     const offRunRecord = ctx.on('session/event', (session, event) => { runRecord.observe(session, event) })
+    // Which session each card belongs to, read off the same firehose: the harness appends a
+    // `session/title` event when a session gets its name, and this is the only place that hears it.
+    const offSessionNames = ctx.on('session/event', (session, event) => { sessionNames.observe(session, event) })
     const offRunStream = ctx.on('agent/assistant-stream', ({ agent, frame }) => {
       runRecord.observeStream(agent?.id, frame)
     })
@@ -497,6 +512,7 @@ export async function apply(ctx, config) {
       offResults()
       offActivity()
       offRunRecord()
+      offSessionNames()
       offRunStream()
       offPriority()
       offAction()

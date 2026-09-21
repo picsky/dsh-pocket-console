@@ -29,3 +29,4 @@ code. A change that contradicts a record here needs a new record, not a quiet ed
 | [0022](0022-the-fold-is-one-turn-and-marks-what-you-said.md) | The fold is one turn plus the one the reply was made against, and it marks the person's own line |
 | [0023](0023-a-reply-into-a-running-session-steers.md) | A reply that arrives while the session runs is steered into that turn, not queued behind it |
 | [0024](0024-an-unfinished-run-still-gets-a-card.md) | A run that stopped short still gets a result card, because the phone is where the next decision is made |
+| [0025](0025-the-subtitle-names-the-session.md) | The session's name rides in the header's subtitle, which the tenant was measured accepting |

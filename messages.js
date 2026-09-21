@@ -61,6 +61,15 @@ const zh = {
   notePlaceholder: '补充说明（可选）',
   appDescription: '把 DeepSeek Harness 的工具审批与提问送到飞书',
   resultTitle: '结果',
+  /**
+   * The small line under a card's title, naming the session it belongs to.
+   *
+   * The title says what the card is and which project it belongs to; two sessions in one project make
+   * two identical titles, and this is the line that tells them apart. The label is spelled out
+   * because the line sits under a title with no other context.
+   */
+  sessionLine: name => `会话：${name}`,
+  logSessionNamed: (session, name) => `会话名：${session} → ${name}`,
   replyHint: '**回复这条消息**即可把下一步交给这个会话。',
   /** Label over the folded record of what this run did, on the result card. */
   resultProcess: '思考过程',
@@ -256,6 +265,8 @@ const en = {
   notePlaceholder: 'Extra note (optional)',
   appDescription: 'DeepSeek Harness tool approvals and questions, delivered to Feishu',
   resultTitle: 'Result',
+  sessionLine: name => `Session: ${name}`,
+  logSessionNamed: (session, name) => `session name: ${session} → ${name}`,
   replyHint: '**Reply to this message** to hand the next step to this session.',
   resultProcess: 'Thinking',
   resultOmitted: bytes => `**…… about ${bytes} bytes left out in the middle ……**`,
