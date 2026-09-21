@@ -70,8 +70,9 @@ test('a run starts at the last thing a person said', () => {
   // What came before the last human message is not what they are asking about, and dropping it is
   // also what bounds this store without an arbitrary cap.
   assert.deepEqual(entries, ['第二件事', '第二件事的答案'], 'only the run the person last started')
-  // The earlier run is not gone: a frozen card shows the sequence, so `read` still has both.
-  assert.equal(runs.read('s_1').entries.length, 4, 'while the whole record keeps the earlier run')
+  // And nothing keeps the earlier run: the card that reports it shows one run, so the record does
+  // too — a discarded run is not a loss a reader can act on, and it is not counted as one.
+  assert.equal(runs.readRun('s_1').dropped, 0, 'the run that is gone is not reported as lost')
 })
 
 test('a run holds what a person said, what the model said, and what it ran', () => {
@@ -110,10 +111,12 @@ test('a second turn in one session does not orphan the message that opens it', (
   // turn: the run is never closed, and the message that opened the new turn is orphaned into a run
   // nothing reads — so the reader is shown an answer to a question the record cannot show.
   assert.deepEqual(lines(runs, 's_1'), ['第二件', '第二件的答案'], 'the new run keeps the message that opened it')
-  assert.deepEqual(
-    runs.read('s_1').entries.map(entry => entry.text),
-    ['第一件', '第一件的答案', '第二件', '第二件的答案'],
-    'while the whole record still holds the turn before it',
+  // The run before it is gone rather than kept: one card reports one run, so there is no reader that
+  // would show it, and the record does not pay to hold what nothing reads.
+  assert.equal(
+    lines(runs, 's_1').includes('第一件的答案'),
+    false,
+    'and the turn before it is not kept anywhere',
   )
 })
 
@@ -259,7 +262,7 @@ test('what the bound leaves out is counted, not silently lost', () => {
   }
   runs.observe(session, turnEnded())
 
-  const { dropped } = runs.read('s_1')
+  const { dropped } = runs.readRun('s_1')
   const kept = lines(runs, 's_1')
   // A card that had to leave something out has to be able to say so: a reader who is not told cannot
   // tell a short run from a truncated one.

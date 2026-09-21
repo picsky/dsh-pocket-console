@@ -42,9 +42,6 @@ export const RUN_BUDGET = 8 * 1024
 /** Sessions remembered before the coldest is forgotten. */
 const CAPACITY = 64
 
-/** Finished turns one session keeps, so a frozen card still has the sequence it always had. */
-const TURN_HISTORY = 5
-
 /**
  * What kind of step each tool name is, copied from the Harness's own client
  * (`@deepseek-ai/dsh-client-ui-tool`'s `TOOL_VARIANTS`).
@@ -133,16 +130,6 @@ export function createRunRecord({ messages }) {
       process: [],
       /** What {@link process} currently costs, so appending stays constant-time. */
       processSize: 0,
-      /** Finished runs, oldest first, so a frozen card keeps the sequence it always had. */
-      turns: [],
-      /**
-       * How many entries the bound has dropped from the run being followed.
-       *
-       * Kept apart from `dropped`, which spans everything the record has lost: a result card shows
-       * one run and has to describe that run's loss, while a frozen card shows the whole fold and
-       * has to describe the fold's.
-       */
-      runEntriesLost: 0,
       /** The visible deltas of the step being streamed, which are the only copy until it settles. */
       streamed: [],
       /** What {@link streamed} currently costs. */
@@ -215,7 +202,6 @@ export function createRunRecord({ messages }) {
     // Oldest first, because the end of a run is what a reader is looking for.
     while (record.processSize > RUN_BUDGET && record.process.length > 1) {
       record.dropped += rawBytes(record.process[0].text)
-      record.runEntriesLost += 1
       record.processSize -= rawBytes(record.process[0].text)
       record.process.shift()
     }
@@ -248,18 +234,18 @@ export function createRunRecord({ messages }) {
     note(record, label, 'tool')
   }
 
-  /** Move the run being followed into the finished list and start a fresh one. */
+  /**
+   * Finish the run being followed and start a fresh one.
+   *
+   * What the finished run held is dropped, and deliberately **not** counted as lost: `dropped`
+   * describes the run a card is about, and a card reporting bytes from a run it no longer shows
+   * would be reporting a loss the reader can neither see nor act on. (It used to be accumulated,
+   * because five finished runs were kept for a frozen card to read — a reader that was never
+   * wired to anything, and is gone.)
+   */
   const closeTurn = (record) => {
-    if (record.process.length > 0) {
-      record.turns.push(record.process)
-      while (record.turns.length > TURN_HISTORY) {
-        const gone = record.turns.shift()
-        for (const entry of gone) record.dropped += rawBytes(entry.text)
-      }
-    }
     record.process = []
     record.processSize = 0
-    record.runEntriesLost = 0
     record.streamed = []
     record.streamSize = 0
     record.streamedStep = undefined
@@ -422,63 +408,18 @@ export function createRunRecord({ messages }) {
     /**
      * What the run being followed did, and only that run.
      *
-     * This is the reader the result card uses: it answers "what happened since I last spoke", and
-     * earlier finished runs are a different question that a frozen card asks instead. Keeping the
-     * two readers apart is what makes "the last human message is the anchor" visible in the output
-     * rather than only true of the storage.
+     * The reader the result card uses: it answers "what happened since I last spoke", which is the
+     * same run the activity card folds — so the two cards say the same thing about the same thing.
+     * The boundary is a person speaking, and it is drawn in `observe` below rather than in a reader.
      * @param session - the session id.
-     * @returns the run's entries, whether it has any, and what the bound left out of it.
+     * @returns the run's entries, and how many bytes the bound left out of them.
      */
     readRun(session) {
       const record = records.get(session)
-      if (record === undefined) return { entries: [], dropped: 0, entriesLost: 0 }
+      if (record === undefined) return { entries: [], dropped: 0 }
       return {
         entries: [...record.process],
         dropped: record.dropped,
-        entriesLost: record.runEntriesLost,
-      }
-    },
-
-    /**
-     * One run's entries as text, with adjacent entries of the same kind joined by one newline.
-     *
-     * This is what a card renders, and joining by kind is what keeps a long run from spending an
-     * element per tool line: the platform refuses a card over 200 elements, and a run with a hundred
-     * steps would reach that with the tools alone. Adjacent-only, because a tool line that moved the
-     * reader's cursor backward past prose would read as though the prose came after it.
-     * @param entries - the run's entries, as {@link readRun} returns them.
-     * @returns one string per contiguous group.
-     */
-    mergeByKind(entries) {
-      const groups = []
-      for (const entry of entries) {
-        const last = groups[groups.length - 1]
-        if (last !== undefined && last.kind === entry.kind) {
-          last.text += `\n${entry.text}`
-          continue
-        }
-        groups.push({ kind: entry.kind, text: entry.text })
-      }
-      return groups
-    },
-
-    /**
-     * What one session's record holds, as the entries a frozen card renders.
-     *
-     * The run being followed first, then what earlier finished runs left, because a reader opening
-     * this is asking what happened and the newest answer is the one they mean.
-     * @param session - the session id.
-     * @returns the entries, how many bytes the bound left out, and the turns they came from.
-     */
-    read(session) {
-      const record = records.get(session)
-      if (record === undefined) return { entries: [], dropped: 0, turns: [] }
-      const turns = [...record.turns, record.process].filter(entries => entries.length > 0)
-      return {
-        entries: turns.flatMap(entries => entries),
-        dropped: record.dropped,
-        // The shape a frozen card renders: whole turns, kept apart.
-        turns,
       }
     },
 
