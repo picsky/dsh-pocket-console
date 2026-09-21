@@ -625,15 +625,23 @@ window.__ModuleLoader__.load({
         : h('code', null, enrollment.recipient)
 
       useEffect(() => {
-        const controller = new AbortController()
-        void refresh(controller.signal)
+        // One request at a time: the next tick aborts one that has not answered
+        // yet, so a slow response cannot land out of order and overwrite a newer
+        // snapshot. Each tick needs its own controller — an aborted signal stays
+        // aborted, and a fresh one is what lets the poll keep going.
+        let latest = new AbortController()
+        void refresh(latest.signal)
         // Binding and connecting both settle out of band, so the card polls. An
         // attempt that is still running is asked more often than an idle card, so
         // a verdict arrives in about a second instead of at the next idle tick.
         const settling = enrollment.state === 'starting' || enrollment.state === 'awaiting'
-        const timer = setInterval(() => { void refresh(controller.signal) }, settling ? 700 : 3000)
+        const timer = setInterval(() => {
+          latest.abort()
+          latest = new AbortController()
+          void refresh(latest.signal)
+        }, settling ? 700 : 3000)
         return () => {
-          controller.abort()
+          latest.abort()
           clearInterval(timer)
         }
       }, [refresh, enrollment.state])
