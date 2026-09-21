@@ -177,7 +177,8 @@ function runGroups(entries, dropped, copy, budget, maxGroups) {
  *   rides on a settled card instead of costing a message of its own.
  */
 export function createResultNotifier({
-  ctx, log, channel, settings, messages, workspaces, priority, runRecord, nextTask, now = () => Date.now(),
+  ctx, log, channel, settings, messages, workspaces, priority, runRecord, nextTask,
+  diagnostics = () => {}, now = () => Date.now(),
 }) {
   /** Per-session observation: the newest turn, its last message, and when we last spoke. */
   const tracks = new Map()
@@ -1006,6 +1007,18 @@ export function createResultNotifier({
           body,
           forms: [],
         })).catch(error => { log.warn(messages().logNoticeCardFailed, error) })
+        log.info(messages().logReplyCardRewritten(String(notice.handle)))
+      } else {
+        // Said out loud, because this branch used to be silent and the two ways it can end look
+        // identical from the phone: a reply whose card is not rewritten is a card that still shows a
+        // box the reader has already used. Which half is missing — the session or the card as sent —
+        // is the whole diagnosis, and without this line the only symptom is "nothing changed", with
+        // nothing anywhere to say whether a rewrite was attempted at all.
+        log.warn(messages().logReplyCardNotRewritten({
+          session: notice.session !== undefined,
+          view: sent !== undefined,
+          handle: String(notice.handle ?? ''),
+        }))
       }
     } catch (error) {
       log.warn(messages().logNoticeCardFailed, error)

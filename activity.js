@@ -131,7 +131,8 @@ const TURN_HISTORY = 5
  * @returns installation, the event feed, and what a priority change does to the card.
  */
 export function createActivity({
-  ctx, log, channel, settings, messages, priority, workspaces, now = () => Date.now(),
+  ctx, log, channel, settings, messages, priority, workspaces, diagnostics = () => {},
+  now = () => Date.now(),
 }) {
   /** One record per session being shown: what it is doing, and the message its card lives in. */
   const activities = new Map()
@@ -585,6 +586,7 @@ export function createActivity({
         // a run, and taking it away would take away the answer to "what was it doing" — and one
         // that was never sent is not sent now, because a message the desk is not expecting is
         // exactly the notification this plugin does not send.
+        diagnostics?.(`活动卡：跳过「${record.session}」——桌面持有优先侧，这一轮不发卡。`)
         record.dirty = false
         continue
       }
@@ -595,6 +597,7 @@ export function createActivity({
         // what stops it: a channel that can carry one keeps the platform from accepting the same
         // card twice, and a channel that cannot is kept from a second *attempt* only by the
         // answer itself, which is why a delivered id is never sent again.
+        diagnostics?.(`活动卡：为「${record.session}」创建（尚无消息 id）。`)
         record.sending = true
         record.uuid ??= randomUUID()
         void writeCard(record, view => channel.deliver(view, { uuid: record.uuid }))

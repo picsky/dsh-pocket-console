@@ -89,6 +89,25 @@ stateDiagram-v2
 | `resultNotifyCooldownSeconds` | `0` | Shortest gap between two result notices for one session |
 | `mirrorTtlSeconds` | `60` | How long a phone decision may still close the desktop composer |
 | `locale` | `zh` | Language of the cards sent to the phone (`zh` or `en`) |
+| `debug` | `off` | ★ `on` writes the plugin's decision about every card to the deployment log — why it was sent, edited, or skipped |
+
+`debug` is the switch to reach for when a card does something you cannot explain.
+A card that is **not** rewritten and a card whose rewrite **failed** look identical on the
+phone, and the branch that skips the rewrite is silent by design, so without this the only
+symptom is "nothing changed". With it on, each decision is named.
+
+**Where the lines go:** to the deployment logger *and* to a file of its own —
+`$DSH_HOME/pocket-console-debug.log`, i.e. `~/.dsh/pocket-console-debug.log` unless
+`DSH_HOME` says otherwise. The file is there because the logger is not the plugin's to
+configure: Cordis lets an exporter set a per-name level and defaults to `info`, so
+`log.debug` reaches a terminal only when the **host** was started to show debug. A switch
+documented as "turn this on to see why" that showed nothing on a default deployment would
+teach you the plugin has nothing to say, which is worse than having no switch at all.
+
+So: turn `debug` on, reproduce, then read `~/.dsh/pocket-console-debug.log`. Its first lines
+name the mode at startup; each later line names one decision — a card created, a card edited,
+a card **skipped and why**, a rewrite that did not happen. A line that reports a *failure*
+is still a warning and visible without any of this.
 
 The rest are deployment-level: they exist so a deployment can retune the core, and a
 person never has to read about them.

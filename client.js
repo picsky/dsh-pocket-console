@@ -38,6 +38,7 @@ window.__ModuleLoader__.load({
       { field: 'delaySeconds', kind: 'number' },
       { field: 'titlePrefix', kind: 'text' },
       { field: 'resultNotify', kind: 'select', options: ['off', 'idle'], labels: { off: 'resultNotifyOff', idle: 'resultNotifyIdle' } },
+      { field: 'debug', kind: 'select', options: ['off', 'on'], labels: { off: 'debugOff', on: 'debugOn' } },
     ]
 
     /** The colour each enrollment state reports itself in. */
@@ -118,6 +119,10 @@ window.__ModuleLoader__.load({
         resultNotifyHint: '会话停下来后，把本轮结果发到手机，并附上一个可以直接回复的输入框。',
         resultNotifyOff: '关闭',
         resultNotifyIdle: '空闲时通知',
+        debug: '调试模式',
+        debugHint: '把插件对每张卡的决定写进部署日志：为什么发、为什么改、为什么跳过。排查"卡片没变化"时打开它。它只控制插件说什么；日志本身还要按 debug 级别运行才能看到。',
+        debugOff: '关闭',
+        debugOn: '开启',
         overridden: '已覆盖',
         reset: '恢复默认',
         invalidNumber: '请填一个数字，留空表示恢复默认。',
@@ -190,6 +195,10 @@ window.__ModuleLoader__.load({
         resultNotifyHint: 'After a session stops, send the turn result to the phone with a box to reply in.',
         resultNotifyOff: 'Off',
         resultNotifyIdle: 'When idle',
+        debug: 'Debug mode',
+        debugHint: 'Writes the plugin\'s decision about every card to the deployment log: why it was sent, why it was edited, why it was skipped. Turn it on to investigate "the card did not change". It controls what the plugin says; the log itself still has to run at the debug level to show it.',
+        debugOff: 'Off',
+        debugOn: 'On',
         overridden: 'Overridden',
         reset: 'Reset',
         invalidNumber: 'Enter a number, or leave it blank to inherit the default.',
