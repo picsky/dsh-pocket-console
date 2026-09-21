@@ -60,7 +60,7 @@ const TRACK_CAPACITY = 256
  * a person or the loop has already decided on, and a card asking "what now?" a second after somebody
  * pressed stop is noise. `blocked` is left out for the same reason.
  */
-const UNFINISHED_REASONS = new Set(['error'])
+const UNFINISHED_REASONS = new Set(['error', 'max-tokens'])
 
 /** Bytes of UTF-8, which is what a size the platform counts and a size this code counts agree on. */
 const rawBytes = (value) => Buffer.byteLength(String(value ?? ''), 'utf8')
