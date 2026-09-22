@@ -18,10 +18,10 @@ jobs:
     name: publish to npm
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      # Reading the tagged commit's check runs is how this job refuses a commit CI
-      # never judged. Naming any permission sets the others to none, so this one has
-      # to be listed even though it is only read.
+      # Creating the GitHub Release is what needs this; the check-run reads and the
+      # npm credential are the other two. Naming any permission sets the others to
+      # none, so all three have to be listed.
+      contents: write
       checks: read
       # What npm exchanges for the publish credential. Without it the registry
       # asks for a token this workflow deliberately does not have.
@@ -225,3 +225,28 @@ jobs:
           }
           console.log('attestation present:', JSON.stringify(attestations).slice(0, 160));
           " "$meta"
+      # The npm half is done and verified; the GitHub Release is the other half of
+      # "a release", and it must not be left to a maintainer's memory the way it was
+      # from 0.8.0 to 0.9.2 (the tags existed, the Releases page carried only the
+      # original pre-release). The notes are the tagged tree's own CHANGELOG.md
+      # section, so the release never drifts from what its changelog says. A tag that
+      # already has a release is only edited, so re-running this job is safe.
+      - name: Create the GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          notes=$(node -e '
+            const fs = require("fs");
+            const version = process.argv[1];
+            const changelog = fs.readFileSync("CHANGELOG.md", "utf8");
+            const match = changelog.match(new RegExp("^## " + version + "[\\s\\S]*?(?=^## )", "m"));
+            process.stdout.write(match ? match[0].trim() : "See CHANGELOG.md for what changed in this release.");
+          ' "$version")
+          if gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "v$version" --repo "$GITHUB_REPOSITORY" \
+              --title "Release $version" --notes "$notes"
+          else
+            gh release create "v$version" --repo "$GITHUB_REPOSITORY" \
+              --title "Release $version" --notes "$notes"
+          fi

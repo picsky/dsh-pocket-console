@@ -115,7 +115,7 @@ release:
 | Check | Result |
 |---|---|
 | `npm run check:parity` | passes — names, defaults, published links, wired visuals |
-| `npm test` | 250/250, no network and no credentials |
+| `npm test` | 275/275, no network and no credentials |
 | `npm pack --dry-run` | docs present, `internal/` and `assets/` absent, transport bundled |
 | Action pins (`actions/checkout@v6`, `actions/setup-node@v6`, `pnpm/action-setup@v6`) | all three tags exist |
 | CI matrix vs `engines` | `[22, 24]` against `^22.19.0 \|\| >=24.0.0` — consistent |
@@ -287,7 +287,7 @@ against the platform before anything connects.
 **What is not verified yet.** The one-scan flow, the long connection, card delivery, and
 card actions arriving back were verified against a live tenant. The card-action field
 path, the one-option-per-row layout, and typed answers shipped after that pass — the
-suite covers them (250 cases, no network needed), and a phone still has to confirm them.
+suite covers them (275 cases, no network needed), and a phone still has to confirm them.
 Both branches of the credential check were observed live.
 
 This is an **unofficial** community plugin, not affiliated with or endorsed by DeepSeek.
@@ -323,7 +323,7 @@ cards.
   three scopes, one event, one callback.
 - **Outbound only:** the long connection needs no public IP or tunnel.
 - **A real DSH plugin:** registers on the documented waterfalls with `prepend: true` and
-  patches nothing. 25 decision records, 250 tests, and a real-composition e2e job in CI.
+  patches nothing. 28 decision records, 275 tests, and a real-composition e2e job in CI.
 
 Install: `dsh plugin --profile web add dsh-pocket-console`
 
@@ -378,7 +378,7 @@ dsh plugin --profile web add dsh-pocket-console
 
 **还没验证到的部分（如实说明）**：一键创建、长连接、卡片投递、卡片回调回到 Host
 都已在真实租户上跑通；卡片回调的字段路径、选项整行、自由文本回答是在那次验证**之后**改的，
-测试覆盖了它们（250 个用例，不需要网络），但**还需要真机确认一次**。
+测试覆盖了它们（275 个用例，不需要网络），但**还需要真机确认一次**。
 凭据校验的两条分支都已在真实平台上观察过。
 
 非官方社区插件，与 DeepSeek 无隶属关系，MIT。
@@ -459,7 +459,7 @@ connection, so there is no public IP, domain, or tunnel.
 
 It's a real DSH plugin rather than a wrapper — a `dsh.bundle` profile layer, no patching
 or forking — with a documented channel contract so another transport is a new file.
-25 decision records, 250 tests that need no network, and an e2e job that installs the
+28 decision records, 275 tests that need no network, and an e2e job that installs the
 packed tarball into a real `dsh web` to prove it activates.
 
 Not everything is phone-verified yet: the one-scan flow, long connection, delivery, and
