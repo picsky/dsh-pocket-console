@@ -19,7 +19,7 @@ new reader meets first, on GitHub and on the npm page — and the English one mo
 reader meets it: approvals, `ask_user_question` questions, a finished run's result to
 reply to, the next task it can hand you, and the run's live progress while the phone
 holds the person — instead of only the two waterfall moments. The npm and GitHub
-descriptions follow the same wording. No plugin behaviour changed.
+descriptions are now in Chinese, with the same scope. No plugin behaviour changed.
 
 ## 0.9.2
 
