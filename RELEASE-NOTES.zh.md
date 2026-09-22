@@ -1,8 +1,7 @@
 # 发布说明 · 中文
 
-每个版本的 GitHub Release 正文取本文件对应版本的小节（默认显示中文），
-正文顶部有一个 **English** 链接，指向由 `CHANGELOG.md` 该版本小节生成的
-`RELEASE-NOTES.en.md`（随 Release 附带）。
+每个版本的 GitHub Release 正文由两部分拼成，**中文在前、英文在后**：先取本文件对应版本
+的小节（中文），再接 `CHANGELOG.md` 该版本的小节（英文）。
 
 维护约定：每次发布在 `CHANGELOG.md` 写完英文条目后，为同一版本在这里补一段中文发布说明，
 两个文件都要有对应版本的小节；每条改动末尾标注对应的 PR/issue 编号（#NN），

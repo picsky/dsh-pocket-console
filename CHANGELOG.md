@@ -7,10 +7,9 @@ published says so, because its work ships with the next release that is.
 The project is pre-1.0: a minor bump can carry a behaviour change, and one is called
 out when it does.
 
-A version's GitHub Release is assembled from two sources: the Chinese body is that
-version's section of `RELEASE-NOTES.zh.md` (the release page's default view), and the
-English version is this file's section for that version, attached to the release as
-`RELEASE-NOTES.en.md` and linked from the top of the body.
+A version's GitHub Release body is assembled from two sources, Chinese first: the
+version's section of `RELEASE-NOTES.zh.md`, then this file's section for that version
+as the English half.
 
 ## 0.9.2
 
