@@ -7,7 +7,7 @@ introduction; this is where to go once you have a specific job.
 
 | Job | Read | Also in Chinese |
 |---|---|---|
-| **Run it** | [Install and uninstall](../README.md#install-and-uninstall) — install, bind, first approval | ✅ |
+| **Run it** | [Install and uninstall](../README.en.md#install-and-uninstall) — install, bind, first approval | ✅ |
 | **Change a setting** | [configuration.md](configuration.md) — every field, its default, and which ones the Settings card writes at runtime | [中文](zh-CN/configuration.md) |
 | **Fix something** | [troubleshooting.md](troubleshooting.md) — installing, binding, and cards that do not arrive, in the order you meet them | [中文](zh-CN/troubleshooting.md) |
 | **Work on the code** | [development.md](development.md) — the suite, the real-composition check, and debugging a live deployment | — |
@@ -22,8 +22,8 @@ introduction; this is where to go once you have a specific job.
 
 Three pages are paired with a Chinese counterpart, and both halves are updated together:
 [configuration](configuration.md), [troubleshooting](troubleshooting.md), and the
-[channel contract](../providers/README.md). The [Chinese README](../README.zh-CN.md) is a
-fourth pair, with [the English one](../README.md). Everything else here — this page,
+[channel contract](../providers/README.md). The [Chinese README](../README.md) is a
+fourth pair, with [the English one](../README.en.md). Everything else here — this page,
 `development`, `releasing`, the decision records — is English only, on the same reasoning
 that the source, the commit messages, and the issue tracker are: one copy to keep true.
 

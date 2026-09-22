@@ -11,6 +11,16 @@ A version's GitHub Release body is assembled from two sources, Chinese first: th
 version's section of `RELEASE-NOTES.zh.md`, then this file's section for that version
 as the English half.
 
+## Unreleased
+
+**The README now leads in Chinese.** `README.md` is the Chinese README — the language a
+new reader meets first, on GitHub and on the npm page — and the English one moved to
+`README.en.md`. Both introductions now describe the plugin's full scope in the order a
+reader meets it: approvals, `ask_user_question` questions, a finished run's result to
+reply to, the next task it can hand you, and the run's live progress while the phone
+holds the person — instead of only the two waterfall moments. The npm and GitHub
+descriptions follow the same wording. No plugin behaviour changed.
+
 ## 0.9.2
 
 **Reliability: a card that fails to go out is retried, and a card that was accepted stops being

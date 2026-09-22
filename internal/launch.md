@@ -78,10 +78,10 @@ Use the phone card, not a logo.
 
 ## 2. Repository metadata (do this before the GIF is even finished)
 
-**Description** (currently the README's first line; make the entity searchable first):
+**Description** (make the entity searchable first; this is what GitHub and npm show):
 
 ```
-DeepSeek Harness (DSH) plugin — approve tool calls and answer ask_user_question from your phone via Feishu/Lark cards. Desktop first, one-scan setup, no public IP.
+Don't hand over the whole machine, just the decisions and the next step: DeepSeek Harness approvals, ask_user_question prompts and result replies reach your phone as Feishu cards, desktop first, outbound only — with live run progress and the next task one tap away.
 ```
 
 **Topics.** `dsh-plugin` is the one that matters: there is no official registry, and
@@ -156,15 +156,16 @@ first.
 Title:
 
 ```
-[Show and tell] dsh-pocket-console — approve tool calls and answer ask_user_question from your phone (Feishu cards, desktop first, one-scan setup)
+DSH | dsh-pocket-console | 桌面优先的飞书审批/提问卡——人不在，决策也不卡
 ```
 
 Body: the problem in two sentences, the GIF, the one-line install, then — honestly —
-what makes this one different from the other Feishu bridges: desktop-first with a
-configurable head start and desktop mirroring, full `ask_user_question` forms, result
-notices you can reply to, three scopes instead of a broad template, and a real-
-composition e2e job in CI for an alpha that ships weekly. Disclose "unofficial" and
-repeat the README's caveats rather than smoothing them out.
+what makes this one different from the other Feishu bridges: approvals, questions,
+result replies, the next task from the phone, live run progress — in that order —
+plus desktop-first with a configurable head start and desktop mirroring, three scopes
+instead of a broad template, and a real-composition e2e job in CI for an alpha that
+ships weekly. Disclose "unofficial" and repeat the README's caveats rather than
+smoothing them out.
 
 ### Wave 2 — registries and lists (days 1–7)
 
@@ -260,16 +261,22 @@ dsh plugin --profile web add dsh-pocket-console
 
 **What it does that is less usual**
 
-- **Desktop first, and the desktop follows.** The phone is the fallback, not the default.
-  When you do answer on the phone, the page you left open settles the same way a click
-  there would — the composer closes instead of waiting on a decision that already
-  happened.
-- **Both seams, not just approvals.** `ask_user_question` returns every answer at once,
-  so the card lays all the questions out with progress, multi-select, and a typed answer
+- **Approvals.** A tool call that needs the go-ahead arrives as a card; one tap approves
+  (single-use, `allowed-once`) or rejects.
+- **Questions, not only approvals.** `ask_user_question` returns every answer at once, so
+  the card lays all the questions out with progress, multi-select, and a typed answer
   beside the options, rather than turning "answer three questions" into three waits.
-- **A finished run can hand you the next step.** With `resultNotify: idle`, a session
-  that goes quiet sends its answer with a box to reply in; what you type continues that
-  session as your own message.
+- **The result comes back, with a box to reply in.** With `resultNotify: idle`, a session
+  that goes quiet sends its answer with a reply box; what you type continues that session
+  as your own message.
+- **The next task, from the phone.** A finished run can hand you the next step: the
+  result card carries a form that starts a new session in the same workspace.
+- **The run, live.** While the phone holds the person, the run's progress shows on a card
+  that is edited in place — status, turn and step, the tool it is waiting on.
+- **Desktop first, and the desktop follows.** The phone is the fallback, not the default;
+  a card only goes out after the desktop has had `delaySeconds` with no answer. When you
+  do answer on the phone, the page you left open settles the same way a click there
+  would — the composer closes instead of waiting on a decision that already happened.
 - **Engineering, not a wrapper.** It is a `dsh.bundle` profile layer registering on the
   two documented answerer waterfalls with `prepend: true` — nothing in DSH is patched or
   forked. The channel contract is documented, so a transport that is not Feishu is a new
@@ -309,16 +316,21 @@ Add picsky/dsh-pocket-console (approval) — Feishu approval and question escala
 **Body**
 
 ```markdown
-**dsh-pocket-console** forwards the two moments that stall an unattended run —
-`approval/request` and `user-questions/request` — to a phone as Feishu interactive
-cards.
+**dsh-pocket-console** forwards what stalls an unattended run — `approval/request`
+and `user-questions/request` — and what comes after it, to a phone as Feishu
+interactive cards, desktop first.
 
-- **Desktop first:** the desktop GUI answers first; the phone is reached after
-  `delaySeconds` with no answer, and a phone answer is mirrored onto the open page's
-  composer.
-- **Both seams:** questions answered all-at-once, with multi-select and typed answers,
-  not only approvals.
-- **Result notices:** a stopped session's answer arrives with a box to reply in.
+- **Approvals:** one tap approves (single-use) or rejects; the desktop answers first,
+  the phone is reached after `delaySeconds` with no answer, and a phone answer is
+  mirrored onto the open page's composer.
+- **Questions:** answered all-at-once, with multi-select and typed answers, not only
+  approvals.
+- **Results you can reply to:** a stopped session's answer arrives with a box to reply
+  in, and the reply continues the session as your own message.
+- **Next task:** a finished run can start the next session from the phone, in the same
+  workspace.
+- **Live progress:** while the phone holds the person, the run's status, turn and step
+  show on a card that is edited in place.
 - **One-scan setup:** the Settings card's QR code creates and configures the Feishu app;
   three scopes, one event, one callback.
 - **Outbound only:** the long connection needs no public IP or tunnel.
@@ -358,14 +370,19 @@ dsh plugin --profile web add dsh-pocket-console
 
 **几个不太一样的点**
 
+- **审批。** 需要拍板的工具调用以卡片送达，点一下批准（一次性，`allowed-once`）或拒绝。
+- **提问，不只审批。** `ask_user_question` 一次收一组问题、一次返回全部答案，
+  所以卡片把题目全部铺开，带进度、多选，以及选项旁边的输入框，
+  而不是把"回答三个问题"在小屏幕上变成三次等待。
+- **结果带着回复框回来。** 打开 `resultNotify: idle`，会话安静下来后
+  会把结果连同一个输入框发给你，你写的内容会作为**你自己的消息**接着这个会话跑。
+- **下一段任务，从手机开。** 跑完的一段会在结果卡上带一个表单，
+  在同一个工作区里开一个新会话，不需要另一张卡。
+- **执行过程实时可见。** 手机持有时，run 的状态、回合、步骤、正在等的工具
+  都在一张原地更新的卡上。
 - **桌面优先，而且桌面会跟着走。** 手机是兜底，不是默认。你在手机上答完之后，
   留在那儿的页面会用和"在桌面上点一下"完全相同的方式结算——面板关掉，
   而不是继续等一个已经做过的决定。
-- **两条 seam 都做，不只是审批。** `ask_user_question` 一次收一组问题、一次返回全部答案，
-  所以卡片把题目全部铺开，带进度、多选，以及选项旁边的输入框，
-  而不是把"回答三个问题"在小屏幕上变成三次等待。
-- **跑完的一轮可以把下一步交给你。** 打开 `resultNotify: idle`，会话安静下来后
-  会把结果连同一个输入框发给你，你写的内容会作为**你自己的消息**接着这个会话跑。
 - **是真正的 DSH 插件，不是外壳。** 以 `dsh.bundle` profile 层分发，
   在两条有文档的 answerer waterfall 上以 `prepend: true` 注册，**没有 patch 或 fork DSH 任何代码**。
   通道契约是文档化的，所以接飞书之外的传输是**新增一个文件**，不是重写。
@@ -400,13 +417,15 @@ Shorter and drier than the LINUX DO post; that board punishes marketing tone.
 
 ````markdown
 DSH（DeepSeek Harness）跑长任务时，`approval/request` 和 `user-questions/request`
-都没有超时，所以人一走开，这一轮就停住了。写了个插件把这两个时刻推到飞书卡片上。
+都没有超时，所以人一走开，这一轮就停住了。写了个插件把这类时刻——以及一轮结束后的
+结果——推到飞书卡片上：审批、提问、回复结果、开下一段任务，手机持有时还能实时看执行过程。
 
 桌面上先答——默认给桌面 120 秒，没人答才发到手机；手机上点一下按钮，Agent 继续跑。
 反过来的方向也做了：你在手机上答完之后，桌面那个还开着的页面会自己结算，不用再点一次。
 
 提问是整组铺开的：进度、多选、选项旁边的自由输入，一次提交全部答案。
-另外可以打开"结果通知"，会话停下来后把结果发到手机，附一个输入框，写的内容直接接着那个会话跑。
+另外可以打开"结果通知"，会话停下来后把结果发到手机，附一个输入框，写的内容直接接着那个会话跑；
+跑完的一段还能从手机直接开下一个任务。
 
 安装：
 
@@ -444,6 +463,10 @@ behind it would never run) and calls `next()` first, then races a timer. The des
 keeps answering exactly as before; after a configurable head start the same request also
 goes out as a Feishu interactive card.
 
+The phone side covers the whole loop: approvals, `ask_user_question` questions, a
+finished run's result with a box to reply in, the next task it can hand you — and, while
+the phone holds the person, the run's live progress on a card that is edited in place.
+
 Two design decisions worth calling out:
 
 - The phone is a fallback, not the default. The interesting case isn't "I'm away", it's
@@ -479,8 +502,8 @@ Short, personal, no template smell. Send three lines and a link, not a press rel
 你好，
 
 看到你整理过 DSH 插件清单，推荐一个我自己写的：
-dsh-pocket-console —— 把工具调用审批和 ask_user_question 推到飞书卡片，
-桌面优先、手机兜底，手机答完桌面会自己结算。
+dsh-pocket-console —— 把工具调用审批、提问、结果回复和下一段任务推到飞书卡片，
+桌面优先、手机兜底，手机答完桌面会自己结算，手机持有时还能实时看执行过程。
 
 装法一行：dsh plugin --profile web add dsh-pocket-console
 仓库：https://github.com/picsky/dsh-pocket-console（MIT，非官方）
@@ -493,9 +516,10 @@ English equivalent:
 
 ```markdown
 Hi — I saw your roundup of DSH plugins and wanted to put one in front of you:
-dsh-pocket-console forwards tool-call approvals and ask_user_question prompts to Feishu
-cards, desktop-first with the phone as fallback, and the desktop composer settles itself
-after a phone answer.
+dsh-pocket-console forwards approvals, ask_user_question prompts, result replies, and
+the next task to Feishu cards, desktop-first with the phone as fallback, the desktop
+composer settles itself after a phone answer, and the run's progress is live on a card
+while the phone holds you.
 
 Install is one line: dsh plugin --profile web add dsh-pocket-console
 Repo: https://github.com/picsky/dsh-pocket-console (MIT, unofficial)
