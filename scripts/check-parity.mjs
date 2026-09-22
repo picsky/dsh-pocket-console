@@ -244,10 +244,10 @@ for (const [label, rows] of tables) {
 /** Each README's example, and the bundle patch's. */
 const reference = read('docs/configuration.md')
 const englishExample = readmeExample(reference, 'docs/configuration.md')
-const chineseExample = readmeExample(chinese, 'README.zh-CN.md')
+const chineseExample = readmeExample(chinese, 'docs/zh-CN/configuration.md')
 const patch = patchExampleFields(read('cordis.patch.yml'))
 
-for (const [label, entries] of [['docs/configuration.md example', englishExample], ['README.zh-CN.md example', chineseExample]]) {
+for (const [label, entries] of [['docs/configuration.md example', englishExample], ['docs/zh-CN/configuration.md example', chineseExample]]) {
   for (const entry of entries) {
     // `channelConfig` is the channel's own object, not a Config key; `config:`
     // is the row's own key in the layer, not a setting.
@@ -276,7 +276,7 @@ for (const name of sectionNames) {
 sameDefaults(config, [
   ['cordis.patch.yml example', patch],
   ['docs/configuration.md example', englishExample],
-  ['README.zh-CN.md example', chineseExample],
+  ['docs/zh-CN/configuration.md example', chineseExample],
   ['docs/configuration.md table', tables[0][1]],
   ['docs/zh-CN/configuration.md table', tables[1][1]],
 ])
@@ -301,7 +301,7 @@ function checkPublishedLinks(manifest, root) {
   // 404 case above. An internal document may cite anything, including a decision
   // record that ships — what it must not do is become the reason a published file
   // exists, which is why it lives outside `docs/` and is never in `files`.
-  const documents = ['README.md', 'README.zh-CN.md', 'SECURITY.md', 'CHANGELOG.md', 'CONTRIBUTING.md']
+  const documents = ['README.md', 'README.en.md', 'SECURITY.md', 'CHANGELOG.md', 'CONTRIBUTING.md']
   // The channel contract is published as well, and it is the one published document outside
   // `docs/`: a link from it to something the tarball does not carry 404s on the registry
   // exactly the way a README's does.
@@ -356,7 +356,7 @@ checkPublishedLinks(JSON.parse(read('package.json')), root)
  * @param root - the repository root.
  */
 function checkReadmeVisuals(root) {
-  for (const document of ['README.md', 'README.zh-CN.md']) {
+  for (const document of ['README.md', 'README.en.md']) {
     const source = readFileSync(resolve(root, document), 'utf8')
     for (const match of source.matchAll(/<img[^>]*\ssrc="([^"]+)"/g)) {
       const target = match[1]
@@ -410,7 +410,7 @@ function checkDocumentedBudgets(root) {
 
   // The same sentence appears in both READMEs, so both are checked: they are written independently
   // and one of them drifting is exactly how the two languages start telling different stories.
-  for (const document of ['README.md', 'README.zh-CN.md']) {
+  for (const document of ['README.md', 'README.en.md']) {
     const text = readFileSync(resolve(root, document), 'utf8')
     const stated = new RegExp(`held under \\*\\*${kb} KB|限制在 \\*\\*${kb} KB`)
     if (!stated.test(text)) {

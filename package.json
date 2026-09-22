@@ -1,7 +1,7 @@
 {
   "name": "dsh-pocket-console",
   "version": "0.9.2",
-  "description": "Don't hand over the whole machine, just the decision blocking it: unattended DeepSeek Harness approvals and ask_user_question prompts reach your phone as Feishu cards, desktop first, outbound only.",
+  "description": "Don't hand over the whole machine, just the decisions and the next step: DeepSeek Harness approvals, ask_user_question prompts and result replies reach your phone as Feishu cards, desktop first, outbound only — with live run progress and the next task one tap away.",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -33,7 +33,7 @@
     "providers/README.md",
     "cordis.patch.yml",
     "README.md",
-    "README.zh-CN.md",
+    "README.en.md",
     "CHANGELOG.md",
     "SECURITY.md",
     "CONTRIBUTING.md",

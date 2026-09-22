@@ -179,7 +179,7 @@ Two consequences worth knowing:
   committed shows a broken image on both surfaces — which is why the GIF's snippet stays
   commented until the GIF exists.
 
-Use the same absolute form in **both** `README.md` and `README.zh-CN.md`, in the same
+Use the same absolute form in **both** `README.md` (Chinese) and `README.en.md`, in the same
 places, so the two languages do not drift.
 
 ## 7. The diagrams
@@ -239,7 +239,7 @@ entry points show different screenshots is two projects.
 | the mermaid block | not shipped — add it under **For developers** | same place |
 
 A capture is **language-bound**: it shows whatever the deployment was running in. So a
-Chinese deployment's screenshots belong in `README.zh-CN.md` and a Chinese card in the
+Chinese deployment's screenshots belong in `README.md` and a Chinese card in the
 English README is the same mistake as a Chinese diagram there. Two ways out, in order of
 preference:
 

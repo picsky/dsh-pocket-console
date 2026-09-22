@@ -179,15 +179,16 @@ check:parity` refuses a *published* document that links into it: this file is pu
 so it names the path rather than linking it. That boundary is the point — a note a
 reader of the package needs belongs in `docs/`, not there.
 
-**Docs in both languages, or in one with a reason.** `README.md` is English and the
-primary document; `README.zh-CN.md` is its counterpart, and a change to one belongs in the
-other. Three reference pages are also paired: `docs/configuration.md` with
+**Docs in both languages, or in one with a reason.** `README.md` is Chinese and the
+primary document — the language a new reader meets first, on GitHub and on the npm page;
+`README.en.md` is its counterpart, and a change to one belongs in the other. Three
+reference pages are also paired: `docs/configuration.md` with
 `docs/zh-CN/configuration.md`, `docs/troubleshooting.md` with
 `docs/zh-CN/troubleshooting.md`, and the channel contract — `providers/README.md`, which is
 English — with `docs/zh-CN/providers.md`. Everything else — the decision records,
 `docs/development.md`, `docs/releasing.md`, `SECURITY.md`, `CHANGELOG.md`, this file — is
 English only, on the same reasoning that the source, the commit messages, and the issue
-tracker are: one copy to keep true. `README.zh-CN.md` says so at the top, and a request
+tracker are: one copy to keep true. `README.md` says so at the top, and a request
 for another translated page is a worthwhile issue rather than a silent gap.
 
 **A new setting touches six places**, and `npm run check:parity` refuses to pass

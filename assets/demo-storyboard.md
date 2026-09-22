@@ -151,5 +151,5 @@ ffmpeg -i demo.mp4 -vf "fps=20,scale=1280:-1:flags=lanczos" -c:v libwebp -lossle
 - [ ] the demo tenant is not the one that binds your real account
 - [ ] file is ≤ 2.5 MB and ≤ 194 frames
 - [ ] plays and loops in the browser at 100 % zoom without scrolling
-- [ ] the same GIF is referenced from `README.md` and `README.zh-CN.md` (one file,
+- [ ] the same GIF is referenced from `README.md` and `README.en.md` (one file,
       two READMEs — do not make a Chinese and an English recording)
