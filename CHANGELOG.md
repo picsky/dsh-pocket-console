@@ -19,7 +19,8 @@ sent twice.** Before this, an approval, a question, or a result hit the platform
 that was not a size refusal sent it back to the desk (approvals) or dropped it with a log line
 (results). A transient blip at the moment a card was due therefore meant the person who stepped
 away got no card at all. These now retry under one idempotency key, the way the activity card
-already did.
+already did. (This batch went straight onto main in commit 45136f6 — no pull request or issue
+tracks it.)
 
 ### Changed
 
@@ -82,7 +83,7 @@ should arrive unread.
   longer be dropped from the run's own fold. **The answer you replied against no longer comes back on
   the phone** — it stays on the desk, and in the result card the previous run reported itself on
   (decision 0027). The dead five-turn reader in `run-record.js` goes with it, which also stops the
-  result card's "省略 N 字节" from counting whole discarded runs.
+  result card's "省略 N 字节" from counting whole discarded runs. (#65)
 
 ### Fixed
 
@@ -97,7 +98,7 @@ should arrive unread.
   `"subagent"`. A delegate gets no activity card, no result card, and is not taken on when the phone
   changes hands; the session that asked for the work is still reported as before. A **fork** is not a
   delegate and keeps its card (`delegated.js`, decision 0026). The troubleshooting docs had already
-  listed delegated sessions among the reasons nothing arrives — the code simply never implemented it.
+  listed delegated sessions among the reasons nothing arrives — the code simply never implemented it. (#63)
 - **Every card names its session, including the sessions that already had one.** The small line came
   from the firehose's `session/title` event, and that event is only appended when a session gets its
   first fallback title, when a generator finishes, or when somebody renames it — **none of which
@@ -106,7 +107,7 @@ should arrive unread.
   failing: the reader saw exactly what they saw before it shipped. The name is now read once from the
   harness's title service the first time a card asks, and only while nothing has been heard on the
   firehose — so an event, including a rename, still wins, and a deployment without that service
-  behaves as it did before (`session-names.js`).
+  behaves as it did before (`session-names.js`). (#61)
 
 ## 0.9.0
 
@@ -126,7 +127,7 @@ carries behaviour changes, and each is called out as one.
   accepted as `{ tag, content }` and refused as a bare string, it does not wrap, and `PATCH` moves it,
   which is what lets a name that arrives late appear on a live card. A card whose session has no name
   yet renders exactly as it did before this field existed — no empty line (`session-names.js`,
-  `providers/feishu.js`, [0025](docs/decisions/0025-the-subtitle-names-the-session.md)).
+  `providers/feishu.js`, [0025](docs/decisions/0025-the-subtitle-names-the-session.md)). (#56)
 
 - **The result card now carries what the run did, not only the last thing said.** A turn that ends
   with a couple of confirmations ends on a confirmation, so the plan being confirmed was nowhere on
@@ -136,7 +137,7 @@ carries behaviour changes, and each is called out as one.
   fit, whole kinds of content are given up in the order a reader would choose, and whatever goes is
   named with a byte count — the tool lines merged into one, then dropped, then the person's own
   message, and only then the oldest prose, because the newest output is what a decision rests on
-  (`results.js`, [0017](docs/decisions/0017-the-result-card-carries-the-run.md)).
+  (`results.js`, [0017](docs/decisions/0017-the-result-card-carries-the-run.md)). (#29)
 
 - **What one run did is recorded on its own account, whether or not a card was ever sent for it.**
   The result card could only ever show the model's **last** message, and a turn that ends with a
@@ -144,7 +145,7 @@ carries behaviour changes, and each is called out as one.
   phone. The record a frozen card folds was held on the activity card's record, which exists only
   while the phone holds the person, so a run at the desk had no record at all. A run is now recorded
   per session from the last thing a person said, in `run-record.js`, independently of any card, and
-  what its bound leaves out is counted rather than silently lost (`run-record.js`, `index.js`).
+  what its bound leaves out is counted rather than silently lost (`run-record.js`, `index.js`). (#28)
 
 ### Changed
 
@@ -156,7 +157,7 @@ carries behaviour changes, and each is called out as one.
   never welded into the progress that replaced it. The message count per run does not change — two for
   a session's first turn, one for every turn after it — because the reply's card *is* the next turn's
   card (`activity.js`, `results.js`,
-  [0021](docs/decisions/0021-the-card-you-pressed-is-the-one-that-moves.md)).
+  [0021](docs/decisions/0021-the-card-you-pressed-is-the-one-that-moves.md)). (#48)
 
 - **A reply that arrives while the session is working goes into that turn.** It used to be queued as a
   turn of its own, and on the real machine a queued instruction was **lost**: the notice was consumed,
@@ -165,7 +166,7 @@ carries behaviour changes, and each is called out as one.
   what the desktop composer already does; a session that is idle still gets a turn of its own. Which of
   the two happened is named in the deployment log, because "did my sentence arrive" was otherwise
   unanswerable (`results.js`,
-  [0023](docs/decisions/0023-a-reply-into-a-running-session-steers.md)).
+  [0023](docs/decisions/0023-a-reply-into-a-running-session-steers.md)). (#52)
 
 - **A run that stopped short still gets a card the reader can answer.** Two conditions had to hold for
   a result to reach the phone: the turn had to end as `completed`, and its last message had to be an
@@ -176,7 +177,7 @@ carries behaviour changes, and each is called out as one.
   now notify with a reply box whatever they ended on; the face says which of the two it was, or
   whatever the run managed to say before it stopped. A stop somebody already asked for (`aborted`)
   still sends nothing (`results.js`,
-  [0024](docs/decisions/0024-an-unfinished-run-still-gets-a-card.md)).
+  [0024](docs/decisions/0024-an-unfinished-run-still-gets-a-card.md)). (#54)
 
 - **The fold is about one turn, and it marks what the person said.** The fold under a card was the
   session's history — up to five finished turns — which, once a reply started reusing the card the
@@ -187,7 +188,7 @@ carries behaviour changes, and each is called out as one.
   the turn the reply was made against plus the running one, the boundary is drawn when the person
   speaks, the record is built on the way in, and their line is the only one marked (`**你**：`) on
   either card (`activity.js`, `results.js`,
-  [0022](docs/decisions/0022-the-fold-is-one-turn-and-marks-what-you-said.md)).
+  [0022](docs/decisions/0022-the-fold-is-one-turn-and-marks-what-you-said.md)). (#51)
 
 - **A card may carry about seven times what it was carrying, because the limit it was built to does
   not exist.** Every long history was truncated, and the reason was a number copied from the platform's
@@ -196,33 +197,33 @@ carries behaviour changes, and each is called out as one.
   ceilings, found the same way: **200 elements** per card (180 accepted) and roughly **51,000 Chinese
   characters** of text (120,000 of Latin, 20,000 emoji). The text budget moves from 4.6 KB to 32 KB and
   a new element budget joins it at 120, so a run a reader could actually want to read now arrives whole
-  instead of trimmed to a fifth (`budget.js`, `results.js`).
+  instead of trimmed to a fifth (`budget.js`, `results.js`). (#32)
 
 - **When a run does not fit, whole kinds of content are given up before any text is.** The old rule
   kept both ends and cut the middle out, which loses the one thing a reader came for whenever the plan
   is long and the answer is long. Now the fold degrades in the order a reader would choose: merge the
   tool lines into one block (same information, one element instead of many), then drop the tool lines,
   then the person's own message, and only then the oldest prose — because the newest output is what a
-  reader is deciding on. Whatever goes is named with a byte count (`results.js`).
+  reader is deciding on. Whatever goes is named with a byte count (`results.js`). (#32)
 
 ### Fixed
 
 - **The card state could be read back out of order.** The browser's poll of the deployment's state let
   a slow response land after a newer one, so the card could settle on a state that had already been
   superseded. Each tick now retires the request it started, and only the newest answer is applied
-  (`client.js`).
+  (`client.js`). (#57)
 
 - **Three ways the desktop mirror could go quiet.** A refusal from the page's composer was reported as
   "settled" whatever it was, so a real failure was silently dropped and the desktop waited forever; the
   poll had no timeout, so a hung host killed the mirror in silence; and a host too old to serve the
   route spun once a second without saying so. A refusal is now classified by whether the composer is
   still there (still there → keep the decision for it, gone → it settled), the poll has a deadline, and
-  a 404 is reported once and then stops (`client.js`).
+  a 404 is reported once and then stops (`client.js`). (#57)
 
 - **Four corrections to small assumptions.** A card that the activity record had been evicted from was
   no longer recognized as the run's card, so a stale press could overwrite a live run; a refused
   clipboard write still reported success; a failed credential adoption cleared the form the reader had
-  just filled in; and a parameter was passed by nobody (`activity.js`, `client.js`, `escalation.js`).
+  just filled in; and a parameter was passed by nobody (`activity.js`, `client.js`, `escalation.js`). (#57)
 
 - **A run showed an answer to a question it could not show.** A turn that ended was not recorded as
   ended, so the next turn's start looked like the same turn: the run was never closed, and the message
@@ -230,18 +231,18 @@ carries behaviour changes, and each is called out as one.
   question missing. A turn now records that it is open, and a start closes the previous run whenever
   one is. Neither the turn *number* nor "is anything in the run" can make that distinction: numbers
   repeat in a session whose log was reset, and a person's message arrives before the turn that claims
-  it (`run-record.js`).
+  it (`run-record.js`). (#57)
 
 - **The bytes a fold reported as left out could be wrong.** They were counted by matching kept entries
   against every entry *by text*, so a run that ran the same command twice counted both as kept when
   only one was — under-reporting what the reader is missing, which is the one thing that number exists
-  to get right. Entries are matched by position now (`results.js`).
+  to get right. Entries are matched by position now (`results.js`). (#29)
 
 - **The first run after the phone takes over was the one the phone could not show.** A session that was
   already running when the person moved had no activity card, and the card was minted lazily on the
   session's next event — which, for a run already in flight, may be its last. So the first thing that
   run did after the move was exactly the thing somebody picked the phone up to look at. Moving to the
-  phone now takes on every session the registry still reports as running (`activity.js`).
+  phone now takes on every session the registry still reports as running (`activity.js`). (#57)
 
 ## 0.8.2
 

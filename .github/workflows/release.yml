@@ -271,9 +271,9 @@ jobs:
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$tag" --repo "$GITHUB_REPOSITORY" RELEASE-NOTES.en.md --clobber
             gh release edit "$tag" --repo "$GITHUB_REPOSITORY" \
-              --title "Release $version · 发布 $version" --notes-file release-body.md
+              --title "Release $version" --notes-file release-body.md
           else
             gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
-              --title "Release $version · 发布 $version" --notes-file release-body.md \
+              --title "Release $version" --notes-file release-body.md \
               RELEASE-NOTES.en.md
           fi
