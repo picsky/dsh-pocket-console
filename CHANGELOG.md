@@ -7,10 +7,10 @@ published says so, because its work ships with the next release that is.
 The project is pre-1.0: a minor bump can carry a behaviour change, and one is called
 out when it does.
 
-Each version's section opens with the English summary and then a **中文摘要**. A version's
-GitHub Release body is generated from its own section, so the release page stays bilingual
-with the changelog. / 每个版本小节先给英文摘要、再给「中文摘要」；某版本的 GitHub Release
-正文直接取自该版本的小节，因此发布页与 changelog 始终中英一致。
+A version's GitHub Release is assembled from two sources: the Chinese body is that
+version's section of `RELEASE-NOTES.zh.md` (the release page's default view), and the
+English version is this file's section for that version, attached to the release as
+`RELEASE-NOTES.en.md` and linked from the top of the body.
 
 ## 0.9.2
 
@@ -20,8 +20,6 @@ that was not a size refusal sent it back to the desk (approvals) or dropped it w
 (results). A transient blip at the moment a card was due therefore meant the person who stepped
 away got no card at all. These now retry under one idempotency key, the way the activity card
 already did.
-
-**中文摘要**：发不出去的卡会被重试，已被平台收下的卡不会发第二遍。在此之前，审批、提问或结果都只投递一次，任何非「体积超限」的失败都会把审批退回桌面、或把结果记一条日志后丢弃——卡片即将发出的那一刻赶上网络抖动，走开的人就一张卡都收不到。现在这三条投递路径都在同一个幂等键下重试（活动卡从 0.9.0 起就是这样）。
 
 ### Changed
 
@@ -70,8 +68,6 @@ called out below rather than left to the number — the first is a promise the t
 already made and the code never kept, the second removes something a reader used to have, so neither
 should arrive unread.
 
-**中文摘要**：0.9.0 以来的三项修复，其中两项改变行为——被 run「委派」工作的会话不再有自己的卡片；冻结卡片上的折叠不再带进它之前那一轮。两处都在下文单独说明：前者是排障文档早就承诺、代码却从未兑现的一条；后者移除了读者原本拥有的东西，因此都不该悄悄落地。
-
 ### Changed
 
 - **The fold is this run, and nothing before it.** The activity card's "本次执行过程" kept the run the
@@ -118,8 +114,6 @@ should arrive unread.
 the registry's `latest` was 0.8.1 while the tree said 0.8.3 — so everything in this section and in
 the `0.8.2` section below reaches a reader for the first time here. It is a minor bump because it
 carries behaviour changes, and each is called out as one.
-
-**中文摘要**：0.8.1 之后的第一个正式发布。树里曾编号过两个从未发布的版本——registry 的 `latest` 停在 0.8.1，而树的 package.json 写着 0.8.3——所以本节与下方 `0.8.2` 一节的改动，都是第一次到达读者。这是 minor 版本，因为它携带行为变化，每一条都在下文单独说明。
 
 ### Added
 

@@ -228,25 +228,52 @@ jobs:
       # The npm half is done and verified; the GitHub Release is the other half of
       # "a release", and it must not be left to a maintainer's memory the way it was
       # from 0.8.0 to 0.9.2 (the tags existed, the Releases page carried only the
-      # original pre-release). The notes are the tagged tree's own CHANGELOG.md
-      # section, so the release never drifts from what its changelog says. A tag that
-      # already has a release is only edited, so re-running this job is safe.
+      # original pre-release). The body is the tagged tree's own release notes, split
+      # by language: the version's Chinese section of RELEASE-NOTES.zh.md is the
+      # default view, and the CHANGELOG.md section is attached as RELEASE-NOTES.en.md
+      # and linked from the top of the body. A tag that already has a release is only
+      # edited, so re-running this job is safe.
       - name: Create the GitHub Release
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           version=$(node -p "require('./package.json').version")
-          notes=$(node -e '
+          tag="v$version"
+          node -e '
             const fs = require("fs");
             const version = process.argv[1];
-            const changelog = fs.readFileSync("CHANGELOG.md", "utf8");
-            const match = changelog.match(new RegExp("^## " + version + "[\\s\\S]*?(?=^## )", "m"));
-            process.stdout.write(match ? match[0].trim() : "See CHANGELOG.md for what changed in this release.");
-          ' "$version")
-          if gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit "v$version" --repo "$GITHUB_REPOSITORY" \
-              --title "Release $version · 发布 $version" --notes "$notes"
+            const tag = process.argv[2];
+            // Slice a "## <version>" section to the next "## " heading, or to the end
+            // of the file for the last section — a lookahead cannot see a following
+            // heading for the newest section of RELEASE-NOTES.zh.md.
+            const section = (file) => {
+              const lines = fs.readFileSync(file, "utf8").split("\n");
+              const heads = [];
+              lines.forEach((line, i) => { if (/^## /.test(line)) heads.push(i); });
+              const idx = heads.findIndex((i) => lines[i] === "## " + version);
+              if (idx === -1) return "";
+              const start = heads[idx];
+              const end = idx + 1 < heads.length ? heads[idx + 1] : lines.length;
+              return lines.slice(start, end).join("\n").trim();
+            };
+            const zh = section("RELEASE-NOTES.zh.md");
+            const en = section("CHANGELOG.md");
+            if (!en) {
+              console.error("no CHANGELOG.md section for " + version);
+              process.exit(1);
+            }
+            const body =
+              "**[English](https://github.com/picsky/dsh-pocket-console/releases/download/" + tag + "/RELEASE-NOTES.en.md) · 中文**\n\n" +
+              (zh || "See the English release notes.") + "\n";
+            fs.writeFileSync("release-body.md", body);
+            fs.writeFileSync("RELEASE-NOTES.en.md", "# Release " + version + " (English)\n\n" + en + "\n");
+          ' "$version" "$tag"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" --repo "$GITHUB_REPOSITORY" RELEASE-NOTES.en.md --clobber
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" \
+              --title "Release $version · 发布 $version" --notes-file release-body.md
           else
-            gh release create "v$version" --repo "$GITHUB_REPOSITORY" \
-              --title "Release $version · 发布 $version" --notes "$notes"
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
+              --title "Release $version · 发布 $version" --notes-file release-body.md \
+              RELEASE-NOTES.en.md
           fi
