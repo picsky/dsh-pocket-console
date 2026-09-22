@@ -245,8 +245,8 @@ jobs:
           ' "$version")
           if gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "v$version" --repo "$GITHUB_REPOSITORY" \
-              --title "Release $version" --notes "$notes"
+              --title "Release $version · 发布 $version" --notes "$notes"
           else
             gh release create "v$version" --repo "$GITHUB_REPOSITORY" \
-              --title "Release $version" --notes "$notes"
+              --title "Release $version · 发布 $version" --notes "$notes"
           fi
