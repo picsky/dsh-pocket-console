@@ -28,6 +28,21 @@ const FORM_VALUE_FIELD = 'value'
 /** Form field carrying a typed answer beside a multi-select's options. */
 const FORM_CUSTOM_FIELD = 'custom'
 
+/** How long one delivery retry waits before trying again. */
+const DELIVERY_RETRY_MS = 5_000
+/** How many attempts one card gets before the escalation is given up on. */
+const DELIVERY_MAX_TRIES = 4
+/** How long one post-decision rewrite retry waits. */
+const REWRITE_RETRY_MS = 1_000
+/** How many attempts a post-decision rewrite gets before it is given up on. */
+const REWRITE_MAX_TRIES = 3
+
+/** Wait, without holding the process open for it. */
+const sleep = (milliseconds) => new Promise((resolve) => {
+  const timer = setTimeout(resolve, milliseconds)
+  timer.unref?.()
+})
+
 /**
  * What one card title calls the request it belongs to.
  *
@@ -330,8 +345,7 @@ export function createEscalation({
       record.finished = true
       release()
       if (record.delivered && headline !== undefined && typeof channel.update === 'function') {
-        void Promise.resolve(channel.update(record.handle, settledView(record, headline, tone)))
-          .catch(error => { log.warn(messages().logMessageRewriteFailed, error) })
+        void rewriteRetried(record.handle, settledView(record, headline, tone), messages().logMessageRewriteFailed)
       }
       if (outcome !== undefined) record.settle.resolve(outcome)
       return true
@@ -409,7 +423,7 @@ export function createEscalation({
           // to name the session it belonged to.
           workspaces?.record(handle, record.workspace)
         }).catch((error) => {
-          log.warn(messages().logDeliveryFailed, error)
+          log.warn(messages().logDeliveryGivenUp(DELIVERY_MAX_TRIES), error)
           // The card never arrived, so there is no phone decision to wait for.
           // Abandon rather than settle: the promise this call returns stays racing
           // the desktop branch, which is still pending and still authoritative.
@@ -455,22 +469,64 @@ export function createEscalation({
   }
 
   /**
-   * Deliver one request's card, retrying once with half the text when the platform
-   * refuses it for size.
+   * One rewrite, retried a bounded number of times.
    *
-   * The budget is chosen to stay far inside the platform's limit, but that limit
-   * is documented outside this repository; the retry is what keeps a card arriving
-   * even if the real ceiling is lower than the documentation says.
+   * A rewrite that fails leaves the card looking answerable — buttons on a decided request, an
+   * input box on a retired one — and a card that lies about what it can do is the worst card there
+   * is. The common failures (a rate limit, a dropped connection) pass with a retry; a message that
+   * no longer exists does not, and is given up on loudly.
+   * @param handle - the message to rewrite.
+   * @param view - the view to write.
+   * @param what - the copy naming the failure, for the log.
+   */
+  const rewriteRetried = async (handle, view, what) => {
+    if (handle === undefined || typeof channel.update !== 'function') return
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await channel.update(handle, view)
+        return
+      } catch (error) {
+        if (attempt >= REWRITE_MAX_TRIES) {
+          log.warn(`${what}${messages().logRewriteAttempts(attempt)}`, error)
+          return
+        }
+        await sleep(REWRITE_RETRY_MS)
+      }
+    }
+  }
+
+  /**
+   * Deliver one request's card, retrying on transient failure under one idempotency key.
+   *
+   * The budget is chosen to stay far inside the platform's limit, but that limit is documented
+   * outside this repository; a size refusal is answered by halving the text and trying once more.
+   * Any other failure — a dropped connection, a rate limit — is transient in the common case, and
+   * one card is worth retrying for before the escalation is given up on and the request goes back
+   * to the desk. Every attempt carries the same `uuid`: a send the platform accepted but whose
+   * answer was lost is then answered by the message it already made, never by a second card.
    * @param record - the escalation whose card is being delivered.
    * @returns the delivered message handle.
    */
   async function deliverCard(record) {
-    try {
-      return await channel.deliver(record.view)
-    } catch (error) {
-      if (!looksLikeSizeRefusal(error)) throw error
-      log.debug(messages().logCardTooLarge)
-      return await channel.deliver(buildView(record, Math.floor(CARD_TEXT_BUDGET / 2)))
+    record.uuid ??= randomUUID()
+    let view = record.view
+    for (let attempt = 1; ; attempt += 1) {
+      // An answer that settled the request while a retry waited must not deliver a card for it.
+      if (closed || record.finished || record.delivered) {
+        throw new Error('escalation is no longer waiting to deliver')
+      }
+      try {
+        return await channel.deliver(view, { uuid: record.uuid })
+      } catch (error) {
+        if (looksLikeSizeRefusal(error) && attempt === 1) {
+          log.debug(messages().logCardTooLarge)
+          view = buildView(record, Math.floor(CARD_TEXT_BUDGET / 2))
+          continue
+        }
+        if (attempt >= DELIVERY_MAX_TRIES) throw error
+        log.debug(messages().logDeliveryRetrying(attempt))
+        await sleep(DELIVERY_RETRY_MS)
+      }
     }
   }
 
@@ -484,9 +540,8 @@ export function createEscalation({
    * @param handle - the message the press came from, as the channel reported it.
    */
   const retireCard = (handle) => {
-    if (handle === undefined || typeof channel.update !== 'function') return
     const copy = messages()
-    void Promise.resolve(channel.update(handle, {
+    void rewriteRetried(handle, {
       // The record this card belonged to is gone, so the workspace comes from what was
       // remembered against the message; a card that cannot be named is still retired.
       title: titleFor(settings(), workspaces?.lookup(handle), copy.requestGoneTitle),
@@ -497,7 +552,7 @@ export function createEscalation({
       body: [copy.requestGone],
       buttons: [],
       forms: [],
-    })).catch(error => { log.warn(copy.logMessageRewriteFailed, error) })
+    }, copy.logMessageRewriteFailed)
   }
 
   /** Re-time every request that is still waiting for its card. */
@@ -643,6 +698,10 @@ export function createEscalation({
         // card whose buttons are still there and whose only answer is a toast saying so.
         // The press carries the message it came from, so the card is rewritten where it
         // lies: `muted`, with the controls gone, so it stops looking answerable.
+        // Said at info rather than debug: a stale press is a reader who believed they
+        // were deciding something, and "this press did nothing, the request is gone"
+        // is the one line that makes that believable afterwards.
+        log.info(messages().logStalePress)
         retireCard(messageId)
         return { toast: messages().requestGone, accepted: false }
       }

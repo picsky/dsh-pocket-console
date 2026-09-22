@@ -269,6 +269,11 @@ function resolveConfig(raw, messages) {
     appName: config.appName ?? 'DSH Pocket Console',
     appDesc: config.appDesc ?? messages().appDescription,
     createOnly: config.createOnly ?? true,
+    // How often the channel asks the platform whether this app is still accepted, while
+    // connected. `0` disables the probe. Deployment-only; the channel owns this key.
+    probeIntervalMs: Number.isFinite(Number(config.probeIntervalMs))
+      ? Math.max(0, Number(config.probeIntervalMs))
+      : 300_000,
   }
 }
 
@@ -566,6 +571,9 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
   /** Pending notice that a handshake is taking unusually long. */
   let slowTimer
 
+  /** The periodic liveness probe, armed while a connection is up. */
+  let probeTimer
+
   /**
    * What the current connection could not do, reported beside its state: a pair
    * the user typed that the store refused to keep.
@@ -578,9 +586,52 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
     slowTimer = undefined
   }
 
+  /** Stop the pending liveness probe, if one is armed. */
+  const clearProbe = () => {
+    clearTimeout(probeTimer)
+    probeTimer = undefined
+  }
+
+  /**
+   * Ask the platform, while connected, whether it still recognises this app.
+   *
+   * The long connection reconnects on its own and the SDK's own heartbeat notices a dead
+   * socket — neither can tell this side that the *app* was revoked or disabled. That is a
+   * credential question, and the one endpoint that answers it is the same tenant-token call
+   * the connect-time check uses. A probe that finds the pair rejected publishes the failure
+   * and takes the channel down (so `available()` turns false and approvals stop being offered
+   * to a channel that cannot answer); an unreachable platform proves nothing and is left alone
+   * rather than flapping the card. See {@link checkCredentials} for how a refusal is told from
+   * a network miss.
+   */
+  const runProbe = async () => {
+    armProbe()
+    if (closed || transport === undefined || !connected || credentials === undefined) return
+    const check = await checkCredentials(transport.client, credentials, messages())
+    if (check.ok) return
+    if (check.kind === 'unreachable') {
+      log.debug(messages().logProbeUnreachable)
+      return
+    }
+    // A refusal is terminal for this connection: the handshake would retry the pair forever,
+    // so the channel reports why instead of sitting at "connecting" with nothing to say.
+    log.warn(messages().logProbeRejected(check.message))
+    enrollment = { state: 'failed', message: check.message }
+    closeTransport()
+  }
+
+  /** Arm the periodic liveness probe; a re-arm replaces the pending one. */
+  const armProbe = () => {
+    clearProbe()
+    if (closed || config.probeIntervalMs <= 0) return
+    probeTimer = setTimeout(() => { probeTimer = undefined; void runProbe() }, config.probeIntervalMs)
+    probeTimer.unref?.()
+  }
+
   /** Drop the live pair. Whatever connects next opens its own. */
   const closeTransport = () => {
     clearSlow()
+    clearProbe()
     connected = false
     try {
       transport?.wsClient?.close?.()
@@ -706,6 +757,9 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       if (closed || run !== generation) return
       clearSlow()
       connected = true
+      // The connection is usable: start asking the platform, from here on, whether it still
+      // recognises this app. A reconnection re-arms the probe from the moment it is usable again.
+      armProbe()
       republish(run)
       log.info(messages().logReady)
     },

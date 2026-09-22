@@ -629,4 +629,60 @@ test('a deployment with no storage says so instead of failing quietly', async ()
     `the deployment says the notices will not be kept: ${infos.join(' | ')}`)
 })
 
+test('a result the platform accepted but never answered is not sent again', async () => {
+  const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle' })
+  await bind(route, { openId: 'ou_scanner' })
+  agents.set('s_1', { status: 'idle', followup: () => {} })
+  const emit = listenerOf('session/event').handler
+
+  runTurn(emit, 's_1')
+  // The failure a retry can make worse: the platform has the card, and this side never finds
+  // out. Without an idempotency key the retry would deliver the reader a second result card.
+  observed.loseNextAnswer = true
+  await sleep(6_500)
+  assert.equal(observed.lostAnswers, 1, 'the first send was accepted and its answer was lost')
+  assert.equal(observed.created.length, 1, 'so exactly one result card exists')
+  assert.equal(observed.deduplicated, 1, 'and the retry was answered, not sent')
+  assert.equal(typeof observed.created[0].data?.uuid, 'string', 'the result card carries an idempotency key')
+})
+
+test('a result refused transiently is retried and arrives once', async () => {
+  const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle' })
+  await bind(route, { openId: 'ou_scanner' })
+  agents.set('s_1', { status: 'idle', followup: () => {} })
+  const emit = listenerOf('session/event').handler
+
+  runTurn(emit, 's_1')
+  observed.failNextDelivery = 'the platform is momentarily unavailable'
+  await sleep(6_500)
+  assert.equal(observed.deliveryFailures, 1, 'the first attempt was refused')
+  assert.equal(observed.created.length, 1, 'and the retry arrived')
+  assert.equal(typeof observed.created[0].data?.uuid, 'string', 'the result card carries an idempotency key')
+})
+
+test('a result whose successor failed to send keeps the earlier result', async () => {
+  const { route, listenerOf, agents } = await scaffold({ resultNotify: 'idle' })
+  await bind(route, { openId: 'ou_scanner' })
+  agents.set('s_1', { status: 'idle', followup: () => {} })
+  const emit = listenerOf('session/event').handler
+
+  runTurn(emit, 's_1', '第一次的结果')
+  await sleep(1100)
+  const first = sentCard()
+  const firstSubmit = callbackValues(first).find(value => value.submit === true)
+  const [firstField] = controlNames(first)
+
+  // A second result is due, and its delivery keeps failing. The older card was retired
+  // for it up front, so a delivery failure must put that card back rather than leave the
+  // reader with neither this result nor the last one. No leading user message: one would
+  // retire the earlier notice as "the reader spoke", which is a different rule.
+  observed.failEveryDelivery = true
+  runTurn(emit, 's_1', '第二次的结果', { said: false, turn: 2 })
+  await sleep(16_300)
+  assert.equal(observed.created.length, 1, 'the second result never landed')
+
+  const toast = await clickCard(firstSubmit, { [firstField]: '接着做' })
+  assert.equal(toast.toast.type, 'success', 'the earlier card is replyable again')
+})
+
 

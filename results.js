@@ -37,6 +37,21 @@ const INSTRUCTION_FIELD = 'value'
  */
 const RESULT_ENDS = 'resultEnds'
 
+/** How long one result-card delivery retry waits before trying again. */
+const NOTICE_DELIVERY_RETRY_MS = 5_000
+/** How many attempts one result card gets before the delivery is given up on. */
+const NOTICE_DELIVERY_MAX_TRIES = 4
+/** How long one result-card rewrite retry waits. */
+const NOTICE_REWRITE_RETRY_MS = 1_000
+/** How many attempts a result-card rewrite gets before it is given up on. */
+const NOTICE_REWRITE_MAX_TRIES = 3
+
+/** Wait, without holding the process open for it. */
+const sleep = (milliseconds) => new Promise((resolve) => {
+  const timer = setTimeout(resolve, milliseconds)
+  timer.unref?.()
+})
+
 /**
  * Whether one Assistant message is a turn's answer.
  *
@@ -457,7 +472,12 @@ export function createResultNotifier({
     let answer = clipToBytes(face, messages().truncated)
     // One live notice per session: the newest result is the one worth replying
     // to, and an older card that still accepted a reply would inject an
-    // instruction the reader wrote against a superseded answer.
+    // instruction the reader wrote against a superseded answer. The old notice is
+    // captured before it is retired, so a delivery failure below can put it back
+    // rather than leaving the reader with neither this result nor the last one.
+    const superseded = [...notices]
+      .filter(([, notice]) => String(notice.session) === String(session))
+      .map(([oldId, notice]) => ({ id: oldId, notice, view: notice[VIEW] }))
     retire(session, messages().superseded)
     // Resolved once, then carried: this card is rewritten when the reader replies and
     // when a newer result supersedes it, and those rewrites must say the same thing.
@@ -537,17 +557,30 @@ export function createResultNotifier({
       return offer(base)
     }
     try {
+      // One key per card, kept across attempts: a result the platform accepted but whose
+      // answer was lost is retried under the same key, so the reader gets one card, not two.
+      const uuid = randomUUID()
       let card = cardFor(answer)
-      const handle = await channel.deliver(card).catch(async (error) => {
-        if (!looksLikeSizeRefusal(error)) throw error
-        log.debug(messages().logNoticeTooLarge)
-        answer = clipToBytes(face, messages().truncated, Math.floor(CARD_TEXT_BUDGET / 2))
-        card = cardFor(answer)
-        // The fold is what does not fit, so the fold is what is given up. The offer is cheaper than
-        // it looks and stays: dropping it would take away the one control a result is worth having.
-        delete card.details
-        return await channel.deliver(card)
-      })
+      let handle
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          handle = await channel.deliver(card, { uuid })
+          break
+        } catch (error) {
+          if (looksLikeSizeRefusal(error) && attempt === 1) {
+            log.debug(messages().logNoticeTooLarge)
+            answer = clipToBytes(face, messages().truncated, Math.floor(CARD_TEXT_BUDGET / 2))
+            card = cardFor(answer)
+            // The fold is what does not fit, so the fold is what is given up. The offer is cheaper than
+            // it looks and stays: dropping it would take away the one control a result is worth having.
+            delete card.details
+            continue
+          }
+          if (attempt >= NOTICE_DELIVERY_MAX_TRIES) throw error
+          log.debug(messages().logNoticeRetrying(attempt))
+          await sleep(NOTICE_DELIVERY_RETRY_MS)
+        }
+      }
       const notice = notices.get(id)
       if (notice !== undefined) notice.handle = handle
       // The card exactly as it went out — including the offer, if it was appended. A later rewrite
@@ -584,6 +617,23 @@ export function createResultNotifier({
       }).then(() => { log.info(messages().logNoticeStored(id)) })
     } catch (error) {
       notices.delete(id)
+      // The newer result never arrived. This run retired the reader's previous notice for it,
+      // and a delivery failure must not take that previous result away as well: put it back,
+      // durably, and rewrite its card as live again so the reply box is there to use.
+      for (const { id: oldId, notice, view } of superseded) {
+        noticeSet(oldId, notice)
+        void store.put({
+          rid: oldId,
+          session: notice.session,
+          handle: notice.handle,
+          workspace: notice.workspace,
+          seq: await sessionSeq(notice.session),
+          sentAt: now(),
+        }).then(() => { log.info(messages().logNoticeStored(oldId)) }).catch(() => {})
+        if (view !== undefined && notice.handle !== undefined) {
+          void rewriteRetried(notice.handle, view, messages().logNoticeCardFailed)
+        }
+      }
       log.warn(messages().logNoticeSendFailed, error)
     }
   }
@@ -807,6 +857,33 @@ export function createResultNotifier({
   const subtitleFor = (handle, known) =>
     known?.notice?.subtitle ?? sessionNames?.subtitle?.(workspaces?.sessionOf?.(handle))
 
+  /**
+   * One rewrite, retried a bounded number of times.
+   *
+   * A rewrite that fails leaves the card looking like it still takes a reply — an input box on a
+   * card whose notice is gone — and a card that lies about what it can do is the worst card there
+   * is. The common failures (a rate limit, a dropped connection) pass with a retry; a message that
+   * no longer exists does not, and is given up on loudly.
+   * @param handle - the message to rewrite.
+   * @param view - the view to write.
+   * @param what - the copy naming the failure, for the log.
+   */
+  const rewriteRetried = async (handle, view, what) => {
+    if (handle === undefined || typeof channel.update !== 'function') return
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await channel.update(handle, view)
+        return
+      } catch (error) {
+        if (attempt >= NOTICE_REWRITE_MAX_TRIES) {
+          log.warn(`${what}${messages().logRewriteAttempts(attempt)}`, error)
+          return
+        }
+        await sleep(NOTICE_REWRITE_RETRY_MS)
+      }
+    }
+  }
+
   function retract(handle, headline, workspace) {
     if (handle === undefined || typeof channel.update !== 'function') return
     // A message the activity card is being shown in belongs to a run, not to a notice. This became
@@ -820,7 +897,7 @@ export function createResultNotifier({
     const body = known === undefined
       ? [headline]
       : [...known.view.body.slice(0, known.view[RESULT_ENDS] ?? known.view.body.length), headline]
-    void Promise.resolve(channel.update(handle, {
+    void rewriteRetried(handle, {
       title: titleOf(`${settings().titlePrefix} ${messages().resultTitle}`, workspace),
       // From the notice when this side still holds it — that is the line the card was sent with — and
       // otherwise from the registry, because a card that outlived its notice still belongs to a
@@ -832,7 +909,7 @@ export function createResultNotifier({
       forms: [],
       // Kept only when it is the card's own, so an unknown card is not given one by accident.
       ...(known?.view.details !== undefined ? { details: known.view.details } : {}),
-    })).catch(error => { log.warn(messages().logNoticeCardFailed, error) })
+    }, messages().logNoticeCardFailed)
   }
 
   /**

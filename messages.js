@@ -127,8 +127,12 @@ const zh = {
    * harness's behaviour, not the deployment's.
    */
   logMessageRewriteFailed: '卡片改写失败',
+  logRewriteAttempts: attempts => `（已重试 ${attempts} 次）`,
   logDeliveryFailed: '消息投递失败',
   logCardTooLarge: '卡片被判定为超出体积上限，按一半长度重投一次。',
+  logDeliveryRetrying: attempt => `消息投递第 ${attempt} 次尝试未成功，稍后重试。`,
+  logDeliveryGivenUp: tries => `审批/提问卡连续 ${tries} 次发送失败，已放弃本次升级；这条请求回到桌面。`,
+  logStalePress: '按了一张已失效的卡（进程重启，或请求已结束）；这张卡已改写为「已结束」。',
   logCardOverBodyBudget: (bytes, budget) => `要发出的卡片有 ${bytes} 字节，超过整卡预算 ${budget}：先丢掉折叠面板，仍超出则按比例缩短正文。`,
   logMirror: (status, reason) => `桌面镜像：${status}${reason === undefined ? '' : `（${reason}）`}`,
   logMirrorLapsed: '有一条手机决定，在任何一个浏览器前来取走它之前就过期了；那个等待中的窗口没有被关闭。',
@@ -185,10 +189,13 @@ const zh = {
   logPersistFailed: '应用凭据未能保存；本次连接仍使用填写的值',
   logAdopting: '已收到应用凭据，正在校验并连接飞书。',
   logEnrollmentFailed: '飞书绑定失败；审批将只保留在桌面',
+  logProbeRejected: detail => `探活发现飞书不再认可这组应用凭据（${detail}），已关闭长连接；请检查应用或重新绑定。`,
+  logProbeUnreachable: '探活未能联系上飞书（网络问题），暂不改变连接状态。',
   logNoticeFailed: '结果通知失败',
   logNoticeCooling: '结果未通知：同一会话仍在冷却期内。',
   logNoticeNoAgent: '结果未通知：该会话没有活跃 agent（本版本不恢复已回收的会话）。',
   logNoticeTooLarge: '通知被判定为超出体积上限，按一半长度重投一次。',
+  logNoticeRetrying: attempt => `结果发送第 ${attempt} 次尝试未成功，稍后重试。`,
   logNoticeSent: '结果已发送到手机。',
   /** Whether the result card carried the run, since a missing fold and an unrecorded run look alike. */
   logRunFold: (session, entries, carried) => carried
@@ -310,8 +317,12 @@ const en = {
 
   /** Deployment log lines. See the Chinese dictionary for why these are localized. */
   logMessageRewriteFailed: 'message rewrite failed',
+  logRewriteAttempts: attempts => ` (retried ${attempts} times)`,
   logDeliveryFailed: 'message delivery failed',
   logCardTooLarge: 'card read as over the size limit; retrying once at half the text.',
+  logDeliveryRetrying: attempt => `message delivery attempt ${attempt} failed; retrying shortly.`,
+  logDeliveryGivenUp: tries => `gave up escalating after ${tries} failed deliveries; this request goes back to the desk.`,
+  logStalePress: 'a card with no live request was pressed (a restart, or a request that already settled); it was rewritten as finished.',
   logCardOverBodyBudget: (bytes, budget) => `the card about to go out weighs ${bytes} bytes, over the whole-card budget of ${budget}: the fold is dropped first, and the text is shortened proportionally if that is not enough.`,
   logMirror: (status, reason) => `desktop mirror: ${status}${reason === undefined ? '' : ` (${reason})`}`,
   logMirrorLapsed: 'a phone decision lapsed before any browser collected it; the composer waiting behind it was left unclosed.',
@@ -364,10 +375,13 @@ const en = {
   logPersistFailed: 'the app credentials could not be saved; this connection still uses what was entered',
   logAdopting: 'app credentials received; checking them and connecting to Feishu.',
   logEnrollmentFailed: 'binding Feishu failed; approvals will stay on the desktop',
+  logProbeRejected: detail => `the liveness probe found Feishu no longer accepts these app credentials (${detail}); closed the long connection — check the app or rebind.`,
+  logProbeUnreachable: 'the liveness probe could not reach Feishu (a network problem); leaving the connection state alone.',
   logNoticeFailed: 'sending the result notice failed',
   logNoticeCooling: 'no notice: this session is still inside its cooldown.',
   logNoticeNoAgent: 'no notice: this session has no live agent (this version does not revive a reclaimed session).',
   logNoticeTooLarge: 'the notice read as over the size limit; retrying once at half the text.',
+  logNoticeRetrying: attempt => `result delivery attempt ${attempt} failed; retrying shortly.`,
   logNoticeSent: 'the result was sent to the phone.',
   /** Whether the result card carried the run, since a missing fold and an unrecorded run look alike. */
   logRunFold: (session, entries, carried) => carried

@@ -336,4 +336,95 @@ test('a card rewritten once the request is answered keeps the workspace', async 
   assert.equal(rewritten.header.title.content, 'DSH 工具审批 · my-app', 'the settlement keeps the workspace')
 })
 
+test('a card the platform accepted but never answered is not sent again', async () => {
+  const { route, listenerOf } = await scaffold()
+  await bind(route, { openId: 'ou_scanner' })
+
+  const approval = listenerOf('approval/request')
+  const desktop = Promise.withResolvers()
+  const result = approval.handler(
+    { toolName: 'pwsh', signal: new AbortController().signal },
+    () => desktop.promise,
+  )
+  // The failure a retry can make worse: the platform has the card, and this side never finds
+  // out. Without an idempotency key the retry would deliver the reader a second card.
+  observed.loseNextAnswer = true
+  await sleep(6_400)
+  assert.equal(observed.lostAnswers, 1, 'the first send was accepted and its answer was lost')
+  assert.equal(observed.created.length, 1, 'so exactly one card exists')
+  assert.equal(observed.deduplicated, 1, 'and the retry was answered, not sent')
+
+  // The escalation is still live: the card can be answered from the phone.
+  const card = sentCard()
+  const allow = callbackValues(card).find(value => value.v === 'allowed-once')
+  const toast = await clickCard(allow)
+  assert.equal(toast.toast.type, 'success')
+  assert.equal(await result, 'allowed-once', 'a phone answer still settles the request')
+})
+
+test('a transient refusal is retried, and the card arrives once under one key', async () => {
+  const { route, listenerOf } = await scaffold()
+  await bind(route, { openId: 'ou_scanner' })
+
+  const approval = listenerOf('approval/request')
+  const desktop = Promise.withResolvers()
+  const result = approval.handler(
+    { toolName: 'pwsh', signal: new AbortController().signal },
+    () => desktop.promise,
+  )
+  observed.failNextDelivery = 'the platform is momentarily unavailable'
+  await sleep(6_400)
+  assert.equal(observed.deliveryFailures, 1, 'the first attempt was refused')
+  assert.equal(observed.created.length, 1, 'and the retry arrived')
+  assert.equal(typeof observed.created[0].data?.uuid, 'string', 'the card carries an idempotency key')
+
+  const card = sentCard()
+  const allow = callbackValues(card).find(value => value.v === 'allowed-once')
+  const toast = await clickCard(allow)
+  assert.equal(toast.toast.type, 'success')
+  assert.equal(await result, 'allowed-once')
+})
+
+test('a card that keeps failing is given up on, and the desktop decides', async () => {
+  const { route, listenerOf } = await scaffold()
+  await bind(route, { openId: 'ou_scanner' })
+
+  const approval = listenerOf('approval/request')
+  const desktop = Promise.withResolvers()
+  const result = approval.handler(
+    { toolName: 'pwsh', signal: new AbortController().signal },
+    () => desktop.promise,
+  )
+  observed.failEveryDelivery = true
+  await sleep(16_200)
+  assert.equal(observed.created.length, 0, 'no card ever landed')
+  assert.equal(observed.createAttempts, 4, 'one card is worth four attempts')
+  desktop.resolve('allowed-once')
+  assert.equal(await result, 'allowed-once', 'the desktop answer still decides')
+})
+
+test('a settled card whose rewrite is refused is rewritten on the retry', async () => {
+  const { route, listenerOf } = await scaffold()
+  await bind(route, { openId: 'ou_scanner' })
+
+  const approval = listenerOf('approval/request')
+  const desktop = Promise.withResolvers()
+  const result = approval.handler(
+    { toolName: 'pwsh', signal: new AbortController().signal },
+    () => desktop.promise,
+  )
+  await sleep(1200)
+  const allow = callbackValues(sentCard()).find(value => value.v === 'allowed-once')
+
+  // A rewrite that fails once leaves the card looking answerable — buttons on a decided
+  // request. The retry lands within a second, so the card stops offering them.
+  observed.failNextPatch = 'rate limited'
+  const toast = await clickCard(allow)
+  assert.equal(toast.toast.type, 'success')
+  assert.equal(await result, 'allowed-once')
+  await sleep(1_300)
+  assert.equal(observed.patched.length, 1, 'the settled card was rewritten on the retry')
+  assert.match(observed.patched[0].data.content, /已批准/, 'and carries the outcome')
+})
+
 

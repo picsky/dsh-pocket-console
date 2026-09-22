@@ -26,6 +26,10 @@ export const observed = {
   registerAppCalls: [],
   /** Set to make the next delivery fail with that message. */
   failNextDelivery: undefined,
+  /** Set to make every delivery fail until it is cleared again. */
+  failEveryDelivery: false,
+  /** How many delivery attempts the platform has seen (accepted or refused). */
+  createAttempts: 0,
   /** Set to make the next card edit fail with that message. */
   failNextPatch: undefined,
   /** How many card edits the platform refused. */
@@ -81,6 +85,8 @@ export function resetObserved() {
   observed.closed = 0
   observed.registerAppCalls.length = 0
   observed.failNextDelivery = undefined
+  observed.failEveryDelivery = false
+  observed.createAttempts = 0
   observed.failNextPatch = undefined
   observed.patchFailures = 0
   observed.loseNextAnswer = false
@@ -157,10 +163,11 @@ export class Client {
             observed.deduplicated += 1
             return { data: { message_id: this.accepted.get(uuid) } }
           }
+          observed.createAttempts += 1
           // A case can make the next delivery fail the way the platform refuses
           // an oversized card, which is the only way to exercise the retry.
-          if (observed.failNextDelivery !== undefined) {
-            const message = observed.failNextDelivery
+          if (observed.failNextDelivery !== undefined || observed.failEveryDelivery) {
+            const message = observed.failNextDelivery ?? 'the platform refused'
             observed.failNextDelivery = undefined
             observed.deliveryFailures += 1
             throw new Error(message)

@@ -33,6 +33,8 @@ const COPY = {
   // not fail on copy rather than on behaviour.
   logMessageRewriteFailed: 'rewrite failed', logDeliveryFailed: 'delivery failed',
   logCardTooLarge: 'card too large', logMirror: status => status,
+  logDeliveryRetrying: () => 'retrying', logDeliveryGivenUp: () => 'gave up',
+  logStalePress: 'stale press', logRewriteAttempts: () => '',
 }
 
 /**
@@ -109,12 +111,17 @@ test('a request the channel cannot fully answer is left to the desktop', async (
   assert.deepEqual(await result, { answers: [{ id: 'pick', selected: ['a', 'b'] }] })
 })
 
-test('a delivery the platform refuses leaves the desktop branch authoritative', async () => {
+test('a transient refusal is retried, and the request is not abandoned early', async () => {
   // Not a size refusal: the core retries those once, smaller. This is the case
-  // the comment at the delivery site is about — the card never arrives, so the
-  // escalation must hand the request back rather than hold it forever.
+  // the comment at the delivery site is about — a failure that may pass with a
+  // retry must not hand the request back while a card could still arrive.
+  let attempts = 0
   const { channel, delivered } = stubChannel({
-    deliver: async () => { throw new Error('the platform is unavailable') },
+    deliver: async () => {
+      attempts += 1
+      if (attempts === 1) throw new Error('the platform is unavailable')
+      return { id: 'handle_retry' }
+    },
   })
   const escalation = machine(channel)
 
@@ -126,8 +133,36 @@ test('a delivery the platform refuses leaves the desktop branch authoritative', 
   )
   await new Promise(resolve => setTimeout(resolve, 30))
 
-  assert.equal(delivered.length, 1, 'delivery was attempted once')
-  assert.deepEqual(escalation.pending(), [], 'and the failed escalation is closed')
+  assert.equal(delivered.length, 1, 'the first attempt was made')
+  assert.equal(escalation.pending().length, 1, 'and the escalation is still retrying, not abandoned')
+
+  // The retried delivery goes out under the same key and the card arrives.
+  await new Promise(resolve => setTimeout(resolve, 5_200))
+  assert.equal(delivered.length, 2, 'the retry reached the channel')
+  assert.equal(escalation.pending()[0].delivered, true, 'and the card is on the phone')
+
+  desktop.resolve('allowed-once')
+  assert.equal(await result, 'allowed-once', 'the desktop answer still decides')
+})
+
+test('a channel that keeps refusing is given up on, and the desktop stays authoritative', async () => {
+  // One card is worth a bounded number of attempts; after that the escalation is
+  // given up on rather than retried forever, and the request goes back to the desk.
+  const { channel, delivered } = stubChannel({
+    deliver: async () => { throw new Error('the platform is unavailable') },
+  })
+  const escalation = machine(channel)
+
+  const desktop = Promise.withResolvers()
+  const result = escalation.escalate(
+    { toolName: 'pwsh', signal: new AbortController().signal },
+    () => desktop.promise,
+    'approval',
+  )
+  await new Promise(resolve => setTimeout(resolve, 16_000))
+
+  assert.equal(delivered.length, 4, 'one card is worth four attempts')
+  assert.deepEqual(escalation.pending(), [], 'then the escalation is given up on')
 
   // The call must still settle with the desktop's answer. Before this was fixed
   // the escalation settled with no answer at all, so the race resolved to

@@ -7,6 +7,54 @@ published says so, because its work ships with the next release that is.
 The project is pre-1.0: a minor bump can carry a behaviour change, and one is called
 out when it does.
 
+## 0.9.2
+
+**Reliability: a card that fails to go out is retried, and a card that was accepted stops being
+sent twice.** Before this, an approval, a question, or a result hit the platform once; any failure
+that was not a size refusal sent it back to the desk (approvals) or dropped it with a log line
+(results). A transient blip at the moment a card was due therefore meant the person who stepped
+away got no card at all. These now retry under one idempotency key, the way the activity card
+already did.
+
+### Changed
+
+- **Delivery retries, once per card, under one key.** An approval, a question, or a result whose
+  delivery fails is retried up to four times, five seconds apart, before it is given up on. Every
+  attempt carries the same `uuid`, so a send the platform accepted but whose answer was lost is
+  answered by the message it already made — the reader gets one card, not two. This is the same
+  retry the activity card has had since 0.9.0, now extended to the other two delivery paths. A
+  card that still cannot go out after the retries is given up on loudly: an approval or question
+  goes back to the desk (the desktop branch stays authoritative, as before), and a result is
+  dropped as before.
+- **A result whose successor failed to send keeps the earlier one.** A newer result retires the
+  previous card before it goes out, which is correct when the newer one lands. When the newer one
+  never lands, the previous notice is now put back — in memory and in the durable store — and its
+  card is rewritten as live again, so a delivery failure cannot take the reader's last result away
+  with it.
+- **A post-decision rewrite is retried, not logged and dropped.** Rewriting a card once it is
+  decided, retired, or answered is retried up to three times, one second apart, before it is given
+  up on. A rewrite that failed once used to leave the card looking answerable — buttons on a
+  decided request, an input box on a retired one — which is the worst card there is.
+
+### Added
+
+- **A liveness probe for the Feishu channel.** While connected, the channel asks the platform on
+  an interval whether it still recognises this app (the same tenant-token call the connect-time
+  check uses). A probe that finds the pair rejected — an app revoked or disabled mid-run — closes
+  the long connection and reports the failure on the Settings card, so `available()` turns false
+  and approvals stop being offered to a channel that cannot answer. An unreachable platform
+  proves nothing and is left alone rather than flapping the card. The interval is
+  `channelConfig.probeIntervalMs` (default 300 000 ms; `0` disables it).
+- **A stale press is said out loud.** A button pressed on a card whose request is gone — after a
+  restart, or for a request already settled — now logs at info what happened, instead of only
+  rewriting the card and answering a toast.
+
+### Fixed
+
+- **Result delivery is idempotent.** A result the platform accepted but whose answer was lost was
+  re-sent on the size-refusal retry without a key, so it could become two cards. It now carries
+  the same `uuid` as the approval and question cards.
+
 ## 0.9.1
 
 **Three fixes since 0.9.0, and two of them change behaviour**: a session a run *delegated* work to no
