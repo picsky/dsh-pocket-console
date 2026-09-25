@@ -140,6 +140,10 @@ jobs:
       # tarball lacks; publishing a disagreeing tree would ship the disagreement to
       # every deployment.
       - run: npm run check:parity
+      # The release body is this version's notes, so a version whose notes name no
+      # DSH version is a release nobody can tell is for them — and one that can be
+      # verified against nothing. Refused here, before the tag can publish.
+      - run: npm run check:dsh-version
       - run: npm test
       # npm's own packer cannot pack this tree. `pnpm install` hard-links its store into
       # node_modules — `nodeLinker: hoisted` in pnpm-workspace.yaml controls the layout,

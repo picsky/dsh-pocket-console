@@ -11,7 +11,7 @@ A version's GitHub Release body is assembled from two sources, Chinese first: th
 version's section of `RELEASE-NOTES.zh.md`, then this file's section for that version
 as the English half.
 
-## Unreleased
+## 0.9.3
 
 **The Web UI loads again on DSH 0.1.7, where the browser settings service this card was bound
 to no longer exists.** 0.1.7's client half of `ui-settings` stopped providing `settingsScope`
@@ -57,6 +57,18 @@ descriptions are now in Chinese, with the same scope. No plugin behaviour change
 - **`scripts/check-parity.mjs` reads a wrapped leaf.** A `Config` field may now be wrapped in
   one call of its own (`liveField(z.natural()…)`), so the gate accepts one wrapper before the
   `z.` that proves a line is a schema, and still ignores anything else at that indentation.
+- **A release now states the DSH versions it was verified on.** `npm run check:dsh-version`
+  refuses a tag whose version section names none, and the release workflow runs it beside the
+  other gates. Which DSH version a plugin was tested against is the fact a reader needs to
+  decide whether a release is for them, and the fact that goes stale quietly: 0.9.2 shipped a
+  version that could not boot on 0.1.7 at all, and nothing in the release said which harness it
+  had been checked against.
+
+**Verified on DSH 0.1.6-alpha.1 and 0.1.7-rc.2.** Both were exercised end to end: 0.1.6 through
+the installed settings section and the keyed card, 0.1.7 through the entry's own form and the
+Plugins page's list slot. The suite runs on Node 22 and 24, and the real-composition check packs
+the tarball, installs it into a scratch profile, boots the application and reads the settings
+back off its own routes.
 
 ## 0.9.2
 
