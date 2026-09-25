@@ -32,7 +32,20 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const { useCallback, useEffect, useState } = React
     const h = React.createElement
-    const { IconChevronDownOutline14, Modal } = require('@deepseek-ai/dsh-client-ui-primitives')
+    const primitives = require('@deepseek-ai/dsh-client-ui-primitives')
+    const { Modal } = primitives
+    /**
+     * The disclosure chevron, under whichever name this Host's icon set uses.
+     *
+     * 0.1.7 renamed the whole icon family from a size suffix to a weight one —
+     * `IconChevronDownOutline14` became `IconChevronDownOutlineRegular`, with no
+     * alias left behind — and an undefined element type is not a missing
+     * decoration: React throws for it on the first render, the slot renderer retires
+     * an entry that throws, and the card *and* the description beside it disappear
+     * from a page that otherwise looks perfectly healthy. So both names are asked
+     * for, and the card is drawn without a chevron when a Host ships neither.
+     */
+    const IconChevronDown = primitives.IconChevronDownOutlineRegular ?? primitives.IconChevronDownOutline14
 
     /**
      * Settings namespace. It is the `settings.plugin.item` slot key up to 0.1.6,
@@ -100,6 +113,8 @@ window.__ModuleLoader__.load({
       zh: {
         title: '口袋控制台',
         description: '把工具审批与提问送到手机，桌面始终优先。',
+        settingsLoading: '正在读取设置…',
+        settingsUnavailable: '这台宿主没有提供本插件的设置表单，所以这里没有可编辑的项。',
         bound: '已绑定',
         unbound: '未绑定',
         awaiting: '等待扫码确认',
@@ -176,6 +191,8 @@ window.__ModuleLoader__.load({
       en: {
         title: 'Pocket console',
         description: 'Send tool approvals and questions to your phone, with the desktop always first in line.',
+        settingsLoading: 'Reading the settings…',
+        settingsUnavailable: 'This host serves no settings form for this plugin, so there is nothing to edit here.',
         bound: 'Bound',
         unbound: 'Not bound',
         awaiting: 'Waiting for confirmation',
@@ -472,6 +489,11 @@ window.__ModuleLoader__.load({
       /** Form-level state: what the Host serves, and what a save would do. */
       const shell = () => ({
         available: snapshotOf().status === 'ready',
+        // `loading` and `unavailable` are different answers — one is a Host still
+        // reading, the other a Host that serves no such namespace — and the card
+        // says which, because that is the whole diagnostic when a platform moves
+        // the settings contract out from under it.
+        status: snapshotOf().status,
         writable: snapshotOf().writable,
         dirty: plan().length > 0,
         invalid: plan().some(item => item.run === undefined),
@@ -578,6 +600,14 @@ window.__ModuleLoader__.load({
       // `documentLanguage` for why the attribute is read rather than held.
       const copy = COPY[documentLanguage()]
       if (props.view === 'summary') return copy.description
+      // Defensive, and before any hook: the renderer binds `usePocketConsole` from
+      // the hooks compartment this bundle injects, and a card rendered without it
+      // would throw — and a throwing entry is retired from the page, taking every
+      // other render of it down too. A sentence is the difference between a
+      // diagnosable page and a blank one.
+      if (typeof props.usePocketConsole !== 'function') {
+        return h('p', { style: S.notice, role: 'status' }, copy.settingsUnavailable)
+      }
       const state = props.usePocketConsole(snapshot => snapshot)
       const shell = state.shell
       const [open, setOpen] = useState(false)
@@ -673,8 +703,14 @@ window.__ModuleLoader__.load({
         }
       }, [refresh, enrollment.state])
 
-      // A deployment that never composed the Host half shows no trace of the card.
-      if (!shell.available) return null
+      // A settings form that is not ready is *said*, never rendered as nothing. An
+      // entry that draws no card is indistinguishable from a page that simply has
+      // no settings — which is how a platform rename hid the card for a whole
+      // release, with the page, the mirror and the plugin all looking healthy.
+      if (!shell.available) {
+        return h('p', { style: S.notice, role: 'status' },
+          shell.status === 'loading' ? copy.settingsLoading : copy.settingsUnavailable)
+      }
 
       /** One labelled row of the status block. */
       const row = (key, label, value) => h('div', { key, style: S.row },
@@ -891,7 +927,7 @@ window.__ModuleLoader__.load({
             h('span', { style: S.name }, copy.title),
             h('span', { style: S.description }, copy.description)),
           shell.dirty ? h('span', { style: S.badge, 'aria-hidden': 'true' }, copy.unsaved) : null,
-          h('span', { style: S.chevron(open) }, h(IconChevronDownOutline14, {}))),
+          h('span', { style: S.chevron(open) }, IconChevronDown === undefined ? null : h(IconChevronDown, {}))),
 
         open ? h('div', { style: S.body },
           !shell.writable ? h('p', { style: S.notice, role: 'status' }, copy.readOnly) : null,

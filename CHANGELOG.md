@@ -11,6 +11,42 @@ A version's GitHub Release body is assembled from two sources, Chinese first: th
 version's section of `RELEASE-NOTES.zh.md`, then this file's section for that version
 as the English half.
 
+## Unreleased
+
+**The settings card shows on DSH 0.1.7, and says so when it cannot.** 0.9.4 finally
+mounted the card there and the page was still empty: 0.1.7 renamed the shell's icon
+family — `IconChevronDownOutline14` became `IconChevronDownOutlineRegular`, with no
+alias — and this bundle destructured the old name, so it handed React `undefined` as an
+element type. React throws for that, and the slot renderer *retires* an entry that
+throws: the card and the description beside it vanished from every position on the page,
+while the page, the plugin and the mirror all stayed healthy. The card now takes the
+chevron from whichever name the Host seeds and draws without one if it seeds neither,
+and it renders every state it can be in — still loading, not served, or handed no form
+hook — instead of returning nothing.
+
+### Fixed
+
+- **Platform UI is asked for by capability.** The chevron resolves
+  `IconChevronDownOutlineRegular` first and falls back to `IconChevronDownOutline14`;
+  when neither exists the card is drawn without it. A renamed icon costs a decoration,
+  which is the most it may ever cost.
+- **The card never renders nothing.** A settings form that is still reading, one the
+  Host does not serve, and a card the renderer handed no form hook each render a
+  sentence, in both languages. `PocketConsoleCard` returned `null` for the
+  not-available case, and that silence is why "the platform renamed something" and
+  "this plugin has no settings" looked the same for a whole release.
+- **`tests/client.test.mjs` pins all three icon surfaces** — the 0.1.7 name alone, the
+  ≤ 0.1.6 name alone, and neither — plus both non-ready statuses and the missing hook.
+  The 0.1.7 case fails against the size-suffixed lookup alone, so the rename cannot come
+  back quietly.
+
+**Verified on DSH 0.1.6-alpha.1 and 0.1.7-rc.2.** 0.1.6 is the `real composition` job
+end to end. 0.1.7-rc.2 is installed here: the entry composes with its four editable
+fields and the routes answer, and the shell's own seeded module table was read directly
+to establish the rename this release fixes — the 0.1.7 shell seeds no
+`IconChevronDownOutline14` at all. What is still unverified is the same thing as before:
+there is no browser here, so the card's pixels on a 0.1.7 page have not been seen.
+
 ## 0.9.4
 
 **The settings card appears again on DSH 0.1.7.** 0.9.3 fixed the boot this card was

@@ -32,4 +32,5 @@ code. A change that contradicts a record here needs a new record, not a quiet ed
 | [0025](0025-the-subtitle-names-the-session.md) | The session's name rides in the header's subtitle, which the tenant was measured accepting |
 | [0026](0026-a-delegated-session-is-not-a-conversation.md) | A session a run delegated to gets no card at all: its header says so, and one instruction must not become several cards |
 | [0027](0027-the-fold-is-this-run.md) | The fold is this run and nothing before it, which is the same run the result card folds |
-| [0028](0028-the-settings-transport-is-not-a-dependency.md) | The settings transport is resolved at apply time, so a platform rename costs the card and never the page |
+| [0028](0028-the-settings-transport-is-not-a-dependency.md) | The settings transport is waited for rather than declared, so a platform rename costs the card and never the page |
+| [0029](0029-the-card-degrades-visibly.md) | Platform UI is asked for by capability and the card never renders nothing, because an entry that throws is retired from the page |
