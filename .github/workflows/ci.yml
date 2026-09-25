@@ -102,6 +102,27 @@ jobs:
           echo "verifying $tarball against $(dsh --version)"
           npm run verify:artifact -- "$tarball"
 
+  # The check the branch ruleset requires, under a name that never moves.
+  #
+  # The matrix above names its legs after their harness, because a person reading a red
+  # run needs to know *which* harness failed. A ruleset cannot express that: it matches
+  # check names exactly, so requiring the legs by name means editing repository settings
+  # every time the support window changes — and a required check that no longer exists
+  # blocks every pull request, which is how this job came to exist. The legs stay named
+  # after their harness, and this one asserts all of them passed.
+  composition-gate:
+    name: real composition
+    needs: composition
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "support-window legs: ${{ needs.composition.result }}"
+          [ "${{ needs.composition.result }}" = "success" ] || {
+            echo "a support-window leg did not pass, so the window is not verified"
+            exit 1
+          }
+
   package:
     name: publish payload
     runs-on: ubuntu-latest

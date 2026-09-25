@@ -58,7 +58,10 @@ the release is cut.
 Both legs run on every pull request (`ci.yml`'s `real composition` matrix) and again on the
 tarball a release is about to publish. Adding a harness means adding a leg in both files, with
 the moment its dependency tree was verified — `--before`, which is what stops a published
-subpackage from changing what the leg verifies.
+subpackage from changing what the leg verifies. The branch ruleset requires the check named
+**`real composition`**, which is a job of its own that asserts every leg passed — so growing the
+matrix is a change to `ci.yml` alone, and a required check never disappears because a harness
+was added.
 
 The window moves only at a release, and only in one direction: when a new DSH version appears,
 a release may add a leg for it and drop the oldest one, and the release notes say so. A harness
@@ -90,6 +93,14 @@ git switch main && git pull --ff-only
 git tag -a v0.9.0 -m "Release 0.9.0"
 git push origin v0.9.0
 ```
+
+**Pushing the tag starts a run that waits for you.** The publish job names the `npm-publish`
+environment, which this repository has configured with a required reviewer, so the run sits in
+*waiting* until someone approves the deployment — on the run's page, under **Review
+deployments**. Nothing runs before that approval, and nothing publishes after it without the
+gates below. Self-review is allowed on purpose: a solo maintainer has to be able to approve
+their own tag, or the gate would deadlock every release. If the environment is ever configured
+with no reviewers, the step is inert and the run starts immediately.
 
 ### A release is not done until someone has run it
 
