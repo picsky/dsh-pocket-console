@@ -64,6 +64,17 @@ git tag -a v0.9.0 -m "Release 0.9.0"
 git push origin v0.9.0
 ```
 
+**Every version section states which DSH versions it was verified against**, in both
+halves of the release body — one line, `Verified on DSH 0.1.6-alpha.1 and 0.1.7-rc.2.`
+at the end of the section. `npm run check:dsh-version` refuses a tag whose version
+names none, and `ci.yml` runs it on every pull request, so a version bumped in the tree
+without that line cannot get past either one. This is not bookkeeping: a plugin can
+keep working against the harness it was written for while a newer one removes the
+service it injects, which is exactly how 0.9.2 shipped a version that could not boot
+the Web UI on 0.1.7 — with nothing in its notes to say which harness it had been
+checked against. The verification itself is the `real composition` job, which installs
+the packed tarball into a scratch profile and boots it.
+
 Two things about that flow are enforced rather than advised. **Only the maintainer can create
 a `v*` tag** — a tag is what starts this workflow and therefore what publishes, so a ruleset
 restricts creation to the maintainer and blocks updating or deleting tags. And **the tag must
