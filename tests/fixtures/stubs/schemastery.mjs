@@ -2,7 +2,8 @@
  * Minimal local stand-in for `@deepseek-ai/schemastery`, sufficient to build
  * and resolve this plugin's `Config` without the DSH toolchain. The real Loader
  * owns schema validation in production; this exists only to drive the local
- * logic test.
+ * logic test. `volatile()` and `extra()` are modelled together, because the marker
+ * they write — and the Host's reading of it — is what the settings form is keyed on.
  */
 
 /**
@@ -28,13 +29,30 @@ class Field {
     this.defaultValue = undefined
     this.hasDefault = false
     this.isRequired = false
-    this.isVolatile = false
+    /** What the Host reads to decide a field is editable, and to wrap its value. */
+    this.meta = {}
+  }
+
+  /**
+   * One more meta entry, on a copy — the real library's `extra`, and the call
+   * `volatile()` itself makes in the library that has both.
+   * @param key - the meta entry.
+   * @param value - what it holds.
+   * @returns the field carrying it.
+   */
+  extra(key, value) {
+    const next = new Field(this.kind)
+    next.defaultValue = this.defaultValue
+    next.hasDefault = this.hasDefault
+    next.isRequired = this.isRequired
+    next.values = this.values
+    next.meta = { ...this.meta, [key]: value }
+    return next
   }
 
   /** Mark the field as one the settings form may edit without a remount. */
   volatile() {
-    this.isVolatile = true
-    return this
+    return this.extra('volatile', true)
   }
 
   required() {
@@ -61,7 +79,7 @@ class Field {
       }
       value = input
     }
-    return this.isVolatile ? live(value) : value
+    return this.meta.volatile ? live(value) : value
   }
 }
 

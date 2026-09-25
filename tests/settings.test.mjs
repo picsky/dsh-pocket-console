@@ -234,6 +234,37 @@ test('a Host that projects Config into a form instead of installing a section', 
   desktop.resolve('rejected')
 })
 
+test('a resolved schema library without the volatile() helper still marks the fields', async () => {
+  // A profile resolves this plugin's `*` peer for itself, so a 0.1.7 Host can be
+  // handed a schemastery older than its own — 3.18.1 has `extra()` and no
+  // `volatile()`. The Host reads the marker rather than the helper, so a plugin
+  // that only asks for the helper lands every field unmarked and no form is ever
+  // built for the entry. A fresh module instance is what makes the absence
+  // visible: `Config` is built once, at load.
+  const z = (await import('./fixtures/stubs/schemastery.mjs')).default
+  const Field = Object.getPrototypeOf(z.string())
+  const helper = Field.volatile
+  delete Field.volatile
+  try {
+    const { Config } = await import(`../index.js?without-volatile=${Date.now()}`)
+
+    assert.deepEqual(
+      Object.entries(Config.shape)
+        .filter(([, field]) => field.meta.volatile === true)
+        .map(([name]) => name),
+      ['delaySeconds', 'titlePrefix', 'resultNotify', 'debug'],
+      'the editable slice is marked, with no helper in sight',
+    )
+    assert.equal(
+      typeof Config.resolve({ delaySeconds: 600 }).delaySeconds.get,
+      'function',
+      'and a marked field still resolves to the live reference the form writes through',
+    )
+  } finally {
+    Field.volatile = helper
+  }
+})
+
 test('shortening the wait releases a notice that was already inside its window', async () => {
   const { route, sections, listenerOf, agents } = await scaffold({
     delaySeconds: 600,

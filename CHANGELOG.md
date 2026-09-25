@@ -18,7 +18,8 @@ versions went out in one afternoon while one problem was being fixed — 0.9.3, 
 each with green checks, green tests and a provenance attestation, and each straight onto the
 channel every deployment installs. The two broken ones were found by a person opening the page,
 because nothing in this repository had ever run what a person runs. This changes the version
-line, the channel and the artifact checks; no plugin behaviour changes.
+line, the channel and the artifact checks; the plugin change it carries is the settings fix
+below.
 
 ### Changed
 
@@ -48,6 +49,19 @@ line, the channel and the artifact checks; no plugin behaviour changes.
 - **The client stand-in enforces React's rule for element types**, so the failure that emptied a
   0.1.7 page — an `undefined` component, which React throws on and the slot renderer answers by
   retiring the entry — fails the suite instead of a release.
+
+### Fixed
+
+- **The volatile marker is written rather than requested**, so a Host whose schemastery lacks
+  `volatile()` still gets a form for this plugin's settings. `volatile()` is
+  `extra('volatile', true)` in the library that has both, and the Host reads the marker rather
+  than the helper, so `liveField` falls back to `extra` when the helper is absent. A profile
+  resolves this plugin's `*` peer for itself, which is how a 3.18.1 copy ends up beside a 0.1.7
+  Host: every editable field landed unmarked, no form was built for the entry, and the card
+  could only report that the Host serves no form.
+- **`tests/settings.test.mjs` composes a `Config` from a schema library with the helper
+  removed**, and fails without that fallback — the compatibility floor is pinned rather than
+  assumed.
 
 **Verified on DSH 0.1.6-alpha.1 and 0.1.7-rc.2**, which is the support window this release
 states.
