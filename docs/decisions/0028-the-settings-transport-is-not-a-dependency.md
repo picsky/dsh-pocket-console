@@ -23,14 +23,23 @@ plugins* with nothing on screen to act on.
 
 ## Decision
 
-The browser half's `inject` names only `slots`. The settings transport is resolved when
-the plugin applies, in the order of what the Host actually offers:
-`configForms.get(namespace)` together with the `plugins.item` page, else
+The browser half's `inject` names only `slots`. Both settings transports are then waited
+for with an injection of their own — `ctx.inject(['configForms'], …)` and
+`ctx.inject(['settingsScope'], …)` — and the first to arrive mounts the card:
+`configForms.get(namespace)` together with the `plugins.item` page, or
 `settingsScope.bind({ namespace })` together with the keyed `settings.plugin.item`
-card, and neither one means the desktop mirror still runs, no card is registered, and
-the Host is told why in the mirror's own report. The card registers into whichever slot
-its transport comes with, and answers `view: 'summary'` before it mounts, because the
-0.1.7 page asks for the summary and the form from the same component.
+card — only one card ever mounts. The card answers
+`view: 'summary'` before it mounts, because the 0.1.7 page asks for the summary and the
+form from the same component.
+
+Waiting, rather than sampling, is the part that took a second release to get right.
+`ctx.inject` starts a **child fiber**, which holds nothing back: the entry is active
+either way, so a service that never appears costs the card and never the page. Reading the
+same service once with `ctx.get` fails in the other direction, and it is not a smaller
+version of the bug: 0.1.7's ui-settings injects `['remote', 'remote.settings']`, so it
+provides `configForms` strictly *after* this entry applies, and a read taken while
+applying finds nothing. 0.9.3 shipped that shape — the GUI booted, the mirror ran, and the
+settings card was silently absent from a page that looked perfectly healthy.
 
 The Host half asks by capability for the same reason: `installSection` where the
 service has it, the entry's own volatile fields where it does not, and
@@ -39,9 +48,13 @@ its own page must not also be handed a generated one for the same fields.
 
 ## Consequences
 
-- A platform rename costs the card and never the page. `tests/client.test.mjs` pins the
-  rule by asserting the bundle's `inject` is exactly `['slots']`, so a settings service
-  required again fails the suite instead of a deployment's boot.
+- A platform rename costs the card and never the page; a platform *delay* costs nothing at
+  all. `tests/client.test.mjs` pins both halves of that rule: the bundle's `inject` is
+  exactly `['slots']`, and a case composes `configForms` only after the plugin applied —
+  the order 0.1.7 actually applies in — and asserts the card appears.
+- The card says which seat it mounted on (`pocket-console: settings card mounted on …`,
+  in the page's console). A card that never mounts has no other symptom to read: the page
+  loads, the mirror works, and the only evidence is a line that is not there.
 - The two write paths have the same four members (`getSnapshot`, `subscribe`, `set`,
   `unset`), which is why one `createSettingsForm` serves both hosts and the card
   itself is unchanged between them.
