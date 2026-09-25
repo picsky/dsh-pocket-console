@@ -19,13 +19,24 @@ test('the browser half loads through the module loader and registers its card', 
   const FakeReact = {
     // Trees instead of nulls: a case has to read what the card renders, not only
     // that it registered. Element identity is all this needs — no DOM.
-    createElement: (type, props, ...children) => ({
-      type,
-      props: {
-        ...(props ?? {}),
-        children: children.flat().filter(child => child !== null && child !== undefined && child !== false),
-      },
-    }),
+    //
+    // React's own rule for element types is enforced here because it is the one that
+    // cost a release: an `undefined` type is not a decoration that failed to render,
+    // it is a throw — and the slot renderer answers a throw by retiring the entry, so
+    // the card leaves the page entirely. A stand-in that accepted `undefined` would
+    // have passed the change that emptied a 0.1.7 page.
+    createElement: (type, props, ...children) => {
+      if (typeof type !== 'string' && typeof type !== 'function') {
+        throw new TypeError(`Element type is invalid: expected a string (for built-in components) or a class/function but got: ${String(type)}`)
+      }
+      return {
+        type,
+        props: {
+          ...(props ?? {}),
+          children: children.flat().filter(child => child !== null && child !== undefined && child !== false),
+        },
+      }
+    },
     useCallback: (fn) => fn,
     useEffect: () => {},
     // Real state cells in call order, so a case can press the card's header to
@@ -73,8 +84,7 @@ test('the browser half loads through the module loader and registers its card', 
    * @param primitives - the module table's `@deepseek-ai/dsh-client-ui-primitives`.
    * @returns the id, exports, and requested specifiers the loader captured.
    */
-  const load = async (url, primitives = baseline['@deepseek-ai/dsh-client-ui-primitives']) => {
-    let loaded
+  const load = async (url, primitives = baseline['@deepseek-ai/dsh-client-ui-primitives']) => {    let loaded
     const requested = []
     const previous = globalThis.window
     const table = { ...baseline, '@deepseek-ai/dsh-client-ui-primitives': primitives }
@@ -99,6 +109,14 @@ test('the browser half loads through the module loader and registers its card', 
     }
     return { ...loaded, requested }
   }
+
+  // The stand-in's fidelity, pinned: an `undefined` element type must throw here, or
+  // this suite cannot see the failure that emptied the 0.1.7 page.
+  assert.throws(
+    () => FakeReact.createElement(undefined, {}),
+    /Element type is invalid/,
+    "the stand-in enforces React's own rule for element types",
+  )
 
   const loaded = await load('../client.js?verify')
   assert.equal(loaded.id, 'dsh-pocket-console', 'the module-table row id is the package name')
