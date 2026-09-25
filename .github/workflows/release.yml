@@ -193,12 +193,14 @@ jobs:
       - name: Verify the artifact on DSH 0.1.6-alpha.1
         run: |
           npm install -g @deepseek-ai/dsh@0.1.6-alpha.1 --before=2026-09-17T00:00:00Z
-          tarball=$(ls dsh-pocket-console-*.tgz | head -1)
+          tarball="dsh-pocket-console-$(node -p "require('./package.json').version").tgz"
+          test -f "$tarball" || { echo "no $tarball to verify"; exit 1; }
           npm run verify:artifact -- "$tarball"
       - name: Verify the artifact on DSH 0.1.7-rc.2
         run: |
           npm install -g @deepseek-ai/dsh@0.1.7-rc.2 --before=2026-09-24T15:00:00Z
-          tarball=$(ls dsh-pocket-console-*.tgz | head -1)
+          tarball="dsh-pocket-console-$(node -p "require('./package.json').version").tgz"
+          test -f "$tarball" || { echo "no $tarball to verify"; exit 1; }
           npm run verify:artifact -- "$tarball"
       # Publishing the tarball is the half npm does correctly, and `--provenance` is why
       # it is npm at all: this is the one step that must carry the attestation.

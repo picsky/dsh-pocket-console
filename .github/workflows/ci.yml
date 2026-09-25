@@ -95,7 +95,10 @@ jobs:
       # contributor without a tarball runs `npm run e2e`, which packs the tree itself.
       - run: |
           pnpm pack
-          tarball=$(ls dsh-pocket-console-*.tgz | head -1)
+          # Named from the manifest rather than globbed: a checkout that happens to hold
+          # an older tarball must not decide which artifact this verifies.
+          tarball="dsh-pocket-console-$(node -p "require('./package.json').version").tgz"
+          test -f "$tarball" || { echo "pnpm pack produced no $tarball"; exit 1; }
           echo "verifying $tarball against $(dsh --version)"
           npm run verify:artifact -- "$tarball"
 
