@@ -139,8 +139,7 @@ test('a settings change takes effect without a restart', async () => {
   assert.equal(snapshot.settings.titlePrefix, 'Re')
 })
 
-test('a later settings change replaces the one before it', async () => {
-  const { state, sections } = await scaffold({ delaySeconds: 1 })
+test('a later settings change replaces the one before it', async () => {  const { state, sections } = await scaffold({ delaySeconds: 1 })
   const section = sections.get('pocket-console')
 
   section.change(layer => { layer.delaySeconds = 5 })
@@ -195,6 +194,43 @@ test('lengthening the wait defers a request that has not gone out yet', async ()
   section.change(layer => { layer.delaySeconds = 600 })
   await sleep(1400)
   assert.equal(observed.created.length, 0, 'the longer wait is the one that holds it')
+  desktop.resolve('rejected')
+})
+
+test('a Host that projects Config into a form instead of installing a section', async () => {
+  const { route, state, sections, config, ctx, settingsPolicies, listenerOf } = await scaffold(
+    { delaySeconds: 600 },
+    { settingsSurface: 'forms' },
+  )
+
+  // 0.1.7 dropped `installSection`: the user-tunable slice of a plugin is its own
+  // `Config`, exposed as the fields declared volatile. There is nothing to install
+  // there, and asking for an installer that no longer exists threw inside the
+  // settings child on every load.
+  assert.equal(sections.size, 0, 'no section is installed on this Host')
+  assert.deepEqual(
+    settingsPolicies.map(policy => policy.presentation),
+    [{ auto: false }],
+    'the generated page is turned off, because this plugin ships a card of its own',
+  )
+  assert.equal(settingsPolicies[0].owner, ctx.fiber, 'and is registered against this plugin')
+
+  await bind(route)
+  assert.equal((await state()).settings.delaySeconds, 600, 'the composed value is served')
+
+  // The Loader updates the volatile reference in place when the form writes, and
+  // nothing calls back into the plugin: a value captured at load would keep the
+  // old wait until a restart, which is the failure the section path had to avoid.
+  const approval = listenerOf('approval/request')
+  const desktop = Promise.withResolvers()
+  void approval.handler({ toolName: 'pwsh', signal: new AbortController().signal }, () => desktop.promise)
+  await sleep(300)
+  assert.equal(observed.created.length, 0, 'the composed wait holds the request')
+
+  config.delaySeconds.set(1)
+  assert.equal((await state()).settings.delaySeconds, 1, 'the reference is read at use, not cached at load')
+  await sleep(1400)
+  assert.equal(observed.created.length, 1, 'and re-times a countdown that was already running')
   desktop.resolve('rejected')
 })
 

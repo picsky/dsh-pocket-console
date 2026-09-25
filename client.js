@@ -1,17 +1,24 @@
 /**
  * Browser half of dsh-pocket-console.
  *
- * Registers one card under `settings.plugin.item` keyed by this plugin's
- * settings namespace, which is the documented way a plugin distributed outside
- * the DSH repository contributes a Settings → Plugins card. The tab decides only
- * which namespaces to dispatch, so this card owns its chrome and follows the
- * tokens and layout the shipped cards use.
+ * Registers one card in the Settings → Plugins surface, which is the documented
+ * way a plugin distributed outside the DSH repository contributes a settings
+ * card. The tab decides only which namespaces to dispatch, so this card owns its
+ * chrome and follows the tokens and layout the shipped cards use.
  *
- * Editable values are staged here and written through `ctx.settingsScope`,
- * which fences each write with the revision the card read. The binding state
- * machine is not a settings value: the Host half owns it behind `/__pocket/*` on
- * the same webserver, so the card polls its own routes and needs no Remote
- * method.
+ * Editable values are staged here and written through the settings transport the
+ * running Host provides, which fences each write with the revision the card read.
+ * The transport is resolved at apply time rather than declared in `inject`,
+ * because its name changed under us: up to 0.1.6 the browser half of ui-settings
+ * provides `settingsScope` (a binder onto one settings namespace, dispatched by
+ * the keyed `settings.plugin.item` slot), and from 0.1.7 the same package
+ * provides `configForms` instead (forms keyed by profile entry id, dispatched by
+ * the list `plugins.item` slot of the Plugins page). Both faces expose the four
+ * members this card uses, so only the lookup and the slot differ.
+ *
+ * The binding state machine is not a settings value: the Host half owns it behind
+ * `/__pocket/*` on the same webserver, so the card polls its own routes and needs
+ * no Remote method.
  *
  * Hand-written in the client module system's factory format, so the package
  * ships and installs with no build step. `require` is the shell's module table;
@@ -27,8 +34,22 @@ window.__ModuleLoader__.load({
     const h = React.createElement
     const { IconChevronDownOutline14, Modal } = require('@deepseek-ai/dsh-client-ui-primitives')
 
-    /** Settings namespace; also the `settings.plugin.item` slot key. */
+    /**
+     * Settings namespace. It is the `settings.plugin.item` slot key up to 0.1.6,
+     * and — because the settings document is the entry's own configuration from
+     * 0.1.7 on — the profile entry id the `configForms` form and the
+     * `plugins.item` page are both addressed by.
+     */
     const NS = 'pocket-console'
+
+    /** Settings-card slot up to 0.1.6: one card per settings namespace. */
+    const SETTINGS_ITEM = 'settings.plugin.item'
+
+    /** Settings-page slot from 0.1.7: the Plugins page's list of per-entry pages. */
+    const PLUGINS_ITEM = 'plugins.item'
+
+    /** Where this card's page sits among the Plugins page's own pages. */
+    const PLUGINS_ITEM_ORDER = 40
 
     /** Same-origin route prefix the host half registers. */
     const ROUTE = '/__pocket'
@@ -543,14 +564,20 @@ window.__ModuleLoader__.load({
 
     /**
      * Render one plugin card.
-     * @param props - the form snapshot bound from the hooks compartment, and the form actions.
-     * @returns the card, or nothing when the Host does not serve its namespace.
+     *
+     * The Plugins page asks for this page twice — as the one-line summary beside
+     * the plugin's name, and as the configuration form itself — so the summary is
+     * answered before any hook runs: a mount that returns early after calling
+     * hooks would change its own hook count between the two views.
+     * @param props - the view asked for, the form snapshot bound from the hooks compartment, and the form actions.
+     * @returns the card, the summary line, or nothing when the Host does not serve its namespace.
      */
     function PocketConsoleCard(props) {
       // Resolved per render rather than handed in once, so a language switch is
       // followed by the card's next poll instead of freezing it at page load. See
       // `documentLanguage` for why the attribute is read rather than held.
       const copy = COPY[documentLanguage()]
+      if (props.view === 'summary') return copy.description
       const state = props.usePocketConsole(snapshot => snapshot)
       const shell = state.shell
       const [open, setOpen] = useState(false)
@@ -884,14 +911,40 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * The settings transport the running Host offers, or nothing when it offers
+     * neither.
+     *
+     * Read through `get` rather than declared in `inject`, and that is the whole
+     * point of this function: a required service the Host does not provide leaves
+     * this entry pending forever, and the web shell refuses to boot while any
+     * entry is not active ("Failed to load plugins"). One renamed service must
+     * therefore cost the card, never the page. `get` is also the accessor Cordis
+     * allows without a declaration, so a service that is absent reads as
+     * `undefined` instead of throwing across a proxy boundary.
+     * @param ctx - the browser plugin context.
+     * @returns the bound scope and the slot it belongs in, or undefined.
+     */
+    function settingsTransport(ctx) {
+      const forms = ctx.get?.('configForms')
+      if (forms !== null && forms !== undefined && typeof forms.get === 'function') {
+        return { scope: forms.get(NS), slot: PLUGINS_ITEM, keyed: false }
+      }
+      const scopes = ctx.get?.('settingsScope')
+      if (scopes !== null && scopes !== undefined && typeof scopes.bind === 'function') {
+        return { scope: scopes.bind({ namespace: NS }), slot: SETTINGS_ITEM, keyed: true }
+      }
+      return undefined
+    }
+
+    /**
      * Register the card under this plugin's settings namespace.
      * @param ctx - the browser plugin context.
      */
     function apply(ctx) {
-      const scope = ctx.settingsScope.bind({ namespace: NS })
-      const form = createSettingsForm(scope)
-      const store = createSnapshot(form.projection())
-      form.subscribe(() => { store.set(form.projection()) })
+      const transport = settingsTransport(ctx)
+      const form = transport === undefined ? undefined : createSettingsForm(transport.scope)
+      const store = form === undefined ? undefined : createSnapshot(form.projection())
+      form?.subscribe(() => { store.set(form.projection()) })
 
       /**
        * Mirror one answer the phone already gave onto this page's composer.
@@ -1154,22 +1207,45 @@ window.__ModuleLoader__.load({
         return typeof off === 'function' ? off : () => {}
       }
 
-      ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
-        name: 'settings.plugin.item',
-        key: NS,
-        inject: () => ({
-          // The card resolves its own copy per render (see `documentLanguage`), so
-          // this is the table for the language in force right now. It is handed
-          // over for the mount-time reader — a diagnostic, or a test asserting what
-          // the active language renders as — and never becomes the card's copy.
-          copy: COPY[documentLanguage()],
-          hooks: { pocketConsole: store },
-          edit: form.edit,
-          resetField: form.resetField,
-          save: form.save,
-          discard: form.discard,
-        }),
-      }, PocketConsoleCard))
+      // The card's face, built per registration so it reads the language in force
+      // when the page asks rather than at mount.
+      const cardFace = () => ({
+        // The card resolves its own copy per render (see `documentLanguage`), so
+        // this is the table for the language in force right now. It is handed
+        // over for the mount-time reader — a diagnostic, or a test asserting what
+        // the active language renders as — and never becomes the card's copy.
+        copy: COPY[documentLanguage()],
+        hooks: { pocketConsole: store },
+        edit: form.edit,
+        resetField: form.resetField,
+        save: form.save,
+        discard: form.discard,
+      })
+
+      if (form === undefined) {
+        // A Host that offers no settings transport at all still gets the mirror:
+        // the card is the only thing that cannot exist without one, and saying so
+        // is what separates "this host cannot show the card" from "the card
+        // silently failed to mount".
+        report('no-settings', 'this host offers neither configForms nor settingsScope')
+      } else if (transport.keyed) {
+        ctx.slots.inject(SETTINGS_ITEM, () => ctx.slots.register({
+          name: SETTINGS_ITEM,
+          key: NS,
+          inject: cardFace,
+        }, PocketConsoleCard))
+      } else {
+        // The Plugins page's list of per-entry pages: a list slot is addressed by
+        // `id`, not by the `key` a keyed slot takes, and the label is what the
+        // page lists it under.
+        ctx.slots.inject(PLUGINS_ITEM, () => ctx.slots.register({
+          name: PLUGINS_ITEM,
+          id: NS,
+          order: PLUGINS_ITEM_ORDER,
+          label: () => COPY[documentLanguage()].title,
+          inject: cardFace,
+        }, PocketConsoleCard))
+      }
 
       // Load, then watch. The first report says whether this bundle reached the
       // page at all, which separates a mirror that is not landing from client
@@ -1184,7 +1260,12 @@ window.__ModuleLoader__.load({
       }, 'pocket-console: desktop mirror')
     }
 
-    module.exports = { apply, inject: ['slots', 'settingsScope'] }
+    // `slots` is the only hard dependency. The settings transport is resolved at
+    // apply time on purpose (see `settingsTransport`): naming a service a Host does
+    // not provide here leaves the entry pending, and the web shell refuses to boot
+    // when any entry is not active — so the one service that was renamed between
+    // 0.1.6 and 0.1.7 used to take the whole GUI down with it.
+    module.exports = { apply, inject: ['slots'] }
     return module.exports
   },
 })

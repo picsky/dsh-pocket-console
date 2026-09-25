@@ -60,7 +60,11 @@ function schemaFields(source, marker) {
   const end = source.indexOf('\n})', start)
   if (end === -1) throw new Error(`check-parity: ${marker} has no closing brace`)
   const block = source.slice(start, end)
-  return [...block.matchAll(/^ {2}([A-Za-z][\w]*): z\.[^\n]*/gm)].map((match) => {
+  // A leaf may be wrapped in one call of its own — `liveField(z.natural()…)` marks
+  // the field the 0.1.7 settings form may edit in place — so the `z.` that proves
+  // this line is a schema sits one optional call in, not necessarily right after
+  // the colon. Anything else at this indentation is still not a field.
+  return [...block.matchAll(/^ {2}([A-Za-z][\w]*): (?:[A-Za-z][\w]*\()?z\.[^\n]*/gm)].map((match) => {
     const defaults = [...match[0].matchAll(/\.default\(/g)]
     // The last `.default()` is the effective one: `z.string().default(a).default(b)` ships b.
     const last = defaults.at(-1)

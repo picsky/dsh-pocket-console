@@ -211,7 +211,9 @@ function disposePrevious() {
  *   writes (the environment layer shadows the reference), what the platform
  *   answers when the stored pair is checked at load, whether the durable
  *   medium survives from the previous scaffold (a restart), and whether the
- *   storage medium is held shut so a case can press a card before it answers.
+ *   storage medium is held shut so a case can press a card before it answers, and
+ *   which settings surface the running Host offers — the 0.1.6 section installer
+ *   (the default) or the 0.1.7 form projection, which has no `installSection`.
  */async function scaffold(configOverrides = {}, {
   services = ['settings', 'webServer', 'storageDomain', 'sessionQuery', 'sessionController', 'sessionTitle'],
   stored = {},
@@ -219,6 +221,7 @@ function disposePrevious() {
   tenantToken,
   keepDurable = false,
   holdStorage = false,
+  settingsSurface = 'section',
 } = {}) {
   // The previous deployment is shut down before anything of this one exists.
   //
@@ -404,7 +407,17 @@ function disposePrevious() {
       }
     },
   }
-  const settings = {
+  /**
+   * The running settings service, as one of its two shapes.
+   *
+   * Up to 0.1.6 it installs a section of its own and hands over a source that
+   * re-reads the document. From 0.1.7 it installs nothing: it projects each
+   * entry's own `Config` instead, which is why the resolved config above hands
+   * the volatile fields over as live references and `configure` is the only
+   * method a plugin calls on it. A case that composes this shape edits the
+   * reference the way the Loader does — `config.delaySeconds.set(600)`.
+   */
+  const sectioned = {
     installSection(owner, ns, schema, entry, hooks) {
       // The real provider hands over a source exactly once and afterwards only
       // reports that something changed, so a case edits the user layer and calls
@@ -427,6 +440,17 @@ function disposePrevious() {
       hooks.onChange()
     },
   }
+  const projected = {
+    /** Whether the active profile accepts form edits, as the real service reports. */
+    writable: true,
+    /** The policy a plugin owning its own page registers. */
+    policies: [],
+    configure(presentation, owner) {
+      this.policies.push({ presentation, owner })
+      return () => {}
+    },
+  }
+  const settings = settingsSurface === 'forms' ? projected : sectioned
   const composed = new Set(services)
   /** What the composed trust fence answers, when one is composed. */
   let rejection
@@ -454,6 +478,9 @@ function disposePrevious() {
     }
   }
   const ctx = {
+    // The plugin's own fiber, which is the identity a settings page policy is
+    // registered against. Cordis contexts carry one; this one is named.
+    fiber: { id: 'pocket-console' },
     logger: {
       warn: (error) => { warnings.push(error) },
       info: (message) => { infos.push(String(message)) },
@@ -587,6 +614,8 @@ function disposePrevious() {
     routes, sections, route, json, state, listenerOf, compose, agents: registry, titles, emitToAll, emitFrame,
     lastDelivered, cardFrom, cardsSent, cardTitled,
     sessionQuery, storageDomain, sessionController,
+    /** The page policies a plugin registered, on a Host that projects forms. */
+    settingsPolicies: projected.policies,
     /** Let a held medium answer, so the pending open and restore can finish. */
     releaseStorage: () => { storageGate?.resolve() },
   }

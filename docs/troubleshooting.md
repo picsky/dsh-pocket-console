@@ -23,11 +23,25 @@ dsh-pocket-console@0.7.6` — and re-add the plain name later if you would rathe
 releases automatically. pnpm also caches registry metadata, so a version published
 minutes ago can stay invisible until that cache refreshes.
 
+**The page stops at "Failed to load plugins" and nothing opens at all.**
+That page is the web shell refusing to start, not a card that failed: it requires every
+plugin it loaded to reach the active state, and an entry whose required Cordis service
+is missing waits forever. The parentheses name the service. This plugin was that entry
+on DSH 0.1.7, which renamed the browser settings service the card was bound to
+(`settingsScope` → `configForms`) and moved the host's editable fields off
+`settings.installSection` and onto the entry's own volatile `Config`; versions up to
+0.9.2 required the old names, so one renamed service took the whole interface down.
+The fix resolves the settings transport when the plugin applies instead, so a rename
+costs the card and never the page; see the changelog for the release that carries it.
+To get back in on an affected version, remove the plugin
+(`dsh plugin --profile web remove dsh-pocket-console`) and upgrade.
+
 **The Settings card does not appear.**
 The card is keyed on the settings namespace the Host serves. Check the plugin loaded
 (`dsh --profile web --dump-config` should list a `# == dsh-pocket-console` layer), then
 reload the page — the served namespace list re-reads on a document commit or a
-reconnect, not on registration.
+reconnect, not on registration. On DSH 0.1.7 and later there is no Settings card at
+all: the same page is under the sidebar's **Plugins** entry, on this plugin's own page.
 
 ## Binding
 
