@@ -14,6 +14,20 @@ genuinely does not touch, and say why in the notes.
 
 Closes #
 
+## If this is a release PR
+
+<!-- Delete this block for anything that is not a release. The full process is docs/releasing.md. -->
+
+- [ ] the version bump, the changelog section and `RELEASE-NOTES.zh.md` agree
+- [ ] both halves of the release body name the DSH versions verified (`npm run check:dsh-version`)
+- [ ] the support window in `docs/releasing.md` and `README.md` matches `ci.yml`'s `real composition` matrix
+- [ ] the version is a **batch** — everything merged since the last release, not one fix
+- [ ] a plain version is meant for `latest`; a candidate is `-rc.N` and publishes to `next`
+- [ ] **after** the tag publishes a candidate: installed it into a real profile and used it — the
+      card is visible, the settings load and save, binding still works — with the evidence
+      (console line, screenshot, or `/__pocket/state`) linked here, and only then promoted with
+      `npm dist-tag add dsh-pocket-console@<version> latest`
+
 ## Checklist
 
 - [ ] `npm test` is green, and new behaviour has a case in `tests/` that fails without it

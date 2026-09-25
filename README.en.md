@@ -113,11 +113,37 @@ These are honest gaps, not choices.
 
 If you want the computer in your hand, install one of the first three. This plugin is for the other case: **the computer stays where it is, and only the decisions — and the conversation's next step — travel.**
 
+## Supported DSH versions
+
+A plugin is verified against a *harness*, not against DSH in general. This one supports **two at
+a time**: the oldest it was written for, and the newest that exists when a release is cut.
+
+| DSH | What is verified on it |
+|---|---|
+| `0.1.6-alpha.1` | the whole pipeline: the installed settings section and the keyed settings card (Settings → Plugins → Plugin configuration) |
+| `0.1.7-rc.2` | the whole pipeline: the entry's own volatile `Config` and the sidebar's **Plugins** page |
+
+Both legs run on every pull request (`ci.yml`'s `real composition` matrix), and again before a
+release against **the tarball about to be published**: it is installed into a throwaway profile,
+the real `dsh web` is booted, its own routes are read, the boot manifest is checked for this
+plugin's entry, and the client bundle the shell would serve is compared with the one the tarball
+installed.
+
+The window moves only at a release: when a new DSH version appears, a release may add a leg and
+drop the oldest, and the release notes say so. A harness outside the window may well work —
+nothing here claims it does.
+
+**Versioning**: a version number is a *batch* of changes verified together, not one fix per
+release. A version with a prerelease suffix (`0.9.6-rc.1`) publishes to npm's `next` channel
+only, and is promoted to `latest` by hand — `npm dist-tag add` — after a person has run it. So
+`latest` only ever points at a version someone has actually used. The full rules are in
+[docs/releasing.md](docs/releasing.md) and [decision 0030](docs/decisions/0030-a-release-is-a-batch-a-person-ran.md).
+
 ## For developers
 
 - **Shape**: a `dsh.bundle` profile layer, plain ESM, **no build step**; the published package is about 4 MB because the Feishu transport and its dependencies are bundled inside the tarball.
 - **Tests**: `npm test`. No install, no network and no credentials — the production dependencies are replaced by in-repo stubs.
-- **Gates**: `npm run check:parity` (one setting has to agree in six places) and `npm run e2e` (installs the packed artifact into a real `dsh web` to prove it activates). That is what CI runs: `verify` on two Node versions, `real composition`, `publish payload`.
+- **Gates**: `npm run check:parity` (one setting has to agree in six places) and `npm run e2e` (packs the working tree and proves the artifact activates and boots its browser half in a real `dsh web`). CI runs `verify` on two Node versions, `real composition` on every harness in the support window against the tarball, and `publish payload`.
 - **Before changing something**: [docs/decisions/](docs/decisions/) records why it is shaped this way; [docs/development.md](docs/development.md) covers the suite and debugging.
 - **How a change lands**: [CONTRIBUTING.md](CONTRIBUTING.md); what changed when is in [CHANGELOG.md](CHANGELOG.md). Writing a transport other than Feishu: [the channel contract](providers/README.md).
 

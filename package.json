@@ -65,7 +65,8 @@
     "prepack": "node scripts/verify-pack.mjs",
     "check:parity": "node scripts/check-parity.mjs",
     "check:dsh-version": "node scripts/check-dsh-version.mjs",
-    "e2e": "node scripts/e2e-profile.mjs"
+    "e2e": "node scripts/e2e-profile.mjs",
+    "verify:artifact": "node scripts/e2e-profile.mjs"
   },
   "keywords": [
     "dsh",
