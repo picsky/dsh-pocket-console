@@ -96,7 +96,11 @@ test('the browser half loads through the module loader and registers its card', 
 
   const loaded = await load('../client.js?verify')
   assert.equal(loaded.id, 'dsh-pocket-console', 'the module-table row id is the package name')
-  assert.deepEqual(loaded.exports.inject, ['slots', 'settingsScope'])
+  // `slots` is the only thing this bundle may require. The settings transport is
+  // resolved at apply time instead, because its service name changed under the
+  // plugin: naming `settingsScope` here is what made a 0.1.7 Host hold this entry
+  // pending, and the web shell refuses to boot while any entry is not active.
+  assert.deepEqual(loaded.exports.inject, ['slots'], 'no service whose name a Host may have renamed is required')
   assert.equal(typeof loaded.exports.apply, 'function')
   assert.deepEqual(
     [...new Set(loaded.requested)].sort(),
@@ -151,16 +155,29 @@ test('the browser half loads through the module loader and registers its card', 
 
   /**
    * Apply one loaded browser half against a stand-in host context.
+   *
+   * Every optional service is reached the way the bundle reaches it — through
+   * `get`, which is the accessor that needs no `inject` declaration — so a case
+   * can compose the 0.1.6 surface, the 0.1.7 one, or neither.
    * @param module - the loaded browser half.
+   * @param own - which settings surface this stand-in composes: the 0.1.6
+   *   `settingsScope` (the default), the 0.1.7 `configForms`, or neither.
    * @returns what the card registered and bound.
    */
-  const applyTo = (module) => {
-    const seen = { inject: [], register: [], bind: undefined, effects: [] }
+  const applyTo = (module, own = {}) => {
+    const seen = { inject: [], register: [], bind: undefined, forms: undefined, effects: [] }
+    const services = { uiSession }
+    if (own.surface === 'forms') {
+      // 0.1.7: no `settingsScope` at all, and the form is looked up by profile
+      // entry id rather than bound by namespace.
+      services.configForms = { get(namespace) { seen.forms = namespace; return scope } }
+    } else if (own.surface !== 'none') {
+      services.settingsScope = { bind(spec) { seen.bind = spec; return scope } }
+    }
     module.apply({
-      settingsScope: { bind(spec) { seen.bind = spec; return scope } },
       // The Session UI is reached through `get` because the browser half stays
       // loadable without it; the mirror reads the pending interaction there.
-      get: (name) => name === 'uiSession' ? uiSession : undefined,
+      get: (name) => services[name],
       effect(factory) {
         const disposer = factory()
         seen.effects.push(disposer)
@@ -179,6 +196,7 @@ test('the browser half loads through the module loader and registers its card', 
     return {
       ...seen,
       registered: seen.register.find(entry => entry.options.name === 'settings.plugin.item'),
+      page: seen.register.find(entry => entry.options.name === 'plugins.item'),
     }
   }
 
@@ -842,5 +860,56 @@ test('the browser half loads through the module loader and registers its card', 
   } finally {
     globalThis.fetch = previousUnbindFetch
   }
+
+  // 0.1.7 renamed the browser settings service: `settingsScope` is gone, ui-settings
+  // provides `configForms` instead, a form is addressed by the profile entry id the
+  // settings document is keyed by, and the Plugins page dispatches its pages through
+  // `plugins.item`. The card has to find that surface too.
+  const modern = applyTo(loaded.exports, { surface: 'forms' })
+  assert.deepEqual(modern.inject, ['plugins.item'], 'the Plugins page is the 0.1.7 seat for a settings page')
+  assert.equal(modern.bind, undefined, 'nothing binds a namespace scope the Host no longer provides')
+  assert.equal(modern.forms, 'pocket-console', 'the form is looked up by the entry id its settings are keyed by')
+  assert.equal(modern.page.options.id, 'pocket-console', 'a list slot is addressed by id')
+  assert.equal(modern.page.options.key, undefined, 'and not by the key a keyed slot takes')
+  assert.equal(typeof modern.page.options.label, 'function', 'the page names itself in the Plugins list')
+  assert.equal(modern.page.options.label(), 'Pocket console', 'in the language in force')
+
+  const modernFace = modern.page.options.inject()
+  assert.equal(typeof modernFace.save, 'function', 'the 0.1.7 form face carries the same actions')
+  assert.deepEqual(
+    Object.keys(modernFace.hooks),
+    ['pocketConsole'],
+    'and the same hooks compartment, so the card is one component on both surfaces',
+  )
+  // The page is rendered twice by the Plugins page: as the one-line summary beside
+  // the plugin's name, and as the form. The summary must answer without mounting,
+  // which is why the renderer is handed a hook that would throw if it were called.
+  assert.equal(
+    modern.page.Component({
+      ...modernFace,
+      view: 'summary',
+      usePocketConsole: () => { throw new Error('a summary is not a mount') },
+    }),
+    modernFace.copy.description,
+    'the summary view renders the page description, not the form',
+  )
+
+  modernFace.edit('delaySeconds', '77')
+  await modernFace.save()
+  assert.equal(section.delaySeconds, 77, 'a 0.1.7 form write lands in the same namespace')
+  modernFace.resetField('delaySeconds')
+  await modernFace.save()
+  assert.equal(section.delaySeconds, 120, 'and a reset re-inherits it again')
+
+  // A Host that offers neither surface still has to boot this entry: the mirror is
+  // the part that must work without one, and the card is the only thing lost. A
+  // hard `inject` on either name is what turned that loss into a page that would
+  // not load at all.
+  const bare = applyTo(loaded.exports, { surface: 'none' })
+  assert.deepEqual(bare.register, [], 'no card is registered without a settings surface')
+  assert.equal(bare.effects.length, 1, 'the mirror still runs')
+  assert.equal(typeof bare.effects[0], 'function', 'and is disposable')
+  bare.effects[0]()
+  modern.effects[0]()
 })
 

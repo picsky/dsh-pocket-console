@@ -38,8 +38,9 @@ promise.
 ## Settings you can change at runtime
 
 Four settings are the **settings namespace**: they are editable from the Settings
-card (Settings → Plugins → Plugin configuration → "Pocket console"), marked ★ in the
-table below, and take effect on the next decision with no restart.
+card (Settings → Plugins → Plugin configuration → "Pocket console"; from DSH 0.1.7
+the same card lives in the sidebar's **Plugins** page, on this plugin's own page),
+marked ★ in the table below, and take effect on the next decision with no restart.
 
 ## The states the card can report
 

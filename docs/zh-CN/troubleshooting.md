@@ -15,10 +15,21 @@ git 依赖会从 registry 解析它自己的依赖，于是 pnpm ≥11 会撞上
 `dsh plugin --profile web add dsh-pocket-console@0.7.6`——之后想自动跟随发布，再改回不带版本的写法。
 另外 pnpm 会缓存 registry 元数据，几分钟前刚发布的版本可能在那份缓存刷新前一直看不见。
 
+**页面停在「Failed to load plugins」，整个界面都打不开。**
+这一页是 Web shell 拒绝启动，不是"某张卡片出错"：它要求自己加载的每个插件都进入 active 状态，
+而所需 Cordis 服务缺失的条目会永远等待——括号里写的就是缺哪个服务。DSH 0.1.7 上本插件正是那一条：
+它把卡片绑定的浏览器端设置服务改了名（`settingsScope` → `configForms`），宿主侧的可编辑字段也从
+`settings.installSection` 挪到条目自己的 volatile `Config` 上；0.9.2 及更早版本要求旧名字，
+于是一个改了名的服务把整个界面一起拖垮。修复后改成在插件 apply 时解析设置通道：
+改名最多让卡片不显示，不会影响页面（具体版本见 CHANGELOG）。
+若你用的是受影响的版本，先卸掉插件
+（`dsh plugin --profile web remove dsh-pocket-console`）再升级。
+
 **设置卡片没出现。**
 卡片按 Host 服务的设置命名空间键控。先确认插件加载了
 （`dsh --profile web --dump-config` 应列出 `# == dsh-pocket-console` 层），
 然后刷新页面——已服务命名空间列表只在文档提交或重连时重读，不在注册时。
+DSH 0.1.7 起设置里已经没有这张卡片：同一个页面在侧边栏的**插件**入口里、本插件自己的配置页上。
 
 **点「扫码创建应用」失败，或不出二维码。**
 一键创建流程需要能访问 `open.feishu.cn`。如果主机走代理，确认该域名可达。

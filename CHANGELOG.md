@@ -13,6 +13,17 @@ as the English half.
 
 ## Unreleased
 
+**The Web UI loads again on DSH 0.1.7, where the browser settings service this card was bound
+to no longer exists.** 0.1.7's client half of `ui-settings` stopped providing `settingsScope`
+— its forms are `configForms` now, keyed by profile entry id — and its host half stopped
+providing `installSection`, because a plugin's editable fields are its own `Config` with the
+editable ones marked `.volatile()`. This plugin named `settingsScope` in its client `inject`,
+and Cordis never activates an entry whose required service is missing, so the web shell's own
+boot check found a pending entry and refused to start the page at all: the whole interface
+stopped at *Failed to load plugins*, not just this plugin's card. The cost of a settings
+rename is now the card and never the page. Both halves understand the old contract and the
+new one, so nothing changes on DSH ≤ 0.1.6. ([#75](https://github.com/picsky/dsh-pocket-console/issues/75))
+
 **The README now leads in Chinese.** `README.md` is the Chinese README — the language a
 new reader meets first, on GitHub and on the npm page — and the English one moved to
 `README.en.md`. Both introductions now describe the plugin's full scope in the order a
@@ -20,6 +31,32 @@ reader meets it: approvals, `ask_user_question` questions, a finished run's resu
 reply to, the next task it can hand you, and the run's live progress while the phone
 holds the person — instead of only the two waterfall moments. The npm and GitHub
 descriptions are now in Chinese, with the same scope. No plugin behaviour changed.
+
+### Fixed
+
+- **The browser half requires only `slots`.** `settingsScope` was the one hard dependency it
+  could not afford: a service a Host does not provide leaves the entry pending forever, and
+  the web shell treats a pending entry as a failed boot. The settings transport is resolved
+  when the plugin applies instead — `ctx.get('configForms')` first, then
+  `ctx.get('settingsScope')`, and neither means the desktop mirror still runs with no card
+  registered and a line in the host-side report saying why.
+- **The card finds its seat on either settings surface.** Up to 0.1.6 that is the keyed
+  `settings.plugin.item` slot, dispatched by settings namespace; from 0.1.7 it is the Plugins
+  page's `plugins.item` list, addressed by profile entry id — and that page renders each entry
+  twice, so the card answers the one-line `view: 'summary'` before it mounts its form.
+- **The host half no longer needs `installSection`.** Where the service offers it, the section
+  is installed exactly as before. Where it does not, the four user-tunable fields are declared
+  volatile — guarded by capability, because Schemastery 3.18.2 ships without `.volatile()` — and
+  read from their live references, which is what the 0.1.7 form writes into. The generated page
+  for those same fields is turned off there, since this plugin draws its own.
+- **Settings are read live on 0.1.7 too.** Every consumer already took the values as a thunk;
+  what changed is that the thunk no longer reads a snapshot taken at load. 0.1.7 has no change
+  event for a volatile field, so a countdown that is already running would have kept the wait it
+  was armed with — the reading this plugin exists to avoid — and now re-times itself when the
+  values that time it change.
+- **`scripts/check-parity.mjs` reads a wrapped leaf.** A `Config` field may now be wrapped in
+  one call of its own (`liveField(z.natural()…)`), so the gate accepts one wrapper before the
+  `z.` that proves a line is a schema, and still ignores anything else at that indentation.
 
 ## 0.9.2
 

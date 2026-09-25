@@ -39,6 +39,34 @@ export const name = 'pocket-console'
 export const inject = ['credentials']
 
 /**
+ * Mark one `Config` field as editable through the running Host's settings form.
+ *
+ * Up to 0.1.6 the user-tunable slice of this plugin is installed as a settings
+ * section of its own and `Config` stays plain. From 0.1.7 the settings service
+ * projects each entry's own `Config` instead — but exposes only the fields
+ * declared volatile, whose value then arrives as a reference read with `get()`
+ * rather than as the value itself. Schemastery 3.18.2, which the 0.1.6 host
+ * carries, has no `volatile()`, so asking for it unconditionally would keep the
+ * plugin from loading on a host one release older.
+ * @param schema - the field's schema.
+ * @returns the schema, volatile wherever the runtime understands that.
+ */
+const liveField = (schema) => (typeof schema.volatile === 'function' ? schema.volatile() : schema)
+
+/**
+ * Read one `Config` field, whichever shape the running Host handed over.
+ *
+ * A volatile field is a stable reference the Loader updates in place when the
+ * settings form writes, so it has to be read at use rather than captured at load;
+ * every other field is the value itself.
+ * @param value - the resolved `Config` field.
+ * @returns the value in force right now.
+ */
+const readField = (value) => (
+  value !== null && typeof value === 'object' && typeof value.get === 'function' ? value.get() : value
+)
+
+/**
  * Plugin configuration. Channel-neutral values live here; a channel's own
  * settings travel in `channelConfig`, which that module owns and validates
  * because the set differs per transport.
@@ -54,9 +82,9 @@ export const Config = z.object({
   /** Channel-owned settings, passed through untouched. @default {} */
   channelConfig: z.any().default({}),
   /** Seconds the desktop GUI may answer before the channel is used. @default 120 */
-  delaySeconds: z.natural().default(120),
+  delaySeconds: liveField(z.natural().default(120)),
   /** Title prefix identifying the deployment. @default 'DSH' */
-  titlePrefix: z.string().default('DSH'),
+  titlePrefix: liveField(z.string().default('DSH')),
   /**
    * Whether a stopped session's answer is offered to the channel with a box for
    * the next instruction. `'idle'` enables it; `'off'` leaves the channel to
@@ -64,7 +92,7 @@ export const Config = z.object({
    * hears about is the state this plugin exists to fix.
    * @default 'idle'
    */
-  resultNotify: z.union(['off', 'idle']).default('idle'),
+  resultNotify: liveField(z.union(['off', 'idle']).default('idle')),
   /**
    * Seconds before the same session may notify again, so a session running many
    * short turns does not flood the channel. The quiet window already collapses a
@@ -93,7 +121,7 @@ export const Config = z.object({
    * is for.
    * @default 'off'
    */
-  debug: z.union(['off', 'on']).default('off'),
+  debug: liveField(z.union(['off', 'on']).default('off')),
   /**
    * Language of the cards sent to the phone, used until a browser tells the Host
    * which language the interface is in. A deployment that never opens the Web UI
@@ -188,34 +216,39 @@ export async function apply(ctx, config) {
     throw new TypeError(`pocket-console: channel ${config.channel} must export create()`)
   }
   /**
-   * Effective user-tunable configuration. The composition entry is the base
-   * layer; a mounted settings provider lets the Settings card override it at
-   * runtime, and losing that provider restores exactly what the deployment
-   * composed. The card polls its own state route, so no change push is needed.
+   * Effective user-tunable configuration, read now.
+   *
+   * Two live-ness models meet here, and neither may be cached. Up to 0.1.6 a
+   * mounted settings provider installs a section of its own over {@link entry}
+   * and hands over a source that re-reads the document; from 0.1.7 there is no
+   * such section — the settings service projects the plugin's own `Config`
+   * instead, and the fields declared volatile are references the Loader updates in
+   * place when the form writes, so the value has to be taken from the reference at
+   * use. `liveEntry` covers the second and the provider's source overrides it for
+   * the first, which is also what restores exactly what the deployment composed
+   * when no provider is mounted. The card polls its own state route, so no change
+   * push is needed either way.
    *
    * It is resolved before the channel because the copy thunk below reads it: a
    * channel resolves its own defaults at creation, and one of them is copy.
    */
-  const entry = Object.freeze({
-    delaySeconds: config.delaySeconds,
-    titlePrefix: config.titlePrefix,
-    resultNotify: config.resultNotify,
-    resultNotifyCooldownSeconds: config.resultNotifyCooldownSeconds,
-    mirrorTtlSeconds: config.mirrorTtlSeconds,
-    locale: config.locale,
+  const liveEntry = () => Object.freeze({
+    delaySeconds: readField(config.delaySeconds),
+    titlePrefix: readField(config.titlePrefix),
+    resultNotify: readField(config.resultNotify),
+    resultNotifyCooldownSeconds: readField(config.resultNotifyCooldownSeconds),
+    mirrorTtlSeconds: readField(config.mirrorTtlSeconds),
+    locale: readField(config.locale),
   })
-  let settings = entry
+  /** The composition layer: what the deployment composed, before any user edit. */
+  const entry = liveEntry()
 
   /**
-   * Read the effective settings back from the provider.
-   *
-   * The provider hands over a source once and then only reports that something
-   * changed, so the current value has to be read through that source on every
-   * change. Keeping whatever the source returned at install time meant a card edit
-   * reached the plugin only after a restart — the one thing a settings card must
-   * never require.
+   * The source of the effective values. Replaced by the settings provider when one
+   * is mounted; volatile `Config` fields need no replacement, because reading them
+   * is already reading the document the form writes into.
    */
-  let readSettings = () => entry
+  let readSettings = liveEntry
 
   /**
    * The two machines that count a wait down, declared before anything can re-time
@@ -226,6 +259,34 @@ export async function apply(ctx, config) {
   let results
 
   /**
+   * The values a countdown was last timed from.
+   *
+   * 0.1.7 has no change event for a volatile field — the form writes the document
+   * and the reference simply reads differently — so re-timing cannot be driven by
+   * a notification there. Comparing the timing values on every read re-arms on the
+   * next read instead, and by then the card's own poll has already asked.
+   */
+  const timingOf = (values) => [values.delaySeconds, values.resultNotify, values.resultNotifyCooldownSeconds].join('|')
+  let timing = timingOf(entry)
+
+  /**
+   * The effective settings, and the one place a change is noticed.
+   * @returns the values in force right now.
+   */
+  const settingsNow = () => {
+    const next = readSettings()
+    const now = timingOf(next)
+    if (now !== timing) {
+      // Recorded before re-timing: re-arming reads the settings again, and a
+      // detector that had not already moved on would recurse through it.
+      timing = now
+      escalation?.rearm()
+      results?.rearm()
+    }
+    return next
+  }
+
+  /**
    * Read the new values, then re-time everything already counting them down.
    *
    * An escalation's timer and a notice's calm window are armed from the value in
@@ -234,9 +295,7 @@ export async function apply(ctx, config) {
    * restart `dsh`, which withdraws every outstanding notice for nothing.
    */
   const reloadSettings = () => {
-    settings = readSettings()
-    escalation?.rearm()
-    results?.rearm()
+    settingsNow()
   }
 
   /**
@@ -246,7 +305,7 @@ export async function apply(ctx, config) {
    */
   let uiLocale
   /** The card copy in the language the reader is actually reading. */
-  const messages = () => messagesFor(uiLocale ?? settings.locale)
+  const messages = () => messagesFor(uiLocale ?? settingsNow().locale)
 
   // The channel renders its own chrome, so it reads the same copy the core does.
   const channel = await module.create({
@@ -272,15 +331,30 @@ export async function apply(ctx, config) {
   // the composition entry alone. The owner stays this plugin's context: the
   // provider asks it whether the consumer is unloading before it restores that
   // entry as the source.
+  //
+  // `installSection` is the ≤0.1.6 contract. 0.1.7 projects the entry's own
+  // `Config` into a form instead of accepting a section, so there is nothing to
+  // install there — the volatile fields above are already what the card edits —
+  // and the generated page for them is turned off because this plugin ships its
+  // own. Both are asked for by capability rather than by version, so either
+  // service shape loads.
   ctx.inject(['settings'], (settingsCtx) => {
-    settingsCtx.settings.installSection(ctx, NAME, SectionSchema, entry, {
-      setSource: (source) => { readSettings = source; reloadSettings() },
-      onChange: reloadSettings,
-    })
+    const settingsService = settingsCtx.settings
+    if (typeof settingsService.installSection === 'function') {
+      settingsService.installSection(ctx, NAME, SectionSchema, entry, {
+        setSource: (source) => { readSettings = source; reloadSettings() },
+        onChange: reloadSettings,
+      })
+    }
+    if (typeof settingsService.configure === 'function') {
+      // The policy is registered against this plugin's own fiber, which is the
+      // identity the form projection keys it by.
+      settingsCtx.effect(() => settingsService.configure({ auto: false }, ctx.fiber))
+    }
   })
 
   // The decision the phone took, and what the browser half did with it.
-  const mirror = createMirror({ log, settings: () => settings, messages })
+  const mirror = createMirror({ log, settings: settingsNow, messages })
 
   // What each card on the phone calls its session's workspace, kept beside the message
   // rather than only on the record: a card rewritten after a restart has no record left.
@@ -295,7 +369,7 @@ export async function apply(ctx, config) {
   const priority = createPriority({
     ctx,
     log,
-    settings: () => settings,
+    settings: settingsNow,
     messages,
     // What a return to the desk is *for*: a request that arrived while the phone held the person
     // skipped the head start rather than shortening it, and without this it would stay on the
@@ -313,7 +387,7 @@ export async function apply(ctx, config) {
   // Where the plugin says what it decided about a card, when the deployment asks to hear it. Built
   // once and handed to the modules that decide, so "why did that card not change" has one answer in
   // one place instead of three modules each inventing their own line.
-  const diagnostics = createDiagnostics({ settings: () => settings, log })
+  const diagnostics = createDiagnostics({ settings: settingsNow, log })
 
   // What each session is called, for the small line under a card's title. A project with two sessions
   // running in it makes two identical titles, and the name is the only thing that separates them —
@@ -325,14 +399,14 @@ export async function apply(ctx, config) {
   // The escalation machine owns the timer, the race, and the pending registry;
   // this file only wires it to the two seams and the channel's actions.
   escalation = createEscalation({
-    log, channel, settings: () => settings, mirror, messages, workspaces, priority, sessionNames,
+    log, channel, settings: settingsNow, mirror, messages, workspaces, priority, sessionNames,
     diagnostics,
   })
 
   // The activity card follows a run while it runs, but only once the phone holds the person:
   // while the desk has them, the run is visible where they already are.
   const activity = createActivity({
-    ctx, log, channel, settings: () => settings, messages, priority, workspaces, sessionNames,
+    ctx, log, channel, settings: settingsNow, messages, priority, workspaces, sessionNames,
     diagnostics,
   })
 
@@ -344,7 +418,7 @@ export async function apply(ctx, config) {
   // notice as a card of its own, which cost a second notification for one run; now it rides on the
   // result card, so the offer is handed *to* the notifier rather than called after it.
   const work = createWork({
-    ctx, log, channel, settings: () => settings, messages, workspaces, priority,
+    ctx, log, channel, settings: settingsNow, messages, workspaces, priority,
   })
   // Result notices ride the session firehose rather than a live request, so a
   // turn that ends while nobody is watching still reaches the phone.
@@ -352,7 +426,7 @@ export async function apply(ctx, config) {
     ctx,
     log,
     channel,
-    settings: () => settings,
+    settings: settingsNow,
     messages,
     workspaces,
     priority,
@@ -372,7 +446,7 @@ export async function apply(ctx, config) {
   /** The card's status snapshot: what the section serves and what is open. */
   const snapshot = async () => ({
     namespace: NAME,
-    settings: { ...settings },
+    settings: { ...settingsNow() },
     /** Which side is in force, which is what the effective wait follows. */
     priority: priority.get(),
     /** Open escalations, each with what it is waiting on. */
