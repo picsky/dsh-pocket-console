@@ -11,7 +11,7 @@ A version's GitHub Release body is assembled from two sources, Chinese first: th
 version's section of `RELEASE-NOTES.zh.md`, then this file's section for that version
 as the English half.
 
-## Unreleased
+## 0.9.5
 
 **The settings card shows on DSH 0.1.7, and says so when it cannot.** 0.9.4 finally
 mounted the card there and the page was still empty: 0.1.7 renamed the shell's icon
