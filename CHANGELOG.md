@@ -11,6 +11,36 @@ A version's GitHub Release body is assembled from two sources, Chinese first: th
 version's section of `RELEASE-NOTES.zh.md`, then this file's section for that version
 as the English half.
 
+## Unreleased
+
+**The settings card appears again on DSH 0.1.7.** 0.9.3 fixed the boot this card was
+taking down with it, and then the card it was for was not there: the transport was read
+once, while the plugin applied, and 0.1.7's ui-settings injects
+`['remote', 'remote.settings']` — so it provides `configForms` strictly *later*, the read
+found nothing, and no card was registered at all. The mirror ran, the page loaded, and the
+only symptom was a setting nobody could reach. Each transport is now waited for with
+`ctx.inject`, which mounts the card the moment its service appears without holding the
+entry back.
+
+### Fixed
+
+- **The settings transport is waited for, not sampled.** `ctx.get` answers for the moment
+  it is called, and this entry applies as soon as its own dependency — `slots` — is there,
+  which on 0.1.7 is before the settings provider has applied. `ctx.inject` starts a child
+  fiber that waits for the service and mounts the card when it arrives; a service that
+  never arrives still costs only the card, which is what the child fiber is for.
+  `tests/client.test.mjs` composes `configForms` *after* the plugin applied — the order
+  0.1.7 actually runs in — and fails without this.
+- **The card says where it mounted.** `pocket-console: settings card mounted on
+  plugins.item` (or `settings.plugin.item`) in the page's console, and nothing at all when
+  no transport ever arrived. A card that never mounts has no other symptom: the page is
+  healthy, the mirror is working, and the only evidence is an absent line.
+- **Where the card lives on 0.1.7 is now spelled out.** It is a card in the sidebar's
+  **Plugins** page, listed with `plugins.item` — which that page renders in its *Official*
+  group, alongside the pages the installation ships. Settings keeps only the read-only
+  plugin list there. `README.md`, both configuration pages, and the troubleshooting entry
+  say so, because "the setting is gone" and "the setting moved" looked identical.
+
 ## 0.9.3
 
 **The Web UI loads again on DSH 0.1.7, where the browser settings service this card was bound

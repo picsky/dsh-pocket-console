@@ -31,8 +31,11 @@ on DSH 0.1.7, which renamed the browser settings service the card was bound to
 (`settingsScope` → `configForms`) and moved the host's editable fields off
 `settings.installSection` and onto the entry's own volatile `Config`; versions up to
 0.9.2 required the old names, so one renamed service took the whole interface down.
-The fix resolves the settings transport when the plugin applies instead, so a rename
-costs the card and never the page; see the changelog for the release that carries it.
+The fix asks for the settings transport by capability and waits for it, so a service the
+Host does not provide costs the card and never the page; see the changelog for the
+release that carries it. Note that 0.9.3 stopped the boot failure and still registered no
+card: it read the service once, before 0.1.7's settings provider had applied. 0.9.4 is
+the version whose card actually appears.
 To get back in on an affected version, remove the plugin
 (`dsh plugin --profile web remove dsh-pocket-console`) and upgrade.
 
@@ -41,7 +44,12 @@ The card is keyed on the settings namespace the Host serves. Check the plugin lo
 (`dsh --profile web --dump-config` should list a `# == dsh-pocket-console` layer), then
 reload the page — the served namespace list re-reads on a document commit or a
 reconnect, not on registration. On DSH 0.1.7 and later there is no Settings card at
-all: the same page is under the sidebar's **Plugins** entry, on this plugin's own page.
+all: the same card is in the sidebar's **Plugins** page, listed under that page's
+*Official* group with the pages the installation ships (the page renders every
+registered settings page there; the profile's own bundles are the *Installed* group
+below). The page's console says `pocket-console: settings card mounted on plugins.item`
+when the card mounted. If that line is missing, the settings service never reached the
+plugin: versions before 0.9.4 read it once, too early, and registered nothing.
 
 ## Binding
 

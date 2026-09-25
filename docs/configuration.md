@@ -39,7 +39,8 @@ promise.
 
 Four settings are the **settings namespace**: they are editable from the Settings
 card (Settings → Plugins → Plugin configuration → "Pocket console"; from DSH 0.1.7
-the same card lives in the sidebar's **Plugins** page, on this plugin's own page),
+the same card is in the sidebar's **Plugins** page, listed under that page's
+*Official* group, while Settings keeps only the read-only plugin list),
 marked ★ in the table below, and take effect on the next decision with no restart.
 
 ## The states the card can report

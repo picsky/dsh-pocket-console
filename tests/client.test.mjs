@@ -156,28 +156,51 @@ test('the browser half loads through the module loader and registers its card', 
   /**
    * Apply one loaded browser half against a stand-in host context.
    *
-   * Every optional service is reached the way the bundle reaches it — through
-   * `get`, which is the accessor that needs no `inject` declaration — so a case
-   * can compose the 0.1.6 surface, the 0.1.7 one, or neither.
+   * A settings service is reached the way the bundle reaches it — through an
+   * `inject` that waits — while the Session UI, which the mirror works without, is
+   * read through `get`. The wait is modelled rather than assumed: `compose()`
+   * provides a service the way a later Host entry does, and runs whatever was
+   * waiting on it.
    * @param module - the loaded browser half.
    * @param own - which settings surface this stand-in composes: the 0.1.6
-   *   `settingsScope` (the default), the 0.1.7 `configForms`, or neither.
-   * @returns what the card registered and bound.
+   *   `settingsScope` (the default), the 0.1.7 `configForms`, `forms-late` for a
+   *   service that arrives only after this entry applied, or neither.
+   * @returns what the card registered and bound, and how to compose more.
    */
   const applyTo = (module, own = {}) => {
     const seen = { inject: [], register: [], bind: undefined, forms: undefined, effects: [] }
     const services = { uiSession }
-    if (own.surface === 'forms') {
-      // 0.1.7: no `settingsScope` at all, and the form is looked up by profile
-      // entry id rather than bound by namespace.
-      services.configForms = { get(namespace) { seen.forms = namespace; return scope } }
-    } else if (own.surface !== 'none') {
-      services.settingsScope = { bind(spec) { seen.bind = spec; return scope } }
+    const waiting = []
+    /** Run every waiting callback whose services are all composed now. */
+    const flush = () => {
+      for (const [index, entry] of [...waiting.entries()].reverse()) {
+        if (!entry.deps.every(dependency => services[dependency] !== undefined)) continue
+        waiting.splice(index, 1)
+        const scoped = Object.fromEntries(entry.deps.map(dependency => [dependency, services[dependency]]))
+        entry.callback(scoped)
+      }
     }
+    /** Provide one optional service, the way a later entry would. */
+    const compose = (name) => {
+      if (name === 'configForms') {
+        services.configForms = { get(namespace) { seen.forms = namespace; return scope } }
+      } else if (name === 'settingsScope') {
+        services.settingsScope = { bind(spec) { seen.bind = spec; return scope } }
+      } else {
+        throw new Error(`the stand-in shell composes no "${name}"`)
+      }
+      flush()
+    }
+    if (own.surface === 'forms') compose('configForms')
+    else if (own.surface !== 'forms-late' && own.surface !== 'none') compose('settingsScope')
     module.apply({
       // The Session UI is reached through `get` because the browser half stays
       // loadable without it; the mirror reads the pending interaction there.
       get: (name) => services[name],
+      inject(dependencies, callback) {
+        waiting.push({ deps: dependencies, callback })
+        flush()
+      },
       effect(factory) {
         const disposer = factory()
         seen.effects.push(disposer)
@@ -195,8 +218,17 @@ test('the browser half loads through the module loader and registers its card', 
     })
     return {
       ...seen,
-      registered: seen.register.find(entry => entry.options.name === 'settings.plugin.item'),
-      page: seen.register.find(entry => entry.options.name === 'plugins.item'),
+      compose,
+      waiting: () => waiting.length,
+      // Live views rather than a copy: a card mounted after `applyTo` returned —
+      // the whole point of a service that arrives late — has to be visible here.
+      get registered() { return seen.register.find(entry => entry.options.name === 'settings.plugin.item') },
+      get page() { return seen.register.find(entry => entry.options.name === 'plugins.item') },
+      get forms() { return seen.forms },
+      get bind() { return seen.bind },
+      get inject() { return seen.inject },
+      get register() { return seen.register },
+      get effects() { return seen.effects },
     }
   }
 
@@ -860,6 +892,22 @@ test('the browser half loads through the module loader and registers its card', 
   } finally {
     globalThis.fetch = previousUnbindFetch
   }
+
+  // The order 0.1.7 actually applies in. This entry needs only `slots`, while
+  // ui-settings — the provider of `configForms` — injects
+  // `['remote', 'remote.settings']`, so it applies strictly later. A settings
+  // service read once at apply time therefore finds nothing here, and the card is
+  // lost even though the service arrives moments later; that is the state a real
+  // 0.1.7 page was in, with the GUI booting and no settings card anywhere on it.
+  const late = applyTo(loaded.exports, { surface: 'forms-late' })
+  assert.equal(late.page, undefined, 'nothing is registered while the transport is absent')
+  assert.equal(late.waiting(), 2, 'the card waits for either transport rather than giving up on both')
+  late.compose('configForms')
+  assert.ok(late.page !== undefined, 'the card registers when the service arrives')
+  assert.equal(late.page.options.id, 'pocket-console', 'as the same page it would have been')
+  assert.equal(late.forms, 'pocket-console', 'over the form for this entry')
+  assert.equal(late.waiting(), 1, 'and the transport this Host does not provide waits on, harmlessly')
+  late.effects[0]()
 
   // 0.1.7 renamed the browser settings service: `settingsScope` is gone, ui-settings
   // provides `configForms` instead, a form is addressed by the profile entry id the

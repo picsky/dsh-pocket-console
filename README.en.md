@@ -26,7 +26,7 @@ The published tarball carries its Feishu transport inside it, so the install res
 dsh plugin --profile web add dsh-pocket-console
 ```
 
-Then restart `dsh web` and open **Settings → Plugins → Plugin configuration → Pocket console** (from DSH 0.1.7 the same card lives in the sidebar's **Plugins** page, on this plugin's own page):
+Then restart `dsh web` and open **Settings → Plugins → Plugin configuration → Pocket console** (from DSH 0.1.7 the same card is in the sidebar's **Plugins** page, listed under that page's *Official* group; Settings keeps only the read-only plugin list):
 
 1. Click **Scan to create an app**. If you already have one, click **Use an existing app** and enter its App ID and App Secret.
 2. Scan the QR code with Feishu (the link is valid for 10 minutes and can be used once).
