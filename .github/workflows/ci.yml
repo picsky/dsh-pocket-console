@@ -36,8 +36,21 @@ jobs:
       - run: npm test
 
   composition:
-    name: real composition
+    name: real composition (${{ matrix.dsh }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The support window, one leg per end of it. A plugin is verified against a
+        # harness, not against harnesses in general, and the browser-side contracts
+        # that broke twice in one day (a required service removed, an icon renamed) are
+        # exactly the ones a single pinned leg cannot see. `before` is the moment that
+        # leg's dependency tree was verified — see the note below.
+        include:
+          - dsh: 0.1.6-alpha.1
+            before: 2026-09-17T00:00:00Z
+          - dsh: 0.1.7-rc.2
+            before: 2026-09-24T15:00:00Z
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -56,8 +69,9 @@ jobs:
       # does not help: npm keeps the nested copy `dsh` resolved and adds a second one at the
       # root (the step below prints both, which is how that was found). `--before` is the
       # mechanism for this — resolve the tree as it stood when the pair was verified, so a
-      # published dependency cannot change what this job verifies.
-      - run: npm install -g @deepseek-ai/dsh@0.1.6-alpha.1 --before=2026-09-17T00:00:00Z
+      # published dependency cannot change what this job verifies. Each leg names its own
+      # moment, and adding a leg means verifying it and naming that moment here.
+      - run: npm install -g @deepseek-ai/dsh@${{ matrix.dsh }} --before=${{ matrix.before }}
       # Which boot library `dsh` actually got is the fact the failure above hid, so the
       # job states it rather than leaving it to be inferred from a stack trace.
       - name: which boot library dsh got
@@ -76,7 +90,14 @@ jobs:
           version: 11
       # The tarball carries its transport, so the pack step needs installed deps.
       - run: pnpm install
-      - run: npm run e2e
+      # The artifact a release publishes is the artifact this verifies: pack once, then
+      # hand the file to the same check the release job runs before it publishes. A
+      # contributor without a tarball runs `npm run e2e`, which packs the tree itself.
+      - run: |
+          pnpm pack
+          tarball=$(ls dsh-pocket-console-*.tgz | head -1)
+          echo "verifying $tarball against $(dsh --version)"
+          npm run verify:artifact -- "$tarball"
 
   package:
     name: publish payload

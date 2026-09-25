@@ -1,5 +1,5 @@
 /**
- * Real-composition check.
+ * Real-composition check: the artifact, in the application, on a named harness.
  *
  * The unit suite builds its own context, which is the right shape for behaviour
  * and the wrong shape for activation: a hand-built context does not enforce
@@ -7,26 +7,40 @@
  * an export, or fails to activate still passes there — and then fails on the
  * machine that installed it.
  *
- * This script installs the packed tarball into a scratch profile and boots the
- * real application:
+ * This script takes a tarball and verifies it against a real application:
  *
- *   1. `npm pack` the working tree;
- *   2. `dsh plugin --profile e2e add` the tarball into a throwaway DSH_HOME;
+ *   1. take a tarball — `npm run e2e` packs the working tree, and
+ *      `npm run verify:artifact -- <tarball>` checks one already built, which is
+ *      what a release verifies *before* it publishes, so the artifact checked and
+ *      the artifact published are the same file;
+ *   2. `dsh plugin --profile e2e add` it into a throwaway DSH_HOME;
  *   3. boot `dsh --profile e2e web` on an OS-chosen port;
  *   4. exchange the printed launch token for the browser cookie, then read
  *      `/__pocket/state` — and check the same route refuses the same request
- *      without that cookie.
+ *      without that cookie;
+ *   5. read the page the browser would boot, and the client bundle it would load:
+ *      the boot manifest must carry this plugin's entry, and the served bundle must
+ *      be this package's own `client.js`, because a bundle that is not the one
+ *      verified is the failure the first four steps cannot see.
  *
  * Step 4 is the composition proof: the route exists only if the Host half
  * activated inside the real Loader, installed its settings section, and got its
- * routes onto the real webserver.
+ * routes onto the real webserver. Step 5 is the browser half's proof, as far as it
+ * can be taken without a browser: the entry the shell will boot, and the very bytes
+ * it will run.
+ *
+ * The `dsh` on PATH decides which harness is verified, so a release runs this once
+ * per supported harness. The version it actually got is printed rather than
+ * assumed.
  *
  * Run: npm run e2e
+ *      npm run verify:artifact -- dsh-pocket-console-0.9.5.tgz
  */
 
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { basename, resolve } from 'node:path'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
@@ -126,14 +140,28 @@ async function waitFor(url, options, attempts = 60) {
 
 let server
 try {
-  console.log('packing the working tree…')
-  const built = pack(work)
-  const tarball = join(work, built)
-  check('the tarball was built', tarball.endsWith('.tgz'), built)
+  // An argument names an artifact to verify; without one the working tree is packed,
+  // which is what a contributor runs. A release always names the tarball it is about
+  // to publish, so the bytes verified and the bytes published cannot differ.
+  const named = process.argv[2]
+  let tarball
+  if (named === undefined) {
+    console.log('packing the working tree…')
+    const built = pack(work)
+    tarball = join(work, built)
+    check('the tarball was built', tarball.endsWith('.tgz'), built)
+  } else {
+    tarball = resolve(named)
+    check('the named tarball exists', existsSync(tarball), tarball)
+    console.log(`verifying the artifact ${basename(tarball)}…`)
+  }
+
+  const harness = run('dsh', ['--version']).trim().split('\n').at(-1)?.trim() ?? ''
+  check('the harness is the one on PATH', harness !== '', harness)
 
   const home = join(work, 'home')
   const env = { ...process.env, DSH_HOME: home }
-  console.log('installing it into a scratch profile…')
+  console.log(`installing it into a scratch profile for DSH ${harness}…`)
   // The web profile carries the application layer the plugin mounts into, and
   // dsh composes that profile's bundles itself.
   run('dsh', ['plugin', '--profile', 'web', 'add', tarball], { env })
@@ -219,6 +247,32 @@ try {
       ...(method === 'POST' ? { body: '{}' } : {}),
     })
     check(`${path} exists on the host that serves the card`, response.status !== 404, `status ${response.status}`)
+  }
+
+  // The browser half, as far as it can be checked without a browser. The shell boots
+  // exactly the entries in `window.__DSH_BOOT__`, and runs exactly the bundle each row
+  // points at — so those two facts are the ones a release can verify before publishing,
+  // and the two that were wrong when a card mounted and rendered nothing on 0.1.7.
+  const page = await fetch(origin, { headers: { cookie } })
+  const html = await page.text()
+  const boot = /window\.__DSH_BOOT__"\s*\]\s*=\s*(\{.*?\});/s.exec(html) ?? /window\.__DSH_BOOT__\s*=\s*(\{.*?\});/s.exec(html)
+  check('the page carries a boot manifest', boot !== null, `${html.length} bytes of HTML`)
+  if (boot !== null) {
+    const row = new RegExp('\\{"id":"dsh-pocket-console","url":"([^"]+)"').exec(boot[1])
+    check(
+      'the shell will boot this plugin\'s browser half',
+      row !== null,
+      row === null ? 'no dsh-pocket-console entry in the boot manifest' : 'entry present',
+    )
+    if (row !== null) {
+      const served = await (await fetch(`${origin}/${row[1]}`)).text()
+      const installed = readFileSync(join(home, 'profiles', 'web', 'node_modules', 'dsh-pocket-console', 'client.js'), 'utf8').trim()
+      check(
+        'the bundle the browser runs is the one this tarball installed',
+        served.includes(installed),
+        `served ${served.length} bytes around a ${installed.length}-byte client.js`,
+      )
+    }
   }
 } catch (error) {
   check('the check ran to completion', false, error instanceof Error ? error.message : String(error))

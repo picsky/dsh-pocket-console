@@ -34,3 +34,4 @@ code. A change that contradicts a record here needs a new record, not a quiet ed
 | [0027](0027-the-fold-is-this-run.md) | The fold is this run and nothing before it, which is the same run the result card folds |
 | [0028](0028-the-settings-transport-is-not-a-dependency.md) | The settings transport is waited for rather than declared, so a platform rename costs the card and never the page |
 | [0029](0029-the-card-degrades-visibly.md) | Platform UI is asked for by capability and the card never renders nothing, because an entry that throws is retired from the page |
+| [0030](0030-a-release-is-a-batch-a-person-ran.md) | A version is a batch, `latest` only points at a version a person has run, and the artifact is verified on every supported harness before it is published |

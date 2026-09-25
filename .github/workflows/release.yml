@@ -17,6 +17,13 @@ jobs:
   publish:
     name: publish to npm
     runs-on: ubuntu-latest
+    # The one gate a machine cannot make. Add required reviewers to this environment
+    # in the repository settings and a tag waits here until a person approves it; with
+    # no reviewers configured the environment is inert, which is what keeps a fork or
+    # a fresh clone able to run this workflow as it is. Machine gates — the checks, the
+    # artifact verification below, the registry read-back — still run after approval,
+    # so an approval can never publish something unverified.
+    environment: npm-publish
     permissions:
       # Creating the GitHub Release is what needs this; the check-run reads and the
       # npm credential are the other two. Naming any permission sets the others to
@@ -98,7 +105,12 @@ jobs:
         run: |
           node -e "
           const commit = process.env.GITHUB_SHA
-          const required = ['verify (node 22)', 'verify (node 24)', 'real composition', 'publish payload']
+          // Prefixes, not exact names: a support window grows a matrix leg, and a
+          // release must not need editing every time one is added. Every check whose
+          // name starts with one of these must exist on this commit and be green —
+          // including *every* leg of a matrix, because a leg that was quietly dropped
+          // is a harness nobody verified and nothing else would say so.
+          const required = ['verify (node', 'real composition', 'publish payload']
           const url = 'https://api.github.com/repos/' + process.env.GITHUB_REPOSITORY + '/commits/' + commit + '/check-runs?per_page=100'
           const read = async () => {
             const response = await fetch(url, {
@@ -114,10 +126,15 @@ jobs:
             }
             const runs = (await response.json()).check_runs
             const problems = []
-            for (const name of required) {
-              const run = runs.find((candidate) => candidate.name === name)
-              if (run === undefined) problems.push(name + ': no run on this commit')
-              else if (run.status !== 'completed' || run.conclusion !== 'success') problems.push(name + ': ' + run.status + '/' + run.conclusion)
+            for (const prefix of required) {
+              const matching = runs.filter((candidate) => candidate.name.startsWith(prefix))
+              if (matching.length === 0) {
+                problems.push(prefix + '*: no run on this commit')
+                continue
+              }
+              for (const run of matching) {
+                if (run.status !== 'completed' || run.conclusion !== 'success') problems.push(run.name + ': ' + run.status + '/' + run.conclusion)
+              }
             }
             if (problems.length > 0) {
               console.error('the commit ' + commit + ' is not one CI has passed:')
@@ -126,7 +143,7 @@ jobs:
               console.error('if a run finished without success, this commit is not one to publish')
               return false
             }
-            console.log('all four checks passed on ' + commit)
+            console.log('every required check passed on ' + commit + ': ' + runs.filter((run) => required.some((prefix) => run.name.startsWith(prefix))).map((run) => run.name).join(', '))
             return true
           }
           // `process.exitCode` rather than `process.exit`: exiting while the fetch's
@@ -165,6 +182,24 @@ jobs:
           # A hard-linked file in a package is a known supply-chain trick, and the
           # registry refuses the whole tarball for it.
           [ "$links" = "0" ] || { echo "the tarball carries hard links"; exit 1; }
+      # The artifact is verified before it is published, on every harness in the support
+      # window — the same check CI runs on every pull request, pointed at the one file
+      # this release will upload. Two failures in one day (a required service removed, an
+      # icon renamed) were invisible to every gate above and visible only to a person
+      # opening the page, so the release buys the closest thing to that person a machine
+      # can be: a real harness, a real profile, the real tarball, its routes, and the
+      # client bundle the shell would boot. The harnesses and the moments their trees were
+      # verified are the support window, and adding one here means adding it to ci.yml too.
+      - name: Verify the artifact on DSH 0.1.6-alpha.1
+        run: |
+          npm install -g @deepseek-ai/dsh@0.1.6-alpha.1 --before=2026-09-17T00:00:00Z
+          tarball=$(ls dsh-pocket-console-*.tgz | head -1)
+          npm run verify:artifact -- "$tarball"
+      - name: Verify the artifact on DSH 0.1.7-rc.2
+        run: |
+          npm install -g @deepseek-ai/dsh@0.1.7-rc.2 --before=2026-09-24T15:00:00Z
+          tarball=$(ls dsh-pocket-console-*.tgz | head -1)
+          npm run verify:artifact -- "$tarball"
       # Publishing the tarball is the half npm does correctly, and `--provenance` is why
       # it is npm at all: this is the one step that must carry the attestation.
       #
@@ -172,14 +207,29 @@ jobs:
       # tag — the reason `workflow_dispatch` exists — possible after a failure that came
       # *after* the publish: without it the re-run dies on a duplicate version and the
       # release can never be seen to be good.
+      #
+      # A version with a prerelease suffix goes to `next` and never to `latest`. That is
+      # the whole candidate mechanism: `latest` is what every deployment installs, so it
+      # only ever points at a version a person has run, and promoting one is the recorded
+      # `npm dist-tag add` step the job prints below.
       - name: Publish the tarball with provenance
         run: |
           version=$(node -p "require('./package.json').version")
+          case "$version" in
+            *-*) channel=next ;;
+            *) channel=latest ;;
+          esac
+          echo "publishing dsh-pocket-console@$version to the $channel channel"
           if npm view "dsh-pocket-console@$version" version >/dev/null 2>&1; then
             echo "dsh-pocket-console@$version is already on the registry; nothing to publish"
             exit 0
           fi
-          npm publish "./dsh-pocket-console-$version.tgz" --provenance
+          npm publish "./dsh-pocket-console-$version.tgz" --provenance --tag "$channel"
+          if [ "$channel" = next ]; then
+            echo "this is a candidate: latest still points at $(npm view dsh-pocket-console dist-tags.latest)"
+            echo "verify it, then promote it with:"
+            echo "  npm dist-tag add dsh-pocket-console@$version latest"
+          fi
       # npm's own debug log is the only place a crash of its own names where it got to,
       # and it dies with the runner. Printing it costs nothing and is what identified the
       # packer as the culprit rather than the credentials.
@@ -243,6 +293,12 @@ jobs:
         run: |
           version=$(node -p "require('./package.json').version")
           tag="v$version"
+          # A candidate is a prerelease here too, and must not become the page's
+          # "Latest": the release a reader lands on has to be the one `latest` installs.
+          case "$version" in
+            *-*) prerelease='--prerelease --latest=false' ;;
+            *) prerelease='' ;;
+          esac
           node -e '
             const fs = require("fs");
             const version = process.argv[1];
@@ -275,8 +331,8 @@ jobs:
           ' "$version"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$tag" --repo "$GITHUB_REPOSITORY" \
-              --title "Release $version" --notes-file release-body.md
+              --title "Release $version" --notes-file release-body.md $prerelease
           else
             gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
-              --title "Release $version" --notes-file release-body.md
+              --title "Release $version" --notes-file release-body.md $prerelease
           fi

@@ -11,6 +11,47 @@ A version's GitHub Release body is assembled from two sources, Chinese first: th
 version's section of `RELEASE-NOTES.zh.md`, then this file's section for that version
 as the English half.
 
+## Unreleased
+
+**A release is a batch a person has run, and `latest` only ever points at one.** Three stable
+versions went out in one afternoon while one problem was being fixed — 0.9.3, 0.9.4, 0.9.5 —
+each with green checks, green tests and a provenance attestation, and each straight onto the
+channel every deployment installs. The two broken ones were found by a person opening the page,
+because nothing in this repository had ever run what a person runs. This changes the version
+line, the channel and the artifact checks; no plugin behaviour changes.
+
+### Changed
+
+- **A version is a batch.** Everything merged since the last release goes out together, and a
+  follow-up fix amends the unreleased section rather than opening a version of its own.
+- **Candidates have their own channel.** A version with a prerelease suffix (`0.9.6-rc.1`)
+  publishes to npm's `next`; promotion to `latest` is a separate, recorded
+  `npm dist-tag add` step, taken only after the release checklist's one human line is ticked. A
+  candidate's GitHub Release is marked a prerelease, so the page's "Latest" stays the version
+  `latest` installs.
+- **The artifact is verified before it is published, across the whole support window.**
+  `npm run verify:artifact -- <tarball>` installs the file the release is about to upload into a
+  throwaway profile, boots the real application, reads the plugin's routes, checks the boot
+  manifest carries this plugin, and compares the client bundle the shell would serve with the one
+  the tarball installed. `ci.yml` runs that same check once per harness leg on every pull request.
+- **The support window is stated.** `0.1.6-alpha.1` and `0.1.7-rc.2`, both in CI and in the
+  release, named in `README.md` and in the release notes. A harness outside it may work; nothing
+  claims it does.
+- **A wrong release is deprecated, not withdrawn.** `npm deprecate` with the symptom and the
+  fixing version, `latest` moved back if it was promoted, and the fix carried forward in the next
+  version's notes — `docs/releasing.md` has the three steps.
+- **The publish job names an environment**, so a repository that adds required reviewers gets a
+  human gate on the one action that reaches every deployment. With none configured it is inert,
+  which keeps a clone able to run the workflow unchanged.
+- **A release PR has its own checklist**, in the pull-request template, ending with the line only
+  a person can tick: the candidate was installed into a real profile and used.
+- **The client stand-in enforces React's rule for element types**, so the failure that emptied a
+  0.1.7 page — an `undefined` component, which React throws on and the slot renderer answers by
+  retiring the entry — fails the suite instead of a release.
+
+**Verified on DSH 0.1.6-alpha.1 and 0.1.7-rc.2**, which is the support window this release
+states.
+
 ## 0.9.5
 
 **The settings card shows on DSH 0.1.7, and says so when it cannot.** 0.9.4 finally

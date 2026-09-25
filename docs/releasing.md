@@ -44,6 +44,26 @@ trust endpoint, so this stays a browser step.
 The interim path is a manual `pnpm publish` with a granular access token that has *Bypass
 2FA* enabled, which is what earlier releases used.
 
+## The support window
+
+A plugin is verified against a harness, not against harnesses in general. This one supports
+**two DSH versions at a time**: the oldest it was written for and the newest that exists when
+the release is cut.
+
+| Harness | What is verified on it |
+|---|---|
+| `0.1.6-alpha.1` | the whole pipeline, through the installed settings section and the keyed settings card |
+| `0.1.7-rc.2` | the same pipeline, through the entry's own volatile `Config` and the Plugins page's `items` page |
+
+Both legs run on every pull request (`ci.yml`'s `real composition` matrix) and again on the
+tarball a release is about to publish. Adding a harness means adding a leg in both files, with
+the moment its dependency tree was verified — `--before`, which is what stops a published
+subpackage from changing what the leg verifies.
+
+The window moves only at a release, and only in one direction: when a new DSH version appears,
+a release may add a leg for it and drop the oldest one, and the release notes say so. A harness
+outside the window may well work; nothing here claims it does.
+
 ## Cutting a release
 
 `main` takes changes only through a pull request, so a release is two steps: the version bump
@@ -53,8 +73,15 @@ lands like any other change, and the tag then names the commit that landed.
 npm version minor --no-git-tag-version   # writes package.json; commits nothing, tags nothing
 ```
 
+**A version is a batch, not a fix.** Everything merged since the last release goes out
+together, and a follow-up fix to something already merged amends the *unreleased* section
+instead of opening a version of its own. This is the rule that keeps a version number meaning
+"one thing that was verified": three releases in one afternoon, each fixing the last one's
+omission, is how a version line loses a reader's trust — and each of those releases was on
+`latest` before anyone had opened the page.
+
 Move the changelog's **Unreleased** entries into the new version's section, open the pull
-request, and title it `Release x.y.z`. Merge it once the four checks are green, then tag the
+request, and title it `Release x.y.z`. Merge it once the checks are green, then tag the
 squash commit it produced:
 
 ```sh
@@ -64,6 +91,41 @@ git tag -a v0.9.0 -m "Release 0.9.0"
 git push origin v0.9.0
 ```
 
+### A release is not done until someone has run it
+
+The tag starts the publish, and the publish runs the artifact checks itself — the tarball is
+installed into a scratch profile and booted **on every harness in the support window**, its
+routes are read, and the client bundle the shell would boot is compared with the one the
+tarball installed. That is a machine's best impression of a person opening the page, and it
+is a gate: a failure there stops the publish.
+
+It is not the same thing as a person opening the page, so the release PR carries a checklist
+and the checklist has a line only a human can tick:
+
+- [ ] the version bump, the changelog section and the Chinese release notes agree
+- [ ] both halves of the release body name the DSH versions verified (`npm run check:dsh-version`)
+- [ ] the support window in this document and in `README.md` match the CI matrix
+- [ ] **installed the candidate into a real profile and used it**: the plugin page shows the
+      card, the four settings load and save, the binding still works
+- [ ] the evidence for that line — the console line `pocket-console: settings card mounted on
+      …`, a screenshot, or the `/__pocket/state` output — is in this pull request
+
+### Candidates and promotion
+
+A version with a prerelease suffix (`0.9.6-rc.1`) publishes to the **`next`** channel; a plain
+version publishes to **`latest`**. Nothing else distinguishes them, and `latest` is what every
+deployment installs, so:
+
+```sh
+# after the checklist above is ticked, promote the candidate a person verified
+npm dist-tag add dsh-pocket-console@0.9.6 latest
+```
+
+A candidate that fails its checklist is fixed and re-cut as `rc.2`; it is never promoted, and
+`latest` does not move. `README.md` and the release notes say which channel a version went to,
+and the GitHub Release for a candidate is marked a prerelease so the page's "Latest" stays the
+version `latest` installs.
+
 **Every version section states which DSH versions it was verified against**, in both
 halves of the release body — one line, `Verified on DSH 0.1.6-alpha.1 and 0.1.7-rc.2.`
 at the end of the section. `npm run check:dsh-version` refuses a tag whose version
@@ -72,8 +134,7 @@ without that line cannot get past either one. This is not bookkeeping: a plugin 
 keep working against the harness it was written for while a newer one removes the
 service it injects, which is exactly how 0.9.2 shipped a version that could not boot
 the Web UI on 0.1.7 — with nothing in its notes to say which harness it had been
-checked against. The verification itself is the `real composition` job, which installs
-the packed tarball into a scratch profile and boots it.
+checked against.
 
 Two things about that flow are enforced rather than advised. **Only the maintainer can create
 a `v*` tag** — a tag is what starts this workflow and therefore what publishes, so a ruleset
@@ -183,6 +244,36 @@ it: npm generates **no provenance attestation** off a supported CI provider (`np
 --provenance` fails with `Automatic provenance generation not supported for provider:
 null`), and nothing checked the tag against the version first. Verify the version landed
 afterwards — see below.
+
+## A release that is wrong
+
+Nothing here can be unpublished, and that is not a limitation to work around: a deployment
+may already hold the version, and a withdrawn version that still resolves is worse than a bad
+one that is labelled. So the remedy has three parts, in this order.
+
+1. **Say so, on the registry.** `npm deprecate` prints a warning at install time and changes
+   nothing else:
+
+   ```sh
+   npm deprecate dsh-pocket-console@0.9.3 "the settings card never appears on DSH 0.1.7; use 0.9.5 or newer"
+   ```
+
+   Name the exact version, the symptom, and the version that fixes it. The message is what a
+   reader sees in an install log, and "deprecated" on its own tells them nothing.
+
+2. **Point `latest` back at the last good version**, if the bad one was ever promoted:
+
+   ```sh
+   npm dist-tag add dsh-pocket-console@0.9.2 latest
+   ```
+
+3. **Fix forward.** A bad release is fixed by the next version, not by editing history, and
+   that version's notes say what was wrong. This is where the batch rule pays: 0.9.3, 0.9.4 and
+   0.9.5 were one problem, and as a candidate line they would have cost one promotion instead
+   of three stable versions each discovering the last one's omission in public.
+
+A candidate that fails its checklist reaches neither step 1 nor step 2 — which is the point of
+the channel. Deprecation is for what the channel did not catch.
 
 ## When npm itself falls over
 

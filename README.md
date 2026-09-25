@@ -112,11 +112,26 @@ dsh plugin --profile web remove dsh-pocket-console
 
 想让电脑跟手走，装前三类里的某一个。这个插件服务的是另一种情况：**电脑留在原地，只有那些决定和对话的下一步出门。**
 
+## 支持的 DSH 版本
+
+插件是**对着具体宿主验证**的，不是"对 DSH 一般都行"。同时支持**两个**：写这个插件时最早的、以及发布时最新的。
+
+| DSH | 验证到什么程度 |
+|---|---|
+| `0.1.6-alpha.1` | 全流程：安装式设置 section + keyed 设置卡片（设置 → 插件 → 插件配置） |
+| `0.1.7-rc.2` | 全流程：条目自己的 volatile `Config` + 侧边栏**插件**页 |
+
+两条腿在每个 PR 上都跑（`ci.yml` 的 `real composition` 矩阵），发布前还会再对着**即将发布的那个 tarball** 跑一遍：装进一次性 profile、启动真实 `dsh web`、读它自己的路由、确认 boot manifest 里有本插件、并核对浏览器将执行的那份 client bundle 就是 tarball 里安装的那份。
+
+窗口只在发布时移动：新 DSH 出现时，一次发布可以加一条腿、去掉最旧的一条，发布说明里会写明。窗口之外的版本也许能用，但这里不做承诺。
+
+**版本策略**：版本号代表**一批**一起验证过的改动，不是"一个修复一个版本"；带预发布后缀的版本（如 `0.9.6-rc.1`）只发到 npm 的 `next` 通道，人工在真实环境跑过之后才由 `npm dist-tag add` 提升到 `latest`。所以 `latest` 永远只指向有人亲自跑过的版本。全部规则见 [docs/releasing.md](docs/releasing.md) 与[决策 0030](docs/decisions/0030-a-release-is-a-batch-a-person-ran.md)。
+
 ## 给开发者
 
 - **形态**：`dsh.bundle` profile 层插件，纯 ESM，**没有构建步骤**；发布包约 4 MB，因为飞书通道及其依赖内置在 tarball 里。
 - **测试**：`npm test`。不需要先安装、不需要网络和凭据——生产依赖由仓库内的 stub 顶替。
-- **机器门**：`npm run check:parity`（一处设置必须在六个地方一致）、`npm run e2e`（把打包产物装进真实 `dsh web`，验证它能激活）。CI 上跑的就是这些：两个 Node 版本的 `verify`、`real composition`、`publish payload`。
+- **机器门**：`npm run check:parity`（一处设置必须在六个地方一致）、`npm run e2e`（把工作树打包装进真实 `dsh web`，验证它能激活与渲染入口）。CI 上跑的是 `verify`（两个 Node 版本）、`real composition`（支持窗口的每个 DSH 各一条腿，验的是 tarball）、`publish payload`。
 - **动手之前**：[docs/decisions/](docs/decisions/) 记录"为什么长成这样"，[docs/development.md](docs/development.md) 说明测试与调试。
 - **怎么改、怎么落地**：[CONTRIBUTING.md](CONTRIBUTING.md)（英文）；变了什么都记在 [CHANGELOG.md](CHANGELOG.md)。要写飞书之外的通道，看[通道契约](docs/zh-CN/providers.md)。
 
