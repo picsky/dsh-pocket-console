@@ -11,7 +11,7 @@ A version's GitHub Release body is assembled from two sources, Chinese first: th
 version's section of `RELEASE-NOTES.zh.md`, then this file's section for that version
 as the English half.
 
-## Unreleased
+## 0.9.4
 
 **The settings card appears again on DSH 0.1.7.** 0.9.3 fixed the boot this card was
 taking down with it, and then the card it was for was not there: the transport was read
@@ -20,7 +20,7 @@ once, while the plugin applied, and 0.1.7's ui-settings injects
 found nothing, and no card was registered at all. The mirror ran, the page loaded, and the
 only symptom was a setting nobody could reach. Each transport is now waited for with
 `ctx.inject`, which mounts the card the moment its service appears without holding the
-entry back.
+entry back. ([#78](https://github.com/picsky/dsh-pocket-console/issues/78))
 
 ### Fixed
 
@@ -40,6 +40,15 @@ entry back.
   group, alongside the pages the installation ships. Settings keeps only the read-only
   plugin list there. `README.md`, both configuration pages, and the troubleshooting entry
   say so, because "the setting is gone" and "the setting moved" looked identical.
+
+**Verified on DSH 0.1.6-alpha.1 and against 0.1.7-rc.2's own packages.** 0.1.6 is the
+`real composition` job: it packs the tarball, installs it into a scratch profile, boots the
+application and reads the settings back off its routes. 0.1.7-rc.2 was installed here and
+its host half exercised the same way — the entry composes with the four editable fields
+marked volatile, and the routes answer — and its client packages were read directly for the
+inject order this release is about. The card's mounting decision is covered by the suite;
+its rendering on a 0.1.7 page has still not been seen, because this environment has no
+browser.
 
 ## 0.9.3
 
