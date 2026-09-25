@@ -138,6 +138,49 @@ async function waitFor(url, options, attempts = 60) {
   throw new Error(`no answer from ${url}`)
 }
 
+/**
+ * The boot manifest the page carries.
+ *
+ * Read by matching braces rather than by pattern: the shell assigns it to
+ * `window["__DSH_BOOT__"]` in one release and `window.__DSH_BOOT__` in another, and a
+ * regular expression anchored on either spelling turns a browser-side fact into a
+ * parsing accident. The first `{` after the name opens the object, and the scan is
+ * string-aware so a brace inside a URL cannot end it early.
+ * @param html - the page the shell served.
+ * @returns the parsed manifest, or undefined when the page carries none.
+ */
+function bootManifest(html) {
+  const at = html.indexOf('__DSH_BOOT__')
+  if (at === -1) return undefined
+  const start = html.indexOf('{', at)
+  if (start === -1) return undefined
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let index = start; index < html.length; index += 1) {
+    const character = html[index]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (character === '\\') escaped = true
+      else if (character === '"') inString = false
+      continue
+    }
+    if (character === '"') inString = true
+    else if (character === '{') depth += 1
+    else if (character === '}') {
+      depth -= 1
+      if (depth === 0) {
+        try {
+          return JSON.parse(html.slice(start, index + 1))
+        } catch {
+          return undefined
+        }
+      }
+    }
+  }
+  return undefined
+}
+
 let server
 try {
   // An argument names an artifact to verify; without one the working tree is packed,
@@ -250,29 +293,29 @@ try {
   }
 
   // The browser half, as far as it can be checked without a browser. The shell boots
-  // exactly the entries in `window.__DSH_BOOT__`, and runs exactly the bundle each row
+  // exactly the entries in its boot manifest, and runs exactly the bundle each row
   // points at — so those two facts are the ones a release can verify before publishing,
   // and the two that were wrong when a card mounted and rendered nothing on 0.1.7.
   const page = await fetch(origin, { headers: { cookie } })
   const html = await page.text()
-  const boot = /window\.__DSH_BOOT__"\s*\]\s*=\s*(\{.*?\});/s.exec(html) ?? /window\.__DSH_BOOT__\s*=\s*(\{.*?\});/s.exec(html)
-  check('the page carries a boot manifest', boot !== null, `${html.length} bytes of HTML`)
-  if (boot !== null) {
-    const row = new RegExp('\\{"id":"dsh-pocket-console","url":"([^"]+)"').exec(boot[1])
+  const boot = bootManifest(html)
+  check('the page carries a boot manifest', boot !== undefined, `${html.length} bytes of HTML`)
+  const row = boot?.entries?.find((entry) => entry.id === 'dsh-pocket-console')
+  check(
+    "the shell will boot this plugin's browser half",
+    row !== undefined,
+    row === undefined
+      ? `no dsh-pocket-console entry among ${boot?.entries?.length ?? 0} entries`
+      : `rev ${String(row.rev)}`,
+  )
+  if (row !== undefined) {
+    const served = await (await fetch(new URL(row.url, origin))).text()
+    const installed = readFileSync(join(home, 'profiles', 'web', 'node_modules', 'dsh-pocket-console', 'client.js'), 'utf8').trim()
     check(
-      'the shell will boot this plugin\'s browser half',
-      row !== null,
-      row === null ? 'no dsh-pocket-console entry in the boot manifest' : 'entry present',
+      'the bundle the browser runs is the one this tarball installed',
+      served.includes(installed),
+      `served ${served.length} bytes around a ${installed.length}-byte client.js`,
     )
-    if (row !== null) {
-      const served = await (await fetch(`${origin}/${row[1]}`)).text()
-      const installed = readFileSync(join(home, 'profiles', 'web', 'node_modules', 'dsh-pocket-console', 'client.js'), 'utf8').trim()
-      check(
-        'the bundle the browser runs is the one this tarball installed',
-        served.includes(installed),
-        `served ${served.length} bytes around a ${installed.length}-byte client.js`,
-      )
-    }
   }
 } catch (error) {
   check('the check ran to completion', false, error instanceof Error ? error.message : String(error))
