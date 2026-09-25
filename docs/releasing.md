@@ -58,7 +58,10 @@ the release is cut.
 Both legs run on every pull request (`ci.yml`'s `real composition` matrix) and again on the
 tarball a release is about to publish. Adding a harness means adding a leg in both files, with
 the moment its dependency tree was verified — `--before`, which is what stops a published
-subpackage from changing what the leg verifies.
+subpackage from changing what the leg verifies. The branch ruleset requires the check named
+**`real composition`**, which is a job of its own that asserts every leg passed — so growing the
+matrix is a change to `ci.yml` alone, and a required check never disappears because a harness
+was added.
 
 The window moves only at a release, and only in one direction: when a new DSH version appears,
 a release may add a leg for it and drop the oldest one, and the release notes say so. A harness
