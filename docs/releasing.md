@@ -91,6 +91,14 @@ git tag -a v0.9.0 -m "Release 0.9.0"
 git push origin v0.9.0
 ```
 
+**Pushing the tag starts a run that waits for you.** The publish job names the `npm-publish`
+environment, which this repository has configured with a required reviewer, so the run sits in
+*waiting* until someone approves the deployment — on the run's page, under **Review
+deployments**. Nothing runs before that approval, and nothing publishes after it without the
+gates below. Self-review is allowed on purpose: a solo maintainer has to be able to approve
+their own tag, or the gate would deadlock every release. If the environment is ever configured
+with no reviewers, the step is inert and the run starts immediately.
+
 ### A release is not done until someone has run it
 
 The tag starts the publish, and the publish runs the artifact checks itself — the tarball is
