@@ -65,13 +65,19 @@ test('the browser half loads through the module loader and registers its card', 
   }
   /**
    * Load the bundle behind one stand-in shell.
+   *
+   * The primitives are a parameter, not a constant, because the shell's icon
+   * set is versioned: 0.1.7 renamed the whole family and left no alias behind, so
+   * what a Host seeds decides whether the card can draw at all.
    * @param url - module URL to load, query included.
+   * @param primitives - the module table's `@deepseek-ai/dsh-client-ui-primitives`.
    * @returns the id, exports, and requested specifiers the loader captured.
    */
-  const load = async (url) => {
+  const load = async (url, primitives = baseline['@deepseek-ai/dsh-client-ui-primitives']) => {
     let loaded
     const requested = []
     const previous = globalThis.window
+    const table = { ...baseline, '@deepseek-ai/dsh-client-ui-primitives': primitives }
     globalThis.window = {
       __ModuleLoader__: {
         load({ id, factory }) {
@@ -79,8 +85,8 @@ test('the browser half loads through the module loader and registers its card', 
             id,
             exports: factory((specifier) => {
               requested.push(specifier)
-              assert.ok(Object.hasOwn(baseline, specifier), `the card may only request shell-seeded modules, asked for ${specifier}`)
-              return baseline[specifier]
+              assert.ok(Object.hasOwn(table, specifier), `the card may only request shell-seeded modules, asked for ${specifier}`)
+              return table[specifier]
             }),
           }
         },
@@ -112,9 +118,12 @@ test('the browser half loads through the module loader and registers its card', 
   let section = { ...base }
   let user
   const scopeListeners = new Set()
+  // The Host answers for its namespace with one of three statuses, and a case
+  // moves this to model a form that is still reading or not served at all.
+  let scopeStatus = 'ready'
   const scope = {
     getSnapshot: () => ({
-      status: 'ready',
+      status: scopeStatus,
       value: section,
       base,
       user,
@@ -959,5 +968,72 @@ test('the browser half loads through the module loader and registers its card', 
   assert.equal(typeof bare.effects[0], 'function', 'and is disposable')
   bare.effects[0]()
   modern.effects[0]()
+
+  /**
+   * Open a card and hand back the chevron it drew.
+   * @param applied - one `applyTo` result.
+   * @returns the chevron wrappers the render produced.
+   */
+  const chevronsOf = (applied) => {
+    const rendered = renderFor(applied)
+    FakeReact.cells = [false]
+    const header = headerOf(rendered.render())
+    assert.ok(header !== undefined, 'the card has a disclosure header')
+    return collect(header.props.onClick() ?? rendered.render()).chevrons
+  }
+
+  // 0.1.7 renamed the whole icon family — a size suffix became a weight suffix —
+  // and left no alias. An undefined element type is not a missing decoration: React
+  // throws for it on the first render, the slot renderer retires an entry that
+  // throws, and the card *and* the description beside it disappear from a page that
+  // otherwise looks perfectly healthy. That is what an empty 0.1.7 page was.
+  const weightNamed = await load('../client.js?verify-icons-017', {
+    Modal: 'Modal',
+    IconChevronDownOutlineRegular: () => null,
+  })
+  const weightChevrons = chevronsOf(applyTo(weightNamed.exports))
+  assert.equal(weightChevrons.length, 1, 'the 0.1.7 icon name still draws the chevron')
+  assert.equal(typeof weightChevrons[0].props.children[0].type, 'function', 'and it is the component the Host seeded')
+
+  const sizeNamed = await load('../client.js?verify-icons-016', {
+    Modal: 'Modal',
+    IconChevronDownOutline14: () => null,
+  })
+  const sizeChevrons = chevronsOf(applyTo(sizeNamed.exports))
+  assert.equal(sizeChevrons.length, 1, 'the ≤ 0.1.6 icon name still draws it')
+  assert.equal(typeof sizeChevrons[0].props.children[0].type, 'function', 'from the same seed')
+
+  const unnamed = await load('../client.js?verify-icons-none', { Modal: 'Modal' })
+  const unnamedChevrons = chevronsOf(applyTo(unnamed.exports))
+  assert.equal(unnamedChevrons.length, 1, 'a Host that seeds neither name still gets the card')
+  assert.deepEqual(unnamedChevrons[0].props.children, [], 'drawn without a chevron rather than crashing')
+
+  // A form that is not ready is said out loud, never rendered as nothing: an entry
+  // that draws no card is indistinguishable from a page that has no settings, which
+  // is how the rename above stayed invisible. The form's status is read when the
+  // card mounts and follows the Host from there, so each case mounts its own.
+  const mountedWithStatus = (status) => {
+    scopeStatus = status
+    const applied = applyTo(loaded.exports)
+    const face = applied.registered.options.inject()
+    FakeReact.cells = []
+    FakeReact.cursor = 0
+    const tree = applied.registered.Component({ ...face, usePocketConsole: selector => selector(face.hooks.pocketConsole.getSnapshot()) })
+    applied.effects[0]()
+    return { text: textOf(tree), copy: face.copy }
+  }
+  const loading = mountedWithStatus('loading')
+  assert.ok(loading.text.includes(loading.copy.settingsLoading), `a form still reading says so: ${JSON.stringify(loading.text)}`)
+  const unserved = mountedWithStatus('unavailable')
+  assert.ok(unserved.text.includes(unserved.copy.settingsUnavailable), `and one the Host does not serve says that: ${JSON.stringify(unserved.text)}`)
+  scopeStatus = 'ready'
+
+  // The renderer's hook prop is what makes the card a card; without it the render
+  // would throw, and a throwing entry is retired from every position on the page.
+  const hooklessApplied = applyTo(loaded.exports)
+  const hooklessFace = hooklessApplied.registered.options.inject()
+  const hookless = textOf(hooklessApplied.registered.Component({ ...hooklessFace, view: 'page', usePocketConsole: undefined }))
+  assert.ok(hookless.includes(hooklessFace.copy.settingsUnavailable), 'a card handed no form hook explains itself instead of crashing')
+  hooklessApplied.effects[0]()
 })
 
