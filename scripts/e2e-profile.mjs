@@ -38,7 +38,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, realpathSync, rmSync, readdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, resolve } from 'node:path'
 import { join } from 'node:path'
@@ -182,6 +182,28 @@ function bootManifest(html) {
 }
 
 /**
+ * Where the `dsh` on PATH actually lives, and the tree around it.
+ *
+ * A global install is a link, so the path a shell reports is not the tree the packages
+ * are in: the real path is followed first, then the two directories a package tree can
+ * sit in — beside the binary's own `node_modules`, and beside the one above it.
+ * @returns directories to search from, outermost first.
+ */
+function applicationRoots() {
+  const which = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['dsh'], { encoding: 'utf8' })
+  const binary = (which.stdout ?? '').trim().split('\n')[0]?.trim()
+  if (binary === undefined || binary === '') return []
+  let real
+  try {
+    real = realpathSync(binary)
+  } catch {
+    real = binary
+  }
+  const bin = dirname(real)
+  return [dirname(bin), bin, join(bin, 'node_modules')]
+}
+
+/**
  * The settings form this deployment's Host actually builds for the entry.
  *
  * Booting the application proves the Host half activated, and the boot manifest
@@ -214,6 +236,12 @@ function settingsProbe(home, harnessVersion) {
       // to be satisfied by whatever hoisted one, or by the application tree.
       join(home, 'profiles', 'web', 'node_modules', 'dsh-pocket-console'),
       join(home, 'profiles', 'web', 'node_modules'),
+      // And the application's own tree, read off the `dsh` this run installed. On the
+      // runner the 0.1.7 profile has no `@deepseek-ai` directory of its own while its
+      // plugin activates, so the library it resolves is reachable only from wherever
+      // that `dsh` lives — which is what this names, through the real path because a
+      // global install is itself a link.
+      ...applicationRoots(),
     ],
     { cwd: root, encoding: 'utf8', shell: process.platform === 'win32' },
   )
