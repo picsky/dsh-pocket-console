@@ -45,13 +45,29 @@ export const inject = ['credentials']
  * section of its own and `Config` stays plain. From 0.1.7 the settings service
  * projects each entry's own `Config` instead — but exposes only the fields
  * declared volatile, whose value then arrives as a reference read with `get()`
- * rather than as the value itself. Schemastery 3.18.2, which the 0.1.6 host
- * carries, has no `volatile()`, so asking for it unconditionally would keep the
- * plugin from loading on a host one release older.
+ * rather than as the value itself.
+ *
+ * The marker is what the Host reads, and `volatile()` is only the helper that
+ * writes it: `volatile()` is `extra('volatile', true)` in the library that has
+ * both, and `extra` is the older of the two. Asking for the helper instead of
+ * writing the marker costs the whole form on a Host whose resolved library lacks
+ * it — which is any profile that hoists a schemastery older than the one the Host
+ * carries, because this plugin's peer range is `*` and the Host's own
+ * compatibility gate never evaluates a peer that is not `@deepseek-ai/dsh-*`. That
+ * is how 3.18.1 beside a 0.1.7 Host left every field unmarked: no form was built
+ * for the entry, and the card could report only that the Host serves none.
+ *
+ * So `extra` is the floor, and the helper is used when it is there. A library with
+ * neither leaves the field unmarked — the shape this was before the fix — and
+ * `tests/host-contract.test.mjs` fails on that shape instead of reporting it.
  * @param schema - the field's schema.
- * @returns the schema, volatile wherever the runtime understands that.
+ * @returns the schema, marked volatile.
  */
-const liveField = (schema) => (typeof schema.volatile === 'function' ? schema.volatile() : schema)
+const liveField = (schema) => {
+  if (typeof schema.volatile === 'function') return schema.volatile()
+  if (typeof schema.extra === 'function') return schema.extra('volatile', true)
+  return schema
+}
 
 /**
  * Read one `Config` field, whichever shape the running Host handed over.
