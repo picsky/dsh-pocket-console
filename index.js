@@ -356,16 +356,28 @@ export async function apply(ctx, config) {
   // service shape loads.
   ctx.inject(['settings'], (settingsCtx) => {
     const settingsService = settingsCtx.settings
-    if (typeof settingsService.installSection === 'function') {
+    const installs = typeof settingsService.installSection === 'function'
+    const projects = typeof settingsService.configure === 'function'
+    if (installs) {
       settingsService.installSection(ctx, NAME, SectionSchema, entry, {
         setSource: (source) => { readSettings = source; reloadSettings() },
         onChange: reloadSettings,
       })
     }
-    if (typeof settingsService.configure === 'function') {
+    if (projects) {
       // The policy is registered against this plugin's own fiber, which is the
       // identity the form projection keys it by.
       settingsCtx.effect(() => settingsService.configure({ auto: false }, ctx.fiber))
+    }
+    // Neither shape is not a supported Host — it is a settings service this plugin
+    // does not recognize, and the symptom is the worst kind: the card still draws and
+    // still saves, while whatever the reader types goes nowhere the Host persists.
+    // The deployment log is the only surface left, so it says which capabilities were
+    // probed, by name, rather than the reader having to guess from a silent no-op.
+    if (!installs && !projects) {
+      log.info(messages().logSettingsTransportUnknown(
+        `installSection=${typeof settingsService.installSection}, configure=${typeof settingsService.configure}`,
+      ))
     }
   })
 
