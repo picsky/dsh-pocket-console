@@ -9,6 +9,11 @@ node_modules/
 .DS_Store
 Thumbs.db
 
+# One checkout per change under review. A worktree is a second working tree for a
+# branch that is still being written, so it is local tooling rather than anything
+# this package carries.
+.worktrees/
+
 # Working notes that are not part of the project
 #
 # Competitive research, positioning drafts and the material under them are inputs

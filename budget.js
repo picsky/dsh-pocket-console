@@ -10,6 +10,7 @@
  * | Limit | Accepted | Refused | Code |
  * |---|---|---|---|
  * | Elements in a card | 180 | 200 | `230099`, `element exceeds the limit` |
+ * | Tables in a card | 5 | 6 | `230099`, `card table number over limit` |
  * | Plain text, Chinese | 51,000 chars | 51,300 | `230025` |
  * | Plain text, Latin | 120,000 chars | 200,000 | `230025` |
  * | Plain text, emoji | 20,000 | 40,000 | `230025` |
@@ -61,6 +62,18 @@ export const CARD_ELEMENT_BUDGET = 120
 export const CARD_BODY_BUDGET = 96 * 1024
 
 /**
+ * How many Markdown tables one card may carry.
+ *
+ * Counted by the platform **across the whole card** — body and fold together — and refused at six
+ * with `230099 / ErrCode: 11310 / ErrMsg: card table number over limit`, measured on 2026-09-26
+ * against this deployment's own tenant: five arrived, six were refused, and the nine-table answer
+ * that started this arrived not at all. The documented "at most four per richtext component" is not
+ * what the service enforces (five tables inside one element arrived and rendered in full), so the
+ * only ceiling that matters is the card-wide five, and this budget sits one below it.
+ */
+export const CARD_TABLE_BUDGET = 4
+
+/**
  * What one string costs in the request body that ultimately carries it.
  *
  * The text's own bytes, plus one extra byte for each character the card's JSON has to escape and
@@ -76,32 +89,31 @@ export function bodyBytes(value) {
 }
 
 /**
- * Platform codes that mean the card was refused for its size.
+ * What kind of refusal the platform reported, and what it is worth doing about it.
  *
- * Codes are checked alongside the wording because they are what the platform
- * actually promises: `230025` is the documented one for a card payload over the
- * limit, and the others are the neighbouring "content too long" refusals.
- */
-const SIZE_CODES = new Set([230025, 230020, 230002, 10002])
-
-/**
- * Whether a delivery failure reads as the platform refusing the card's size.
+ * Codes alone are not enough — `230099` is an envelope whose reason lives in its `msg`
+ * ("card table number over limit", "element exceeds the limit", …) — and wording alone is not
+ * enough either, because some codes are not about the card at all. Both are read here, and the
+ * answer is a **kind** rather than a yes/no, because the three card-shaped refusals need three
+ * different degradations.
  *
- * The exact wording differs per surface and per locale, so the wording test is a
- * heuristic by necessity — but a refusal is not: it arrives as an envelope with a
- * `code` and a `msg`, and a card refused for size is retried by halving. This only
- * decides whether that one cheap retry happens: a wrong guess costs one smaller
- * card, and a missed guess leaves a card that never arrives.
+ * The set of codes this used to carry ({@link SIZE_CODES}) was wrong in three of its four entries:
+ * `230020` is a frequency limit, `230002` is "the bot is not in the group" and `10002` is "the bot
+ * is not in the chat" — none of them is a size refusal — while `230099`, the code that actually
+ * refuses a card, was not in the set at all. Halving a card for a rate limit wastes a send, and
+ * missing a table refusal loses the card entirely (issue #74).
+ *
  * @param error - the failure the channel raised.
- * @returns whether halving the text is worth one retry.
+ * @returns the kind (`tables` / `elements` / `size` / `content` / `frequency` / `other`), the
+ *   platform code when there was one, and the message the platform gave.
  */
-export function looksLikeSizeRefusal(error) {
-  const code = Number(error?.code ?? error?.response?.data?.code)
-  if (SIZE_CODES.has(code)) return true
+export function classifyRefusal(error) {
+  const data = error?.response?.data
+  const code = Number(error?.code ?? data?.code)
   const parts = [
     error?.message,
     error?.msg,
-    error?.response?.data?.msg,
+    data?.msg,
     // The SDK sometimes carries the whole envelope inside the message text, which is the only
     // place the platform's own wording appears when it threw before a body was parsed.
     typeof error === 'string' ? error : '',
@@ -109,7 +121,129 @@ export function looksLikeSizeRefusal(error) {
   // Deliberately not `String(error)`: an SDK error's `toString` omits the response body, which is
   // where the reason lives. The message is joined with the parts above instead.
   const message = parts.filter(part => typeof part === 'string').join(' ')
-  return /size|too large|too long|too many bytes|length|exceed|payload/i.test(message)
+  const kind = (of) => ({ kind: of, code: Number.isFinite(code) ? code : undefined, message })
+
+  if (code === 230020 || /frequency limit/i.test(message)) return kind('frequency')
+  // The envelope first: its `msg` decides which of the three card-shaped reasons this is, and a
+  // card-content failure must not be read as a size refusal for the word "exceed" inside it.
+  if (code === 230099 || /failed to create card content/i.test(message)) {
+    if (/table number over limit|table/i.test(message)) return kind('tables')
+    if (/element exceeds the limit|number of card components|components exceeds/i.test(message)) return kind('elements')
+    return kind('content')
+  }
+  if (code === 230025 || /size|too large|too long|too many bytes|length|exceed|payload/i.test(message)) return kind('size')
+  return kind('other')
+}
+
+/**
+ * The three refusals a card can answer by changing the card itself, and what each one gives up.
+ *
+ * `size` halves the text and drops the fold, `elements` drops the fold, `tables` flattens the
+ * tables, and `content` — a card-content failure we cannot name — gives up all three. Everything
+ * else is either worth a plain retry (`frequency`, and any transport failure that never reached
+ * the platform) or not worth retrying at all (`other`: a missing scope, a recipient outside the
+ * app's availability, a dissolved chat — sending the identical card again cannot fix those).
+ * @param refusal - what {@link classifyRefusal} reported.
+ * @returns whether an identical retry could help.
+ */
+export function refusalIsRetryable(refusal) {
+  if (refusal.kind === 'frequency') return true
+  // A platform code means the platform answered and refused: `230002` ("the bot is not in the
+  // group"), `230013` (the recipient is outside the app's availability), `232009` (a dissolved
+  // chat) — the identical card cannot start working, so retrying it only delays the honest report.
+  // No code at all means the request never got an answer (a dropped socket, an expired deadline),
+  // and there the same card is exactly what should go out again.
+  return refusal.kind === 'other' && refusal.code === undefined
+}
+
+/**
+ * Count and, past the budget, flatten the Markdown tables in one string.
+ *
+ * The platform counts tables **across the whole card** and refuses it at six (measured
+ * 2026-09-26: five arrived, six were refused, `230099 / card table number over limit`). The
+ * documentation's "at most four per richtext component" is not what the service enforces — five
+ * tables inside one element arrived and rendered in full — so one counter has to be threaded
+ * through every element of the card, body and fold alike.
+ *
+ * Past the budget a table is not dropped, it is **written as text**: the separator row goes and
+ * every row becomes one line of cells joined by ` · `. A reader loses the grid, not the numbers.
+ *
+ * @param value - the markdown a card element would carry.
+ * @param state - the card-wide counter: `used` so far, `budget` for the whole card. Mutated.
+ * @returns the content to carry, and how many tables were flattened while producing it.
+ */
+export function flattenExcessTables(value, state) {
+  const text = String(value ?? '')
+  const lines = text.split('\n')
+  const kept = []
+  /** One note per element, so a card of ten flattened tables is not a card of ten notes. */
+  let noted = false
+  const flattened = () => {
+    state.flattened = (state.flattened ?? 0) + 1
+    if (noted) return
+    noted = true
+    kept.push('（表格已转为文本）')
+  }
+  for (let at = 0; at < lines.length; at += 1) {
+    const separator = lines[at + 1]
+    // A table is a row of cells followed by the `|---|` rule that makes it one. Requiring a pipe
+    // in the rule is what keeps a bare `---` horizontal rule from being read as a table.
+    if (!(typeof separator === 'string' && lines[at].includes('|') && isTableRule(separator))) {
+      kept.push(lines[at])
+      continue
+    }
+    let end = at + 2
+    while (end < lines.length && lines[end].trim() !== '' && lines[end].includes('|')) end += 1
+    const rows = [lines[at], ...lines.slice(at + 2, end)]
+    state.used += 1
+    if (state.used <= state.budget) kept.push(...lines.slice(at, end))
+    else {
+      flattened()
+      for (const row of rows) kept.push(cellsOf(row).join(' · '))
+    }
+    at = end - 1
+  }
+  return { content: kept.join('\n'), flattened: state.flattened ?? 0 }
+}
+
+/**
+ * Whether one line is a Markdown table's separator row.
+ * @param line - the line to test.
+ * @returns whether it is a rule made of dashes (and colons) with at least one pipe.
+ */
+function isTableRule(line) {
+  return line.includes('|') && line.includes('-') && /^[\s|:-]+$/.test(line)
+}
+
+/**
+ * One table row as its cells.
+ * @param line - the row.
+ * @returns the trimmed cells, outer pipes removed and inner empties kept.
+ */
+function cellsOf(line) {
+  return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim())
+}
+
+/**
+ * A view with every table in it written as text.
+ *
+ * This is the reactive half of the table budget: {@link flattenExcessTables} keeps a card inside
+ * the budget before it is sent, and this is what a card is changed to when the platform refuses it
+ * anyway. It takes the view rather than a rendered card because that is the shape every producer
+ * of a card holds, and because re-rendering is the renderer's job.
+ * @param view - the channel-neutral view about to be delivered.
+ * @returns a new view with no tables left, and how many were flattened.
+ */
+export function flattenViewTables(view) {
+  const state = { used: 0, budget: 0 }
+  const flatten = (text) => flattenExcessTables(text, state).content
+  const flattened = view?.details === undefined
+    ? view
+    : { ...view, details: { ...view.details, blocks: view.details.blocks.map(flatten) } }
+  return {
+    view: { ...flattened, body: (view?.body ?? []).map(flatten) },
+    flattened: state.flattened ?? 0,
+  }
 }
 
 /**

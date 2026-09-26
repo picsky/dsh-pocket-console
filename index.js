@@ -30,6 +30,7 @@ import { LOCALES, messagesFor } from './messages.js'
 import { createMirror } from './mirror.js'
 import { createPriority, DESK } from './priority.js'
 import { createWorkspaces } from './workspaces.js'
+import { createInbound } from './inbound.js'
 import { registerRoutes } from './routes.js'
 
 /** Plugin name used by the Loader and every diagnostic. */
@@ -45,13 +46,29 @@ export const inject = ['credentials']
  * section of its own and `Config` stays plain. From 0.1.7 the settings service
  * projects each entry's own `Config` instead — but exposes only the fields
  * declared volatile, whose value then arrives as a reference read with `get()`
- * rather than as the value itself. Schemastery 3.18.2, which the 0.1.6 host
- * carries, has no `volatile()`, so asking for it unconditionally would keep the
- * plugin from loading on a host one release older.
+ * rather than as the value itself.
+ *
+ * The marker is what the Host reads, and `volatile()` is only the helper that
+ * writes it: `volatile()` is `extra('volatile', true)` in the library that has
+ * both, and `extra` is the older of the two. Asking for the helper instead of
+ * writing the marker costs the whole form on a Host whose resolved library lacks
+ * it — which is any profile that hoists a schemastery older than the one the Host
+ * carries, because this plugin's peer range is `*` and the Host's own
+ * compatibility gate never evaluates a peer that is not `@deepseek-ai/dsh-*`. That
+ * is how 3.18.1 beside a 0.1.7 Host left every field unmarked: no form was built
+ * for the entry, and the card could report only that the Host serves none.
+ *
+ * So `extra` is the floor, and the helper is used when it is there. A library with
+ * neither leaves the field unmarked — the shape this was before the fix — and
+ * `tests/host-contract.test.mjs` fails on that shape instead of reporting it.
  * @param schema - the field's schema.
- * @returns the schema, volatile wherever the runtime understands that.
+ * @returns the schema, marked volatile.
  */
-const liveField = (schema) => (typeof schema.volatile === 'function' ? schema.volatile() : schema)
+const liveField = (schema) => {
+  if (typeof schema.volatile === 'function') return schema.volatile()
+  if (typeof schema.extra === 'function') return schema.extra('volatile', true)
+  return schema
+}
 
 /**
  * Read one `Config` field, whichever shape the running Host handed over.
@@ -340,16 +357,28 @@ export async function apply(ctx, config) {
   // service shape loads.
   ctx.inject(['settings'], (settingsCtx) => {
     const settingsService = settingsCtx.settings
-    if (typeof settingsService.installSection === 'function') {
+    const installs = typeof settingsService.installSection === 'function'
+    const projects = typeof settingsService.configure === 'function'
+    if (installs) {
       settingsService.installSection(ctx, NAME, SectionSchema, entry, {
         setSource: (source) => { readSettings = source; reloadSettings() },
         onChange: reloadSettings,
       })
     }
-    if (typeof settingsService.configure === 'function') {
+    if (projects) {
       // The policy is registered against this plugin's own fiber, which is the
       // identity the form projection keys it by.
       settingsCtx.effect(() => settingsService.configure({ auto: false }, ctx.fiber))
+    }
+    // Neither shape is not a supported Host — it is a settings service this plugin
+    // does not recognize, and the symptom is the worst kind: the card still draws and
+    // still saves, while whatever the reader types goes nowhere the Host persists.
+    // The deployment log is the only surface left, so it says which capabilities were
+    // probed, by name, rather than the reader having to guess from a silent no-op.
+    if (!installs && !projects) {
+      log.info(messages().logSettingsTransportUnknown(
+        `installSection=${typeof settingsService.installSection}, configure=${typeof settingsService.configure}`,
+      ))
     }
   })
 
@@ -442,6 +471,10 @@ export async function apply(ctx, config) {
     // Which session each card belongs to, for the small line under its title.
     sessionNames,
   })
+
+  // The other input surface: a typed message in the chat. Built after the notifier because a quoted
+  // instruction is delivered through it — the reply path is the same code a form reply takes.
+  const inbound = createInbound({ log, messages, diagnostics, workspaces, results, work })
 
   /** The card's status snapshot: what the section serves and what is open. */
   const snapshot = async () => ({
@@ -579,6 +612,12 @@ export async function apply(ctx, config) {
         : '动作由「审批/提问」处理。')
       return answered
     })
+    // The typed half of the same idea: a message in the chat, quoting one of our cards. The channel
+    // has already checked that it came from the bound recipient in a direct chat and that it is not a
+    // repeat; what it means is decided here.
+    const offMessage = (channel.subscribeMessage ?? (() => () => {}))(
+      (message) => inbound.handleMessage(message),
+    )
 
     // Without a server there is no card to ask for a binding, so the
     // deployment's only surface is the log: start onboarding immediately.
@@ -597,6 +636,7 @@ export async function apply(ctx, config) {
       offRunStream()
       offPriority()
       offAction()
+      offMessage()
       // Abandon rather than settle: the desktop branch of each in-flight race
       // stays authoritative, so a still-open GUI can answer normally.
       escalation.close()
