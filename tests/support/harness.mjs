@@ -570,7 +570,19 @@ function disposePrevious() {
       if (name === 'sessionController') return sessionController
       // The title service reads one session's folded title, which is what a card falls back to when
       // the plugin never saw that session's `session/title` event.
-      if (name === 'sessionTitle') return { get: (session) => titles.get(session?.id) }
+      if (name === 'sessionTitle') {
+        return {
+          // The real service answers for a session and for nothing else. A stand-in that accepted
+          // anything would hide the caller that stopped passing one — the class of drift this
+          // harness exists to make visible.
+          get: (session) => {
+            if (session === undefined || session === null || session.id === undefined) {
+              throw new Error('the title service is asked for a session')
+            }
+            return titles.get(session.id)
+          },
+        }
+      }
       // The browser surface's trust fence: present in a GUI deployment, and the
       // routes must ask it before answering anything.
       if (name === 'connection') return { requestRejection: () => rejection }

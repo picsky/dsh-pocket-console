@@ -1049,6 +1049,20 @@ test('the browser half loads through the module loader and registers its card', 
     await sleep(10)
     assert.deepEqual(writes, [], 'an invalid number is not written through the owner')
 
+    // A write the owner refuses, and one the transport drops, are both facts the card has to
+    // show. This model keeps no draft, and the page hands over a new `form` snapshot after
+    // every write — so the controller the write went through is gone by the next render, and
+    // the failure line is the only thing between a dropped edit and a card that looks saved.
+    hostForm.mutate = async () => false
+    collect(render()).controls
+      .find(control => control.props.id === 'pocket-console-delaySeconds')
+      .props.onChange({ target: { value: '300' } })
+    await sleep(10)
+    assert.ok(
+      collect(render()).texts.includes(face.copy.saveFailed),
+      'a write the owner refuses is said out loud',
+    )
+
     // The owner's own contract says `mutate` rejects when the write never reached the
     // document. Letting that rejection out of `commit` makes it an unhandled one, which is
     // a failure nothing reports — and the run itself is half the assertion here, because
@@ -1058,6 +1072,10 @@ test('the browser half loads through the module loader and registers its card', 
       .find(control => control.props.id === 'pocket-console-delaySeconds')
       .props.onChange({ target: { value: '301' } })
     await sleep(10)
+    assert.ok(
+      collect(render()).texts.includes(face.copy.saveFailed),
+      'and so is one that never reached the document',
+    )
     applied.effects[0]()
   }
 
