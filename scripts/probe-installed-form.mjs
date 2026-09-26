@@ -34,7 +34,7 @@
  * Prints one JSON line: `{ ok, detail, fields?, resolved? }`.
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { dirname, join, parse } from 'node:path'
 import { inspectSchema } from '../tests/support/host-schema.mjs'
@@ -45,20 +45,38 @@ const EXPECTED = ['delaySeconds', 'titlePrefix', 'resultNotify', 'debug']
 /**
  * Walk up from one path looking for a resolved package.
  *
- * This is Node's own lookup, narrowed to one package: a profile hoists its
- * dependencies into a `node_modules` beside the entry, and `@deepseek-ai/dsh` keeps
- * its own tree beside its install. Whichever the deployment resolves is the one the
- * Host would hand the plugin, so this is the axis being measured rather than an
- * implementation detail.
+ * This is Node's own lookup, widened for one fact about how this application ships:
+ * every `@deepseek-ai` package keeps its own `node_modules` beside it. A tree therefore
+ * holds several copies of the same library — the profile's, each bundle's, and the one
+ * `dsh` itself resolved — and which copy a Host hands a plugin is exactly the axis being
+ * measured. At each step both are therefore tried: the plain `node_modules` beside the
+ * current directory, and the `node_modules` of every `@deepseek-ai` package already
+ * installed there.
+ *
+ * The first match wins, so a caller that names the narrower root first gets the copy
+ * that root resolved rather than a hoisted ancestor's.
  * @param from - directory to start at.
  * @param specifier - package name, such as `schemastery`.
  * @returns the package directory, or undefined when nothing resolves.
  */
 function findPackage(from, specifier) {
+  /** Whether a directory holds the package. */
+  const holds = (nodeModules) => existsSync(join(nodeModules, '@deepseek-ai', specifier, 'package.json'))
+    ? join(nodeModules, '@deepseek-ai', specifier)
+    : undefined
+
   let current = from
   for (;;) {
-    const candidate = join(current, 'node_modules', '@deepseek-ai', specifier)
-    if (existsSync(join(candidate, 'package.json'))) return candidate
+    const direct = holds(join(current, 'node_modules'))
+    if (direct !== undefined) return direct
+    // One level in: the packages this application installs beside each other.
+    const nested = join(current, 'node_modules', '@deepseek-ai')
+    if (existsSync(nested)) {
+      for (const entry of readdirSync(nested)) {
+        const inside = holds(join(nested, entry, 'node_modules'))
+        if (inside !== undefined) return inside
+      }
+    }
     const parent = dirname(current)
     if (parent === current || current === parse(current).root) return undefined
     current = parent
