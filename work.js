@@ -274,6 +274,23 @@ export function createWork({ ctx, log, channel, settings, messages, workspaces, 
 
   return {
     /**
+     * Start the next task from a typed message rather than a form on a card.
+     *
+     * `/new <prompt>` in the chat is the same act as filling the result card's second box: a new
+     * session, in the workspace of the session the quoted card belongs to, prompted with what the
+     * person wrote. The narrowing is unchanged — the workspace is inherited and never chosen
+     * ([0016](../docs/decisions/0016-the-phone-can-start-the-next-task.md)) — and there is no
+     * once-per-message guard here, because two `/new` messages are two deliberate acts, while a form
+     * that stays on a card invites an accidental second press.
+     * @param session - the session whose workspace the new one inherits.
+     * @param text - what the person asked it to do.
+     * @returns the new session's id, or undefined when it could not be started.
+     */
+    async startFromMessage(session, text) {
+      if (typeof text !== 'string' || text.trim() === '') return undefined
+      return await start(session, text.trim())
+    },
+    /**
      * Answer one press or form submission from a new-task card.
      * @param action - what the channel reported: the echoed payload, the values, and the message.
      * @param aftermath - called with the message once the session exists, so whoever owns that card

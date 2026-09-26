@@ -213,7 +213,8 @@ function disposePrevious() {
  *   medium survives from the previous scaffold (a restart), and whether the
  *   storage medium is held shut so a case can press a card before it answers, and
  *   which settings surface the running Host offers — the 0.1.6 section installer
- *   (the default) or the 0.1.7 form projection, which has no `installSection`.
+ *   (the default), the 0.1.7 form projection (no `installSection`), or a service
+ *   carrying neither method, which stands for a settings contract that moved.
  */async function scaffold(configOverrides = {}, {
   services = ['settings', 'webServer', 'storageDomain', 'sessionQuery', 'sessionController', 'sessionTitle'],
   stored = {},
@@ -450,13 +451,54 @@ function disposePrevious() {
       return () => {}
     },
   }
-  const settings = settingsSurface === 'forms' ? projected : sectioned
+  /**
+   * A settings service with neither shape this plugin knows.
+   *
+   * Not a supported Host: it is a settings service whose contract moved. The plugin
+   * has to keep loading on it — the answerers and the channel do not depend on the
+   * settings surface — and it has to say so in the deployment log, because the card
+   * still draws and still appears to save while nothing the reader types is persisted
+   * anywhere. That silence is what this shape is for.
+   */
+  const unrecognized = {
+    writable: true,
+    documentPath: '/tmp/settings.yaml',
+  }
+  const settings = settingsSurface === 'forms'
+    ? projected
+    : settingsSurface === 'unrecognized' ? unrecognized : sectioned
   const composed = new Set(services)
   /** What the composed trust fence answers, when one is composed. */
   let rejection
   const deferred = []
 
-  /** The context one `inject` callback receives: its services, and effects. */
+  /**
+   * The service one injected name resolves to in this deployment.
+   *
+   * The map is explicit rather than "anything that is not webServer is settings":
+   * that shortcut handed `storageDomain` the settings service, so a plugin that read
+   * the injected service instead of `ctx.get` would have passed here and then used the
+   * wrong object on a real Host. An injected name with no entry is one this harness
+   * does not model, and saying so is better than answering with a lookalike.
+   * @param name - the injected service name.
+   * @returns the service, or undefined when this harness composes none for it.
+   */
+  const serviceOf = (name) => {
+    if (name === 'webServer') return webServer
+    if (name === 'settings') return settings
+    if (name === 'storageDomain') return storageDomain
+    return undefined
+  }
+
+  /**
+   * The context one `inject` callback receives: its services, and effects.
+   *
+   * Cordis throws when a service property is read without an `inject` on the context
+   * that reads it, and an injected child is a context like any other — so this one is
+   * guarded the same way the root is. Before that, an undeclared read inside an
+   * inject callback was a soft `undefined` here and a hard throw on the machine that
+   * installed the plugin, which is the exact inverse of what a stand-in is for.
+   */
   const serviceCtx = (deps) => {
     const child = {
       effect(factory) {
@@ -465,8 +507,13 @@ function disposePrevious() {
         return disposer
       },
     }
-    for (const dep of deps) child[dep] = dep === 'webServer' ? webServer : settings
-    return child
+    for (const dep of deps) child[dep] = serviceOf(dep)
+    return new Proxy(child, {
+      get(target, key) {
+        if (key in target || typeof key === 'symbol') return target[key]
+        throw new Error(`cannot get property "${String(key)}" without inject`)
+      },
+    })
   }
 
   /** Run every waiting callback whose services are all composed now. */

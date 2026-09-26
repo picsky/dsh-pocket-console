@@ -86,6 +86,20 @@ since pressing it plainly means "let this one through". A switch that fails sett
 keeps its buttons and the ordinary answers still work. Actions that still need approval under that
 policy are **refused** rather than granted, and the card says so — as it says that this path goes quiet
 on the phone, and where to change it back.
+**A typed message in the chat is now an instruction.** The card's input box is capped at 1000
+characters by the platform — enough to reply, not enough for the first prompt of a new session — so the
+chat carries instructions too. **Quote a card** and what you type goes to that card's session, by the
+same path a form reply takes; quote one and start with **`/new <what to do>`** to open a new session in
+that card's workspace; send **`/help`** for the list. A message that quotes no card is **not** acted on
+— guessing a session would be worse than doing nothing — and is answered with one short hint instead.
+No new scope, so an installed deployment gets this without re-authorising.
+
+- **The quoted card is the anchor**, because the platform sends `parent_id` only when a message replies
+  to another. Instructions are deduplicated on `chat_id + message_id` (the platform delivers at least
+  once and asks for exactly this key), the handler returns inside the platform's three seconds, and the
+  reply is sent after the decision is returned.
+- **The result card's prompt line teaches the convention**, since an input box replaced by a
+  convention has to say so.
 
 ## 0.9.5
 

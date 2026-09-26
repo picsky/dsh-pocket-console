@@ -3,6 +3,12 @@
 Why the plugin is shaped the way it is, when the answer is not obvious from the
 code. A change that contradicts a record here needs a new record, not a quiet edit.
 
+Records are numbered in order, and a number is an id rather than a claim: two branches written at the
+same time cannot see each other, so both can propose the same one. **Whoever merges second renumbers**,
+and the reviewer of that pull request is who notices — the table below is sorted by number, so a
+collision shows up as two rows sharing one. Renumbering a record is a rename and a row, never a change
+to what it decides.
+
 | Record | Decision |
 |---|---|
 | [0001](0001-no-build-step.md) | Plain ESM, no build step, runtime libraries bundled in the tarball |
@@ -36,4 +42,5 @@ code. A change that contradicts a record here needs a new record, not a quiet ed
 | [0029](0029-the-card-degrades-visibly.md) | Platform UI is asked for by capability and the card never renders nothing, because an entry that throws is retired from the page |
 | [0030](0030-a-release-is-a-batch-a-person-ran.md) | A version is a batch, `latest` only points at a version a person has run, and the artifact is verified on every supported harness before it is published |
 | [0031](0031-a-limit-changes-the-card-never-whether-it-arrives.md) | A platform limit may change how a card looks, never whether it arrives: tables are budgeted and written as text, a refusal is classified before it is retried, and a card that still cannot be delivered falls back to a plain-text message |
+| [0033](0033-a-typed-message-quotes-a-card.md) | A typed message is an instruction only when it quotes a card — the quoted card names the session, commands are the exception, and an unquoted message gets a hint rather than a guess |
 | [0034](0034-full-access-is-a-policy-the-person-switches.md) | Full access is a policy the person switches through DSH's own presets — the plugin never answers an approval on anyone's behalf, because its audit line has no actor |
