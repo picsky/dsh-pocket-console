@@ -478,8 +478,10 @@ export async function apply(ctx, config) {
   })
 
   // The other input surface: a typed message in the chat. Built after the notifier because a quoted
-  // instruction is delivered through it — the reply path is the same code a form reply takes.
-  const inbound = createInbound({ log, messages, diagnostics, workspaces, results, work })
+  // instruction is delivered through it — the reply path is the same code a form reply takes — and the
+  // escalation machine comes with it, because a message that quotes an open approval or question *is*
+  // that answer, through the same decoder a button press goes through.
+  const inbound = createInbound({ log, messages, diagnostics, workspaces, results, work, escalation })
 
   /** The card's status snapshot: what the section serves and what is open. */
   const snapshot = async () => ({
