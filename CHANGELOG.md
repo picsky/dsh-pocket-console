@@ -64,6 +64,19 @@ line, the channel and the artifact checks; no plugin behaviour changes.
 
 ### Fixed
 
+- **The settings card draws no frame of its own, and states its own type scale.** A reader reported
+  the Plugins page twice from a phone-sized window: the settings items sat in a bordered, rounded,
+  tinted box inside the page's own frame, and the text inside it came out at sizes nobody chose — a
+  row at the page's inherited size beside an app id at the browser's 13.33px monospace. Both came
+  from the same habit, a table of metrics written against nothing. The card now draws no frame (the
+  Plugins page already draws the page: `ItemDetail`'s breadcrumb, its 20px title, 32px between its
+  sections), names the whole scale it uses — 13/20 body, 12/18 for hints and identifiers, 11/18 for
+  the tag, taken from the theme's own size steps — and takes every radius and border from the
+  theme's steps (`--dsw-radius-*`, `--dsw-alias-border-l*`, `--dsw-alias-button-primary-fill`)
+  instead of literals. A case reads the style table and fails on a frame, a literal radius, an
+  unstyled identifier, or a style that is used but never declared: the last of those is how the line
+  above the QR code was found rendering at the page's inherited size, because `S.description` was
+  never defined at all.
 - **The plugin's settings form is served whenever its schema is written as the Host
   reads it**, which a stand-in can no longer get wrong on its own. The settings page was
   blank for a deployment whose profile resolved a schemastery older than the one its Host

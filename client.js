@@ -286,90 +286,106 @@ window.__ModuleLoader__.load({
       return base === 'zh' ? 'zh' : 'en'
     }
 
-    /** Inline styles: the shipped cards' tokens and metrics, which this bundle cannot import. */
+    /**
+     * Inline styles: the shipped cards' tokens and metrics, which this bundle cannot import.
+     *
+     * Two things this bundle has to state for itself, because the page states neither.
+     *
+     * **No frame.** The Plugins page already draws the page a plugin opens — breadcrumb, title,
+     * one-liner, and 32px between its sections (`ItemDetail`) — so a bordered, rounded, tinted box
+     * inside it is a second frame around the first one's content. The card is one list item.
+     *
+     * **The whole type scale.** The page sets a colour but no size, so a card that names nothing
+     * inherits whatever the reader's browser defaults to: a row lands at the default size beside a
+     * `<code>` the browser sets at 13.33px in another family, and the block reads as several sizes
+     * that were never chosen. The sizes below are therefore literal and complete — 13/20 body,
+     * 12/18 for hints, identifiers and secondary lines, 11/18 for the tag — and every radius and
+     * border comes from the theme's own steps (`--dsw-radius-*`, `--dsw-alias-border-l*`). The
+     * `--dsw-font-*` tokens are *shorthands*: a theme without one would leave `font:` unresolved
+     * rather than falling back, so the size and line height are written out instead.
+     */
+    const MONO = 'var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)'
     const S = {
       /**
-       * The card's own frame.
-       *
-       * No disclosure control: the Plugins page opens a plugin's page itself, and the
-       * title, the icon and the one-liner above this frame are the page's own chrome
-       * (`ItemDetail`). A second expander inside it was a fold inside a fold, and the
-       * header it drew repeated the line the page had already printed directly above.
+       * The card itself. No border, radius, background or padding of its own: the page owns the
+       * frame, and the only thing this element has to establish is the type scale everything
+       * inside it inherits.
        */
-      card: {
-        listStyle: 'none',
-        border: '1px solid var(--dsw-alias-border-l2)',
-        borderRadius: '12px',
-        background: 'var(--dsw-alias-bg-layer-3)',
-        padding: '0 16px 8px',
-      },
+      card: { listStyle: 'none', fontSize: '13px', lineHeight: '20px' },
       badge: {
-        flex: 'none', borderRadius: '999px', padding: '1px 8px', fontSize: '11px', lineHeight: '17px',
-        fontWeight: 500, whiteSpace: 'nowrap', background: 'var(--dsw-alias-bg-module-platform)',
-        color: 'var(--dsw-alias-label-secondary)',
+        flex: 'none', height: '18px', padding: '0 7px', borderRadius: 'var(--dsw-radius-sm)',
+        fontSize: '11px', lineHeight: '18px', fontWeight: 500, whiteSpace: 'nowrap',
+        background: 'var(--dsw-alias-bg-module-platform)', color: 'var(--dsw-alias-label-secondary)',
       },
-      body: { borderTop: '1px solid var(--dsw-alias-border-l2)', margin: '0 16px', paddingBottom: '8px' },
-      section: {
-        display: 'flex', flexDirection: 'column', gap: '8px',
-        padding: '12px 0', borderTop: '1px solid var(--dsw-alias-border-l2)',
-      },
+      body: { display: 'flex', flexDirection: 'column' },
+      section: { display: 'flex', flexDirection: 'column', gap: '8px', padding: '4px 0 12px' },
       scanBlock: { display: 'flex', flexDirection: 'column', gap: '8px' },
       status: (tone) => ({ display: 'inline-flex', alignItems: 'center', gap: '6px', color: STATUS_COLORS[tone] }),
       dot: (tone) => ({
         width: '7px', height: '7px', borderRadius: '50%', flex: 'none', background: STATUS_COLORS[tone],
       }),
-      guide: {
-        display: 'flex', flexDirection: 'column', gap: '4px',
-        fontSize: '12px', lineHeight: 1.6, color: 'var(--dsw-alias-label-secondary)',
-      },
-      warn: { fontSize: '12px', lineHeight: 1.5, color: 'var(--dsw-alias-state-warn-primary)' },
-      notice: { margin: '12px 0 0', fontSize: '12px', lineHeight: 1.5, color: 'var(--dsw-alias-label-tertiary)' },
+      /** Secondary prose: the two instructions, and what the scan is for. */
+      guide: { display: 'flex', flexDirection: 'column', gap: '4px', color: 'var(--dsw-alias-label-secondary)' },
+      description: { color: 'var(--dsw-alias-label-secondary)' },
+      warn: { fontSize: '12px', lineHeight: '18px', color: 'var(--dsw-alias-state-warn-primary)' },
+      notice: { margin: 0, fontSize: '12px', lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' },
       row: { display: 'flex', gap: '8px', alignItems: 'baseline' },
       rowLabel: { color: 'var(--dsw-alias-label-tertiary)', minWidth: '8rem' },
+      /**
+       * An identifier — the app id, the recipient — in the theme's monospace family at a size this
+       * card chose. A bare `<code>` is 13.33px in the browser's own mono, which is how one row ends
+       * up a different size from its label.
+       */
+      code: {
+        fontFamily: MONO, fontSize: '12px', lineHeight: '18px', color: 'var(--dsw-alias-label-primary)',
+        background: 'var(--dsw-alias-bg-layer-3)', borderRadius: 'var(--dsw-radius-sm)', padding: '2px 8px',
+      },
       list: { margin: '6px 0 0', padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '4px' },
-      listItem: { fontSize: '12px', lineHeight: 1.5, color: 'var(--dsw-alias-label-secondary)' },
+      listItem: { fontSize: '12px', lineHeight: '18px', color: 'var(--dsw-alias-label-secondary)' },
       field: {
-        display: 'flex', flexDirection: 'column', gap: '6px', padding: '12px 0',
-        borderTop: '1px solid var(--dsw-alias-border-l2)',
+        display: 'flex', flexDirection: 'column', gap: '6px', padding: '12px 2px',
+        borderTop: '.5px solid var(--dsw-alias-border-l2)',
       },
       fieldHead: { display: 'flex', alignItems: 'center', gap: '8px' },
-      label: { flex: 1, minWidth: 0, fontSize: '13px', fontWeight: 500, lineHeight: 1.5, color: 'var(--dsw-alias-label-primary)' },
+      label: { flex: 1, minWidth: 0, fontSize: '13px', fontWeight: 500, lineHeight: '20px', color: 'var(--dsw-alias-label-primary)' },
       badges: { display: 'inline-flex', alignItems: 'center', gap: '8px' },
       reset: {
-        border: 'none', background: 'none', padding: 0, font: 'inherit', fontSize: '12px',
-        lineHeight: 1.5, color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer',
+        border: 'none', background: 'none', padding: 0, fontFamily: 'inherit', fontSize: '12px',
+        lineHeight: '18px', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer',
       },
       input: {
-        height: '34px', padding: '0 12px', border: '1px solid var(--dsw-alias-border-l2)',
-        borderRadius: '8px', background: 'var(--dsw-alias-bg-layer-3)', font: 'inherit',
-        fontSize: '13px', lineHeight: 1.5, color: 'var(--dsw-alias-label-primary)',
+        height: '40px', padding: '0 14px', border: '.5px solid var(--dsw-alias-border-l4)',
+        borderRadius: 'var(--dsw-radius-md)', background: 'var(--dsw-alias-bg-layer-3)', fontFamily: 'inherit',
+        fontSize: '13px', lineHeight: '20px', color: 'var(--dsw-alias-label-primary)',
       },
-      inputInvalid: { borderColor: 'var(--dsw-alias-label-error)' },
-      invalid: { margin: 0, fontSize: '12px', lineHeight: 1.5, color: 'var(--dsw-alias-label-error)' },
-      hint: { margin: 0, fontSize: '12px', lineHeight: 1.5, color: 'var(--dsw-alias-label-tertiary)' },
+      inputInvalid: { borderColor: 'var(--dsw-alias-state-error-primary)' },
+      invalid: { margin: 0, fontSize: '12px', lineHeight: '18px', color: 'var(--dsw-alias-state-error-primary)' },
+      hint: { margin: 0, fontSize: '12px', lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' },
       footer: {
         display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px',
-        padding: '12px 0 4px', borderTop: '1px solid var(--dsw-alias-border-l2)',
+        padding: '12px 0 4px', borderTop: '.5px solid var(--dsw-alias-border-l2)',
       },
-      failed: { flex: 1, minWidth: 0, margin: 0, fontSize: '12px', lineHeight: 1.5, color: 'var(--dsw-alias-label-error)' },
+      failed: { flex: 1, minWidth: 0, margin: 0, fontSize: '12px', lineHeight: '18px', color: 'var(--dsw-alias-state-error-primary)' },
       secondary: {
-        appearance: 'none', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: '8px',
-        padding: '5px 14px', font: 'inherit', fontSize: '13px', lineHeight: 1.5, cursor: 'pointer',
-        background: 'none', color: 'var(--dsw-alias-label-secondary)',
+        appearance: 'none', height: '32px', padding: '0 12px', border: '.5px solid var(--dsw-alias-border-l4)',
+        borderRadius: 'var(--dsw-radius-md)', background: 'none', color: 'var(--dsw-alias-label-secondary)',
+        fontFamily: 'inherit', fontSize: '13px', lineHeight: '20px', cursor: 'pointer',
       },
       primary: {
-        appearance: 'none', border: '1px solid transparent', borderRadius: '8px', padding: '5px 14px',
-        font: 'inherit', fontSize: '13px', lineHeight: 1.5, cursor: 'pointer',
-        background: 'var(--dsw-alias-label-primary)', color: 'var(--dsw-alias-bg-layer-3)',
+        appearance: 'none', height: '32px', padding: '0 12px', border: '.5px solid transparent',
+        borderRadius: 'var(--dsw-radius-md)',
+        background: 'var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary))',
+        color: 'var(--dsw-alias-brand-primary-invert)',
+        fontFamily: 'inherit', fontSize: '13px', lineHeight: '20px', cursor: 'pointer',
       },
       disabled: { opacity: 0.4, cursor: 'default' },
       actions: { display: 'flex', gap: '8px', flexWrap: 'wrap' },
       qr: {
-        background: 'var(--dsw-alias-bg-layer-3)', padding: '8px', borderRadius: '8px',
+        background: 'var(--dsw-alias-bg-layer-3)', padding: '8px', borderRadius: 'var(--dsw-radius-md)',
         alignSelf: 'flex-start', width: 240, height: 240,
       },
       link: { color: 'var(--dsw-alias-brand-primary)' },
-      error: { color: 'var(--dsw-alias-label-error)' },
+      error: { color: 'var(--dsw-alias-state-error-primary)' },
     }
 
     /** A button whose disabled look matches the shipped cards. */
@@ -795,7 +811,11 @@ window.__ModuleLoader__.load({
         : copy[enrollment.state] ?? copy.unknownState
       const recipientValue = enrollment.recipient === null || enrollment.recipient === undefined
         ? h('span', null, copy.recipientNone)
-        : h('code', null, enrollment.recipient)
+        : h('code', { style: S.code }, enrollment.recipient)
+      // The app id is an identifier too, and the word that stands in for a missing one is not.
+      const appValue = enrollment.appId === null || enrollment.appId === undefined
+        ? h('span', null, copy.unknown)
+        : h('code', { style: S.code }, enrollment.appId)
 
       useEffect(() => {
         // One request at a time: the next tick aborts one that has not answered
@@ -896,7 +916,7 @@ window.__ModuleLoader__.load({
                 status)),
             // Which app this deployment is actually connected as, and whether it
             // is up: the two facts a reader needs to tell success from silence.
-            enrollment.state === 'bound' ? row('app', copy.appId, h('code', null, enrollment.appId ?? copy.unknown)) : null,
+            enrollment.state === 'bound' ? row('app', copy.appId, appValue) : null,
             enrollment.state === 'bound' ? row('recipient', copy.recipient, recipientValue) : null,
             enrollment.state === 'bound'
               ? row('connection', copy.connection,
