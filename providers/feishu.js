@@ -1268,7 +1268,20 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
      * @param text - what to say.
      */
     async sendText(text) {
+<<<<<<< HEAD
       await sendPlainText(text)
+=======
+      if (transport === undefined || !connected) throw new Error('feishu channel is not connected')
+      const { id, type } = await recipient()
+      await writeBounded(() => transport.client.im.message.create({
+        params: { receive_id_type: type },
+        data: {
+          receive_id: id,
+          msg_type: 'text',
+          content: JSON.stringify({ text }),
+        },
+      }), 'a text message')
+>>>>>>> 49a11c1d1389ddeab32357ba847b4f4e970e98c7
     },
     close() {
       closed = true
