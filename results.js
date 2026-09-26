@@ -16,7 +16,15 @@
  * @module pocket-console/results
  */
 
-import { CARD_ELEMENT_BUDGET, CARD_TEXT_BUDGET, clipTailToBytes, clipToBytes, looksLikeSizeRefusal } from './budget.js'
+import {
+  CARD_ELEMENT_BUDGET,
+  CARD_TEXT_BUDGET,
+  classifyRefusal,
+  clipTailToBytes,
+  clipToBytes,
+  flattenViewTables,
+  refusalIsRetryable,
+} from './budget.js'
 import { isDelegated } from './delegated.js'
 import { titleOf, workspaceLabel } from './identity.js'
 import { PHONE as PRIORITY_PHONE, DESK as PRIORITY_DESK } from './priority.js'
@@ -556,6 +564,9 @@ export function createResultNotifier({
       const base = { ...view, body: [text, messages().replyHint] }
       return offer(base)
     }
+    // Declared out here because the failure path reads it: what the platform refused decides what
+    // the final report says, and a `let` inside the `try` would be out of scope in the `catch`.
+    let refusal
     try {
       // One key per card, kept across attempts: a result the platform accepted but whose
       // answer was lost is retried under the same key, so the reader gets one card, not two.
@@ -567,16 +578,35 @@ export function createResultNotifier({
           handle = await channel.deliver(card, { uuid })
           break
         } catch (error) {
-          if (looksLikeSizeRefusal(error) && attempt === 1) {
+          refusal = classifyRefusal(error)
+          // **What the platform refused decides what is given up.** Reading every failure as a size
+          // problem is what made a nine-table answer vanish: the refusal was about the table count,
+          // `looksLikeSizeRefusal` said no, and four identical attempts later the card was dropped in
+          // silence (issue #74). Each kind now gets the degradation that can actually help it.
+          const first = attempt === 1
+          if (first && (refusal.kind === 'tables' || refusal.kind === 'content')) {
+            const { view: flattened, flattened: count } = flattenViewTables(card)
+            card = flattened
+            if (count > 0) log.debug(messages().logNoticeTablesFlattened(count))
+          } else if (first && refusal.kind === 'size') {
             log.debug(messages().logNoticeTooLarge)
             answer = clipToBytes(face, messages().truncated, Math.floor(CARD_TEXT_BUDGET / 2))
             card = cardFor(answer)
+          }
+          if (first && (refusal.kind === 'size' || refusal.kind === 'elements' || refusal.kind === 'content')) {
             // The fold is what does not fit, so the fold is what is given up. The offer is cheaper than
             // it looks and stays: dropping it would take away the one control a result is worth having.
+            // Not for `tables`: flattening the tables fixes the count on its own, and the fold is where
+            // the run's record lives — giving it up as well would lose text nothing was complaining about.
             delete card.details
+          }
+          if (first && (refusal.kind === 'tables' || refusal.kind === 'size' || refusal.kind === 'elements' || refusal.kind === 'content')) {
             continue
           }
-          if (attempt >= NOTICE_DELIVERY_MAX_TRIES) throw error
+          // A rate limit and a transport failure are worth waiting out; a missing scope, a recipient
+          // outside the app's availability or a dissolved chat are not — the identical card cannot
+          // start working. Failing fast is what lets the caller say so instead of hammering.
+          if (!refusalIsRetryable(refusal) || attempt >= NOTICE_DELIVERY_MAX_TRIES) throw error
           log.debug(messages().logNoticeRetrying(attempt))
           await sleep(NOTICE_DELIVERY_RETRY_MS)
         }
@@ -617,6 +647,14 @@ export function createResultNotifier({
       }).then(() => { log.info(messages().logNoticeStored(id)) })
     } catch (error) {
       notices.delete(id)
+      const kind = refusal?.kind ?? 'other'
+      const code = refusal?.code === undefined ? '无' : refusal.code
+      // **Said where a deployment can read it.** This branch used to end in `log.warn` alone, so a
+      // card the platform refused left nothing behind but "delivery failed" with no code and no
+      // reason: the reader saw no card, the log named nothing, and the only way to find out what
+      // happened was to add a probe by hand (issue #74). `diagnostics` is the surface that exists for
+      // exactly this — "a branch that says nothing".
+      diagnostics(`结果卡没有发出：类型=${kind}，码=${code}，原因=${refusal?.message === undefined || refusal.message === '' ? '平台没有给出' : refusal.message}`)
       // The newer result never arrived. This run retired the reader's previous notice for it,
       // and a delivery failure must not take that previous result away as well: put it back,
       // durably, and rewrite its card as live again so the reply box is there to use.
@@ -635,6 +673,22 @@ export function createResultNotifier({
         }
       }
       log.warn(messages().logNoticeSendFailed, error)
+      // **The last resort: arrive without the card.** Every refusal this far is card-shaped — a
+      // count of tables or elements, a 30 KB body — and a plain-text message is subject to none of
+      // them (150 KB, no elements, no tables). It carries no reply box, which is a real loss, but a
+      // reader who gets the answer without controls is strictly better off than one who gets nothing
+      // at all. Only for card-shaped refusals: a missing scope or an unreachable recipient would
+      // refuse a text message too, and pretending otherwise would just be a second failure.
+      const cardShaped = kind === 'tables' || kind === 'size' || kind === 'elements' || kind === 'content'
+      if (cardShaped && typeof channel.sendText === 'function') {
+        const body = clipToBytes(face, messages().truncated, CARD_TEXT_BUDGET)
+        try {
+          await channel.sendText(`${messages().fallbackHeadline}\n\n${body}`)
+          log.warn(messages().logNoticeFellBackToText)
+        } catch (fallbackError) {
+          log.warn(messages().logNoticeFallbackFailed, fallbackError)
+        }
+      }
     }
   }
 

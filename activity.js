@@ -29,7 +29,7 @@
  * @module pocket-console/activity
  */
 
-import { CARD_TEXT_BUDGET, clipTailToBytes, clipToBytes, looksLikeSizeRefusal } from './budget.js'
+import { CARD_TEXT_BUDGET, classifyRefusal, clipTailToBytes, clipToBytes, flattenViewTables } from './budget.js'
 import { isDelegated } from './delegated.js'
 import { titleOf, workspaceLabel } from './identity.js'
 import { PHONE } from './priority.js'
@@ -557,9 +557,23 @@ export function createActivity({
       try {
         return await write(buildView(record, budget))
       } catch (error) {
-        if (budget !== CARD_TEXT_BUDGET || !looksLikeSizeRefusal(error)) throw error
-        log.debug(messages().logCardTooLarge)
-        return await write(buildView(record, Math.floor(CARD_TEXT_BUDGET / 2)))
+        const refusal = classifyRefusal(error)
+        const degradable = ['tables', 'size', 'elements', 'content'].includes(refusal.kind)
+        // One degradation per kind, and only from the first attempt: a second refusal of the same
+        // card means that degradation was not the answer, and repeating it would be a loop.
+        if (budget !== CARD_TEXT_BUDGET || !degradable) throw error
+        const smaller = refusal.kind === 'size' || refusal.kind === 'content'
+        if (smaller) log.debug(messages().logCardTooLarge)
+        let view = buildView(record, smaller ? Math.floor(CARD_TEXT_BUDGET / 2) : budget)
+        // A table count is not a size problem: the tables are written as text and everything else —
+        // including the fold, which is where the run's own record lives — stays where it was.
+        if (refusal.kind === 'tables' || refusal.kind === 'content') {
+          const { view: flattened, flattened: count } = flattenViewTables(view)
+          diagnostics?.(`活动卡：${count} 张表超过整卡表格预算，已改写为文本后重投。`)
+          view = flattened
+        }
+        if (refusal.kind === 'elements' || refusal.kind === 'content') delete view.details
+        return await write(view)
       }
     }
     return attempt(CARD_TEXT_BUDGET)

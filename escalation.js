@@ -13,7 +13,7 @@
  * @module pocket-console/escalation
  */
 
-import { CARD_TEXT_BUDGET, clipToBytes, looksLikeSizeRefusal } from './budget.js'
+import { CARD_TEXT_BUDGET, classifyRefusal, clipToBytes, flattenViewTables } from './budget.js'
 import { titleOf, workspaceLabel } from './identity.js'
 import { DESK, PHONE, shouldReturnHeadStart } from './priority.js'
 
@@ -518,9 +518,26 @@ export function createEscalation({
       try {
         return await channel.deliver(view, { uuid: record.uuid })
       } catch (error) {
-        if (looksLikeSizeRefusal(error) && attempt === 1) {
+        const refusal = classifyRefusal(error)
+        // The first attempt gives up whatever the platform actually complained about — tables written
+        // as text, the fold dropped, or a smaller body — and then the retries are plain retries of
+        // that card. Reading every refusal as a size problem is what lost a nine-table answer whose
+        // only fault was its table count (issue #74).
+        if (attempt === 1 && refusal.kind === 'tables') {
+          const { view: flattened, flattened: count } = flattenViewTables(view)
+          view = flattened
+          diagnostics?.(`审批/提问卡：${count} 张表超过整卡表格预算，已改写为文本后重投。`)
+          continue
+        }
+        if (attempt === 1 && (refusal.kind === 'size' || refusal.kind === 'content')) {
           log.debug(messages().logCardTooLarge)
           view = buildView(record, Math.floor(CARD_TEXT_BUDGET / 2))
+          continue
+        }
+        if (attempt === 1 && refusal.kind === 'elements') {
+          const withoutFold = { ...view }
+          delete withoutFold.details
+          view = withoutFold
           continue
         }
         if (attempt >= DELIVERY_MAX_TRIES) throw error

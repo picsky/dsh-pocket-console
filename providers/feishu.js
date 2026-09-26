@@ -16,7 +16,7 @@
 
 import * as Lark from '@larksuiteoapi/node-sdk'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import { CARD_BODY_BUDGET, bodyBytes, clipToBytes } from '../budget.js'
+import { CARD_BODY_BUDGET, CARD_TABLE_BUDGET, bodyBytes, clipToBytes, flattenExcessTables } from '../budget.js'
 
 /** Channel name used in diagnostics. */
 export const name = 'feishu'
@@ -299,10 +299,18 @@ const button = (label, tone, payload) => ({
  * @param view - the view built by the core.
  * @param messages - the copy for the controls the view declares.
  * @param onFit - told the weight of a card that had to be brought inside the body budget.
+ * @param onDegrade - told how many tables were written as text to stay inside the card's table
+ *   budget. Separate from `onFit` because the two give up different things and the log line a
+ *   deployment reads should say which.
  * @returns the card document.
  */
-export function renderCard(view, messages, onFit = () => {}) {
-  const elements = view.body.map(content => ({ tag: 'markdown', content }))
+export function renderCard(view, messages, onFit = () => {}, onDegrade = () => {}) {
+  // One counter for the whole card. The platform counts tables across body and fold together and
+  // refuses the card at six, so a fold that reuses the body's allowance would be the same bug in a
+  // new place.
+  const tables = { used: 0, budget: CARD_TABLE_BUDGET }
+  const markdown = (content) => ({ tag: 'markdown', content: flattenExcessTables(content, tables).content })
+  const elements = view.body.map(markdown)
 
   // A folded record, where the view carries one. Collapsed by default and opened in place by the
   // client: the reader who wants the whole of a finished run asks for it, and the reader who does
@@ -318,7 +326,7 @@ export function renderCard(view, messages, onFit = () => {}) {
       tag: 'collapsible_panel',
       expanded: false,
       header: { title: { tag: 'markdown', content: `**${view.details.title}**` } },
-      elements: view.details.blocks.map(content => ({ tag: 'markdown', content })),
+      elements: view.details.blocks.map(markdown),
     })
   }
 
@@ -398,6 +406,10 @@ export function renderCard(view, messages, onFit = () => {}) {
     },
     body: { elements },
   }
+  // Said out loud rather than left to be noticed on the phone: a reader who counted six tables
+  // yesterday and five today, one of them written as text, deserves a line in the log that names
+  // the reason. Nothing was dropped to earn it — the rows are all still there.
+  if ((tables.flattened ?? 0) > 0) onDegrade({ tables: tables.flattened })
   return fitCard(card, onFit)
 }
 
@@ -1035,6 +1047,16 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
   const onOverBudget = (bytes) => { log.warn(messages().logCardOverBodyBudget(bytes, CARD_BODY_BUDGET)) }
 
   /**
+   * Said when tables had to be written as text to keep the card inside the platform's table count.
+   *
+   * `warn` rather than `debug`: the card still arrives and nothing was dropped, but the reader is
+   * looking at a grid that is no longer a grid, and that is the kind of quiet change a deployment
+   * should be able to find out about without opening the phone.
+   * @param report - how many tables were flattened.
+   */
+  const onTablesFlattened = ({ tables }) => { log.warn(messages().logCardTablesFlattened(tables, CARD_TABLE_BUDGET)) }
+
+  /**
    * One write to the platform, bounded by a deadline.
    *
    * This is the only thing that can end a call that never answers: without it the caller's `await`
@@ -1098,7 +1120,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
         data: {
           receive_id: id,
           msg_type: 'interactive',
-          content: JSON.stringify(renderCard(view, messages, onOverBudget)),
+          content: JSON.stringify(renderCard(view, messages, onOverBudget, onTablesFlattened)),
           // The platform holds the same key for an hour and answers a repeat with the message it
           // already accepted, so a send whose response was lost is retried without the reader
           // being notified a second time.
@@ -1123,8 +1145,29 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       // platform to name. Only the deadline and the transport matter here.
       await writeBounded(() => transport?.client.im.message.patch({
         path: { message_id: handle },
-        data: { content: JSON.stringify(renderCard(view, messages, onOverBudget)) },
+        data: { content: JSON.stringify(renderCard(view, messages, onOverBudget, onTablesFlattened)) },
       }), 'an edit')
+    },
+    /**
+     * Send one plain-text message.
+     *
+     * The last resort, and the whole point of it is what it does **not** have: no elements to count,
+     * no tables to count, no 30 KB card ceiling — a text message may weigh 150 KB. So when every
+     * card-shaped attempt has been refused, the answer itself can still reach the reader. It
+     * carries no controls, which is a real loss; arriving is worth more than being interactive.
+     * @param text - what to say.
+     */
+    async sendText(text) {
+      if (transport === undefined || !connected) throw new Error('feishu channel is not connected')
+      const { id, type } = await recipient()
+      await writeBounded(() => transport.client.im.message.create({
+        params: { receive_id_type: type },
+        data: {
+          receive_id: id,
+          msg_type: 'text',
+          content: JSON.stringify({ text }),
+        },
+      }), 'a text message')
     },
     close() {
       closed = true
