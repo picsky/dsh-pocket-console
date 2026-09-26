@@ -41,7 +41,7 @@
 | 不把 pin 当状态推送面 | pin 的**写侧**可用（见 §3），但它是"人主动去看"的面，不是推送面：置顶不会替插件叫人。常驻状态板已单列（见 §3 与 [0018](../docs/decisions/0018-the-status-board-is-a-pinned-card.md)） |
 | 不用 `open_url` / AppLink / webview | 要我们自己提供一个可访问的网址，等于**开一个端口**，与上一条冲突 |
 | 不主动推**状态** | 一个开着的页面或一个忘关的标签页会把"人在手机边"这个真实状态盖掉（[0015](../docs/decisions/0015-desk-presence-is-the-gateways-request-id.md)） |
-| 永不自动批准 | **沉默不作数**。插件从不替你决定 |
+| 插件**永不替人按下允许** | **沉默不作数**；插件只转达人的决定，自己从不决定。人可以**显式**把一个会话的策略切到完全权限——那是 **DSH 的原生设置**，日志记的是 `permission/preset`（"人选了政策"），而不是一条无主的 `allowed-once`（那会让人以为有人批过）。见 [0034](../docs/decisions/0034-full-access-is-a-policy-the-person-switches.md) |
 | 从不改 DSH | 它是 bundle profile 层，只注册在两条已文档化的 waterfall 上。DSH 升级不该弄坏它 |
 | 不做迁移/兼容旧版 | 没有维护中的旧分支，版本就是最新发布版 |
 

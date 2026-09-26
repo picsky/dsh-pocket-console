@@ -75,6 +75,18 @@ fails the answer now goes out as a plain-text message rather than nowhere. No co
   no elements, no tables, 150 KB instead of 30. It has no reply box, and arriving without one beats
   not arriving.
 
+### Added
+
+**An approval card can now stop asking.** A third control, `以后不再问（完全权限）`, switches **that
+session** to the deployment's full-access preset through DSH's own permission service — so the record
+says a person chose a policy, rather than a grant this plugin made on their behalf. It appears only when
+the host offers such a preset (matched by the knobs it writes, not by its name), it asks for
+confirmation first because the desktop asks for one too, and it settles the request it was pressed on,
+since pressing it plainly means "let this one through". A switch that fails settles nothing: the card
+keeps its buttons and the ordinary answers still work. Actions that still need approval under that
+policy are **refused** rather than granted, and the card says so — as it says that this path goes quiet
+on the phone, and where to change it back.
+
 ## 0.9.5
 
 **The settings card shows on DSH 0.1.7, and says so when it cannot.** 0.9.4 finally

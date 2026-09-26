@@ -23,6 +23,9 @@ import { randomUUID } from 'node:crypto'
 const ALLOW = 'allowed-once'
 /** Approval outcome meaning "do not proceed". */
 const REJECT = 'rejected'
+/** Approval outcome meaning "do not ask again in this session": switch it to full access, and grant
+ * this one call too, because the person pressing it plainly wants this one to go through. */
+const ALLOW_FULL = 'allowed-full'
 /** Form field carrying the chosen options, or the typed answer when none are offered. */
 const FORM_VALUE_FIELD = 'value'
 /** Form field carrying a typed answer beside a multi-select's options. */
@@ -65,6 +68,9 @@ const titleFor = (settings, workspace, kind) => titleOf(`${settings.titlePrefix}
 export function createEscalation({
   log, channel, settings, mirror, messages, workspaces, priority, sessionNames,
   diagnostics = () => {},
+  // The permission presets, when the host composes them. The default reports "no full access", which
+  // is what an older host is: the approval card then has the two buttons it has always had.
+  permissions = { fullAccess: () => undefined, current: () => undefined, set: () => false },
 }) {
   /** Live escalations keyed by the opaque id embedded in their action payloads. */
   const open = new Map()
@@ -135,6 +141,22 @@ export function createEscalation({
         buttons: [
           { payload: { rid: record.id, v: ALLOW }, label: copy.allowOnce, tone: 'primary' },
           { payload: { rid: record.id, v: REJECT }, label: copy.reject, tone: 'danger' },
+          // The third control, and only when the deployment actually offers a full-access preset:
+          // on a host without one there is nothing to switch to, and a button that cannot do what it
+          // says is worse than a card with two of them.
+          ...(permissions.fullAccess() === undefined
+            ? []
+            : [{
+                payload: { rid: record.id, v: ALLOW_FULL },
+                label: copy.allowFullAccess(permissions.fullAccess().label),
+                // `default` rather than `primary_filled`: this is not the pressing the card is for,
+                // and a privilege change should not be the most inviting thing on it.
+                tone: 'default',
+                // The desktop asks for a risk acknowledgement before a visible switch to full access;
+                // a plugin calling the setter would step over it. This is that step, moved to where
+                // the press happens, so the person who decides is the person who reads the warning.
+                confirm: { title: copy.fullAccessConfirmTitle, text: copy.fullAccessConfirmText },
+              }]),
         ],
         forms: [],
       }
@@ -613,6 +635,25 @@ export function createEscalation({
 
   /** Answer one approval from an action payload. */
   const decodeApproval = (record, payload) => {
+    if (payload?.v === ALLOW_FULL) {
+      const full = permissions.fullAccess()
+      // The preset was there when the card was drawn and is gone now (a deployment changed its table
+      // mid-flight). Refusing to switch is right; settling the request on a policy nobody chose is not.
+      if (full === undefined) return { toast: messages().fullAccessUnavailable, accepted: false }
+      if (!permissions.set(record.request.agent?.session, full.name)) {
+        // Nothing was decided, so nothing is settled: the card keeps its buttons and the reader can
+        // still answer it the ordinary way.
+        return { toast: messages().fullAccessFailed, accepted: false }
+      }
+      const label = messages().fullAccessSettled(full.label)
+      // This request is granted as well — it is the one the person was looking at — and the card
+      // becomes the record of what was chosen, including that this path now goes quiet.
+      if (record.complete(ALLOW, label, 'success')) {
+        phoneTookOver()
+        mirror.record(record, ALLOW)
+      }
+      return { toast: messages().fullAccessOn(full.label) }
+    }
     if (payload?.v !== ALLOW && payload?.v !== REJECT) return undefined
     const label = payload.v === ALLOW ? messages().allowedOnce : messages().rejected
     // Only the answer that actually settles the request is mirrored: a click
@@ -726,7 +767,9 @@ export function createEscalation({
         ? decodeApproval(record, payload)
         : decodeQuestion(record, payload, values)
       if (outcome === undefined) return { toast: messages().actionUnknown, accepted: false }
-      return { toast: outcome.toast, accepted: true }
+      // A decoder that decided nothing says so itself — the full-access switch that the service
+      // refused claims the press so it can explain, without pretending an answer was given.
+      return { toast: outcome.toast, accepted: outcome.accepted ?? true }
     },
     /**
      * What the state route reports as open.
