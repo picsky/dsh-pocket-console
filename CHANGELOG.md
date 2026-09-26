@@ -48,6 +48,36 @@ line, the channel and the artifact checks; no plugin behaviour changes.
 - **The client stand-in enforces React's rule for element types**, so the failure that emptied a
   0.1.7 page — an `undefined` component, which React throws on and the slot renderer answers by
   retiring the entry — fails the suite instead of a release.
+- **The suite's stand-ins are held to the Host's own contract.** `tests/support/host-contract.mjs`
+  transcribes the Host's settings gate with the file and line each piece was read from, the
+  schemastery stand-in models the marker (`meta.volatile`) rather than a private flag of its own,
+  and `check:parity` holds the marked field set to the card. The build also asks the question
+  inside the installed profile, against the schema library that deployment resolved, and fails the
+  run when the Host serves no form. ([#92](https://github.com/picsky/dsh-pocket-console/issues/92), [#95](https://github.com/picsky/dsh-pocket-console/issues/95))
+
+### Fixed
+
+- **The plugin's settings form is served whenever its schema is written as the Host
+  reads it**, which a stand-in can no longer get wrong on its own. The settings page was
+  blank for a deployment whose profile resolved a schemastery older than the one its Host
+  carries: `liveField` asked for a `volatile()` helper instead of writing the marker the
+  Host's form projection is keyed on, so every editable field landed unmarked, no form
+  was built for the entry, and the card could report only that the Host serves none. The
+  marker is now written through whichever call the resolved library has. ([#89](https://github.com/picsky/dsh-pocket-console/issues/89), [#91](https://github.com/picsky/dsh-pocket-console/issues/91))
+- **A form that is served but can never become ready is refused at build time.** A
+  required field with no default keeps `meta.required` in the projection, so the browser's
+  validation of the schema and the values fails and the form sits at "loading" for good —
+  visible and unusable, which reads as a broken plugin.
+- **A capability the Host does not answer is said in the deployment log.** The settings
+  service names the two probes it makes (`installSection`, `configure`) when neither is
+  there, instead of the card drawing controls that persist nowhere. ([#93](https://github.com/picsky/dsh-pocket-console/issues/93))
+- **The plugin's page is the page's own form.** The Plugins page opens a plugin's page and
+  hands its configuration owner over in `props.form`; the card drew a second disclosure
+  inside that page, repeating the title and the one-liner printed directly above it, and
+  kept a staged draft with its own Save button. It now writes each edit through the
+  owner's form — which is what carries the revision fence and the conflict recovery — and
+  the disclosure, its chevron and the icon lookup that 0.1.7 renamed are gone with it. The
+  ≤ 0.1.6 keyed settings card keeps the draft-then-save model, unchanged. ([#94](https://github.com/picsky/dsh-pocket-console/issues/94))
 
 **Verified on DSH 0.1.6-alpha.1 and 0.1.7-rc.2**, which is the support window this release
 states.
