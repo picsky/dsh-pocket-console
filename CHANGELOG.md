@@ -52,6 +52,58 @@ line, the channel and the artifact checks; no plugin behaviour changes.
 **Verified on DSH 0.1.6-alpha.1 and 0.1.7-rc.2**, which is the support window this release
 states.
 
+### Fixed
+
+**A card is never lost to a platform limit.** An answer ending in nine Markdown tables was refused
+whole by the platform — the reader got nothing, and the log gave no reason. Three defects met: no
+budget for the card's table count, a judge that did not recognize the refusal, and a delivery path
+whose final failure was a single warning. All three are fixed, and when every card-shaped attempt
+fails the answer now goes out as a plain-text message rather than nowhere. No configuration changes.
+
+- **Tables are budgeted, and written as text past the budget.** The platform counts tables across the
+  whole card and refuses it past five; the card renderer now keeps four, body and fold sharing one
+  counter, and turns the rest into text — the rows survive, the grid does not. A card the platform
+  refused for its table count is retried once with its tables flattened.
+- **A refusal is classified instead of guessed.** `230002` ("the bot is not in the group"), `10002`
+  ("the bot is not in the chat") and `230020` (a rate limit) were being read as size refusals, while
+  `230099` — the code that actually refuses a card — was not read at all. Each refusal now yields a
+  kind, and each kind gets the degradation that can help it; a permission or availability refusal
+  fails once, quickly, instead of being resent four times.
+- **A delivery that fails says why.** The result path reports the refusal's kind, code and message to
+  `diagnostics`, so a card that did not arrive is answerable from the deployment log.
+- **The last resort is a message.** When no card can be delivered, the answer is sent as plain text:
+  no elements, no tables, 150 KB instead of 30. It has no reply box, and arriving without one beats
+  not arriving.
+
+### Added
+
+**A typed message in the chat is now an instruction.** The card's input box is capped at 1000
+characters by the platform — enough to reply, not enough for the first prompt of a new session — so the
+chat carries instructions too. **Quote a card** and what you type goes to that card's session, by the
+same path a form reply takes; quote one and start with **`/new <what to do>`** to open a new session in
+that card's workspace; send **`/help`** for the list. A message that quotes no card is **not** acted on
+— guessing a session would be worse than doing nothing — and is answered with one short hint instead.
+No new scope, so an installed deployment gets this without re-authorising.
+
+The two cards that are not about a session are answered the same way, because they are the cards that
+most need typing: **quote a question card** and what you wrote is the answer (an option's exact words
+select it, anything else is the typed answer the card also offers), and **quote an approval card** and
+reply **`允许`** or **`拒绝`**, or **`allow`** / **`reject`**. The word becomes the payload the card's own
+button would have sent, so the race with the desk, the mirror to the desktop half, the in-place rewrite
+of the card and the audit line are the same code: a grant given in the chat is the same `allowed-once` a
+press grants.
+
+- **The quoted card is the anchor**, because the platform sends `parent_id` only when a message replies
+  to another. Instructions are deduplicated on `chat_id + message_id` (the platform delivers at least
+  once and asks for exactly this key), the handler returns inside the platform's three seconds, and the
+  reply is sent after the decision is returned.
+- **An approval answers to exactly two words**, in either language, and to nothing else: no `ok`, no
+  prefix, no fuzzy match. A word that is not one of them decides **nothing at all** rather than rejecting
+  by default, and the refusal names the two words that work. Anything that changes a session's *policy*
+  rather than answering the request in front of the reader stays a deliberate press on the card.
+- **The result card's prompt line teaches the convention**, since an input box replaced by a
+  convention has to say so. `/help` lists what a typed message can be.
+
 ## 0.9.5
 
 **The settings card shows on DSH 0.1.7, and says so when it cannot.** 0.9.4 finally

@@ -18,6 +18,7 @@
     "work.js",
     "run-record.js",
     "delegated.js",
+    "inbound.js",
     "diagnostics.js",
     "identity.js",
     "session-names.js",

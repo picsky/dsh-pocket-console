@@ -16,7 +16,7 @@
 
 import * as Lark from '@larksuiteoapi/node-sdk'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import { CARD_BODY_BUDGET, bodyBytes, clipToBytes } from '../budget.js'
+import { CARD_BODY_BUDGET, CARD_TABLE_BUDGET, bodyBytes, clipToBytes, flattenExcessTables } from '../budget.js'
 
 /** Channel name used in diagnostics. */
 export const name = 'feishu'
@@ -299,10 +299,18 @@ const button = (label, tone, payload) => ({
  * @param view - the view built by the core.
  * @param messages - the copy for the controls the view declares.
  * @param onFit - told the weight of a card that had to be brought inside the body budget.
+ * @param onDegrade - told how many tables were written as text to stay inside the card's table
+ *   budget. Separate from `onFit` because the two give up different things and the log line a
+ *   deployment reads should say which.
  * @returns the card document.
  */
-export function renderCard(view, messages, onFit = () => {}) {
-  const elements = view.body.map(content => ({ tag: 'markdown', content }))
+export function renderCard(view, messages, onFit = () => {}, onDegrade = () => {}) {
+  // One counter for the whole card. The platform counts tables across body and fold together and
+  // refuses the card at six, so a fold that reuses the body's allowance would be the same bug in a
+  // new place.
+  const tables = { used: 0, budget: CARD_TABLE_BUDGET }
+  const markdown = (content) => ({ tag: 'markdown', content: flattenExcessTables(content, tables).content })
+  const elements = view.body.map(markdown)
 
   // A folded record, where the view carries one. Collapsed by default and opened in place by the
   // client: the reader who wants the whole of a finished run asks for it, and the reader who does
@@ -318,7 +326,7 @@ export function renderCard(view, messages, onFit = () => {}) {
       tag: 'collapsible_panel',
       expanded: false,
       header: { title: { tag: 'markdown', content: `**${view.details.title}**` } },
-      elements: view.details.blocks.map(content => ({ tag: 'markdown', content })),
+      elements: view.details.blocks.map(markdown),
     })
   }
 
@@ -398,6 +406,10 @@ export function renderCard(view, messages, onFit = () => {}) {
     },
     body: { elements },
   }
+  // Said out loud rather than left to be noticed on the phone: a reader who counted six tables
+  // yesterday and five today, one of them written as text, deserves a line in the log that names
+  // the reason. Nothing was dropped to earn it — the rows are all still there.
+  if ((tables.flattened ?? 0) > 0) onDegrade({ tables: tables.flattened })
   return fitCard(card, onFit)
 }
 
@@ -527,7 +539,12 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       const openId = data?.sender?.sender_id?.open_id
       if (typeof openId !== 'string' || openId === '') return
       const current = await binding.read()
-      if (current === openId) return
+      if (current === openId) {
+        // The bound person typed something. Whether it is an instruction is the core's call — this
+        // half only knows the platform: which message it is, what it says, and what it replies to.
+        await serveMessage(data)
+        return
+      }
       // A direct message is consent to be reachable here, so it binds an
       // unbound deployment. It must not *re-bind* a bound one: the sender is
       // whoever can reach the bot, and accepting them would hand the recipient
@@ -548,6 +565,98 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
 
   /** Set by the core before any interaction can arrive. */
   let onAction
+
+  /** Set by the core to decide what a typed message means. */
+  let onMessage
+
+  /**
+   * The message events this connection has already served.
+   *
+   * The platform's own page for `im.message.receive_v1` asks for this and nothing else: *"重复的推送…
+   * 请使用 `message_id` 去重，不要依赖 `event_id`"*. At-least-once delivery means a repeat is normal,
+   * and a repeat that carries an instruction must not hand the same instruction over twice. Bounded,
+   * because a deployment that stays up for weeks receives messages forever and nothing else retires an
+   * entry — forgetting the oldest is right, since a delivery that late is not coming.
+   */
+  const servedMessages = new Set()
+
+  /** How many message ids are remembered for deduplication. */
+  const SERVED_LIMIT = 256
+
+  /**
+   * The text of one message, when it is the kind we can read.
+   * @param message - the event's `message` object.
+   * @returns the text, with mention placeholders removed, or an empty string.
+   */
+  function textOfMessage(message) {
+    if (message?.message_type !== 'text') return ''
+    try {
+      const parsed = JSON.parse(message.content ?? '{}')
+      const text = typeof parsed?.text === 'string' ? parsed.text : ''
+      // A group mention arrives as `@_user_1`; in a direct chat there is nothing to mention, but a
+      // quoted line can still carry the placeholder, and an instruction must not start with it.
+      return text.replace(/@_user_\d+/g, '').trim()
+    } catch {
+      // A body the platform did not shape as JSON is a message we cannot read, not a crash.
+      return ''
+    }
+  }
+
+  /**
+   * Offer one typed message to the core and send whatever it answers with.
+   *
+   * The handler must return inside the platform's three seconds, and the SDK does not answer on our
+   * behalf: everything here is a lookup and a hand-off. The reply is sent **after** the decision is
+   * returned, so a slow send cannot turn into a redelivered event.
+   * @param data - the flattened event the SDK handed over.
+   */
+  async function serveMessage(data) {
+    const message = data?.message ?? {}
+    const messageId = message.message_id
+    // Without an id there is nothing to deduplicate on and nothing to quote later, so a message this
+    // shape is not one we can serve — and the platform always sends one.
+    if (typeof messageId !== 'string' || messageId === '') return
+    const key = `${String(message.chat_id ?? '')}:${messageId}`
+    if (servedMessages.has(key)) {
+      log.debug(messages().logMessageRepeat)
+      return
+    }
+    servedMessages.add(key)
+    if (servedMessages.size > SERVED_LIMIT) servedMessages.delete(servedMessages.keys().next().value)
+    if (onMessage === undefined) return
+    const parentId = typeof message.parent_id === 'string' && message.parent_id !== '' ? message.parent_id : undefined
+    const answer = await onMessage({
+      text: textOfMessage(message),
+      parentId,
+      rootId: typeof message.root_id === 'string' ? message.root_id : undefined,
+      threadId: typeof message.thread_id === 'string' ? message.thread_id : undefined,
+      messageId,
+      chatId: typeof message.chat_id === 'string' ? message.chat_id : undefined,
+      messageType: typeof message.message_type === 'string' ? message.message_type : undefined,
+      sender: data?.sender?.sender_id?.open_id,
+    }).catch((error) => {
+      log.warn(messages().logMessageFailed, error)
+      return undefined
+    })
+    const reply = answer?.reply
+    if (typeof reply !== 'string' || reply === '') return
+    // Not awaited: the answer is the reader's, not the platform's, and the event is already served.
+    void sendPlainText(reply).catch((error) => { log.warn(messages().logMessageReplyFailed, error) })
+  }
+
+  /**
+   * Send one plain-text message to the bound recipient.
+   * @param text - what to say.
+   * @returns the message the platform created.
+   */
+  async function sendPlainText(text) {
+    if (transport === undefined || !connected) throw new Error('feishu channel is not connected')
+    const { id, type } = await recipient()
+    return await writeBounded(() => transport.client.im.message.create({
+      params: { receive_id_type: type },
+      data: { receive_id: id, msg_type: 'text', content: JSON.stringify({ text }) },
+    }), 'a text message')
+  }
 
   /** Enrollment progress for the Settings card. Never carries a secret. */
   let enrollment = { state: 'unbound' }
@@ -1035,6 +1144,16 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
   const onOverBudget = (bytes) => { log.warn(messages().logCardOverBodyBudget(bytes, CARD_BODY_BUDGET)) }
 
   /**
+   * Said when tables had to be written as text to keep the card inside the platform's table count.
+   *
+   * `warn` rather than `debug`: the card still arrives and nothing was dropped, but the reader is
+   * looking at a grid that is no longer a grid, and that is the kind of quiet change a deployment
+   * should be able to find out about without opening the phone.
+   * @param report - how many tables were flattened.
+   */
+  const onTablesFlattened = ({ tables }) => { log.warn(messages().logCardTablesFlattened(tables, CARD_TABLE_BUDGET)) }
+
+  /**
    * One write to the platform, bounded by a deadline.
    *
    * This is the only thing that can end a call that never answers: without it the caller's `await`
@@ -1081,6 +1200,19 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       return () => { onAction = undefined }
     },
     /**
+     * Take over what a typed message means.
+     *
+     * The handler is handed the facts the platform sent — the text, what the message replies to, and
+     * the ids — and answers with what to say back, if anything. It is called only for the bound
+     * recipient's direct messages, which is the same rule a card press follows.
+     * @param handler - given one message, returns `{ reply }` or nothing.
+     * @returns a disposer that stops serving messages.
+     */
+    subscribeMessage(handler) {
+      onMessage = handler
+      return () => { onMessage = undefined }
+    },
+    /**
      * Send one card.
      * @param view - the channel-neutral view to render.
      * @param options - the idempotency key the send should carry, when the caller has one.
@@ -1098,7 +1230,7 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
         data: {
           receive_id: id,
           msg_type: 'interactive',
-          content: JSON.stringify(renderCard(view, messages, onOverBudget)),
+          content: JSON.stringify(renderCard(view, messages, onOverBudget, onTablesFlattened)),
           // The platform holds the same key for an hour and answers a repeat with the message it
           // already accepted, so a send whose response was lost is retried without the reader
           // being notified a second time.
@@ -1123,8 +1255,20 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
       // platform to name. Only the deadline and the transport matter here.
       await writeBounded(() => transport?.client.im.message.patch({
         path: { message_id: handle },
-        data: { content: JSON.stringify(renderCard(view, messages, onOverBudget)) },
+        data: { content: JSON.stringify(renderCard(view, messages, onOverBudget, onTablesFlattened)) },
       }), 'an edit')
+    },
+    /**
+     * Send one plain-text message.
+     *
+     * The last resort, and the whole point of it is what it does **not** have: no elements to count,
+     * no tables to count, no 30 KB card ceiling — a text message may weigh 150 KB. So when every
+     * card-shaped attempt has been refused, the answer itself can still reach the reader. It
+     * carries no controls, which is a real loss; arriving is worth more than being interactive.
+     * @param text - what to say.
+     */
+    async sendText(text) {
+      await sendPlainText(text)
     },
     close() {
       closed = true
