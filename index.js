@@ -30,6 +30,7 @@ import { LOCALES, messagesFor } from './messages.js'
 import { createMirror } from './mirror.js'
 import { createPriority, DESK } from './priority.js'
 import { createWorkspaces } from './workspaces.js'
+import { createInbound } from './inbound.js'
 import { registerRoutes } from './routes.js'
 
 /** Plugin name used by the Loader and every diagnostic. */
@@ -443,6 +444,10 @@ export async function apply(ctx, config) {
     sessionNames,
   })
 
+  // The other input surface: a typed message in the chat. Built after the notifier because a quoted
+  // instruction is delivered through it — the reply path is the same code a form reply takes.
+  const inbound = createInbound({ log, messages, diagnostics, workspaces, results, work })
+
   /** The card's status snapshot: what the section serves and what is open. */
   const snapshot = async () => ({
     namespace: NAME,
@@ -579,6 +584,12 @@ export async function apply(ctx, config) {
         : '动作由「审批/提问」处理。')
       return answered
     })
+    // The typed half of the same idea: a message in the chat, quoting one of our cards. The channel
+    // has already checked that it came from the bound recipient in a direct chat and that it is not a
+    // repeat; what it means is decided here.
+    const offMessage = (channel.subscribeMessage ?? (() => () => {}))(
+      (message) => inbound.handleMessage(message),
+    )
 
     // Without a server there is no card to ask for a binding, so the
     // deployment's only surface is the log: start onboarding immediately.
@@ -597,6 +608,7 @@ export async function apply(ctx, config) {
       offRunStream()
       offPriority()
       offAction()
+      offMessage()
       // Abandon rather than settle: the desktop branch of each in-flight race
       // stays authoritative, so a still-open GUI can answer normally.
       escalation.close()
