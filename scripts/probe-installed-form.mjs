@@ -120,6 +120,30 @@ function schemaEntry(dir) {
 }
 
 /**
+ * A directory tree's shape, as far as the search cares about it.
+ *
+ * A probe that cannot be run against every deployment it will meet has to be able to say
+ * where it looked. Two rounds of this check were spent guessing at a layout — first the
+ * profile's own tree, then one level inside it, then the tree beside the plugin — so the
+ * report now carries the candidates each root offered, and a run that finds nothing
+ * names the layout instead of only the roots.
+ * @param root - a directory named as a search root.
+ * @returns a short description of what is there.
+ */
+function describeRoot(root) {
+  if (!existsSync(root)) return `${root}: absent`
+  const inside = join(root, 'node_modules', '@deepseek-ai')
+  if (!existsSync(inside)) return `${root}: no node_modules/@deepseek-ai`
+  const packages = readdirSync(inside)
+  const nested = packages.flatMap((name) => {
+    const inner = join(inside, name, 'node_modules', '@deepseek-ai')
+    return existsSync(inner) ? [`${name}{${readdirSync(inner).join(',')}}`] : []
+  })
+  return `${root}: ${packages.length} packages`
+    + (nested.length === 0 ? '' : `; nested: ${nested.join(' ')}`)
+}
+
+/**
  * One balanced call's argument text, braces and all.
  *
  * The source is scanned rather than imported, so the extraction has to survive the
@@ -237,7 +261,11 @@ try {
   const libraryDir = findSchemaLibrary(roots)
   const entry = schemaEntry(libraryDir)
   if (entry === undefined) {
-    answer({ ok: false, detail: `no @deepseek-ai/schemastery resolves from any of ${roots.join(', ')}` })
+    answer({
+      ok: false,
+      detail: `no @deepseek-ai/schemastery resolves from any of ${roots.join(', ')}`
+        + ` — layout: ${roots.map(describeRoot).join(' | ')}`,
+    })
   }
   const library = (await import(pathToFileURL(entry).href)).default
   const field = library.string()
