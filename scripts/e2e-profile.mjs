@@ -198,14 +198,23 @@ function bootManifest(html) {
  * means different things on a library with `volatile()` and one without, and both are
  * shapes a deployment may legitimately resolve.
  * @param home - the scratch `DSH_HOME`.
- * @param pluginDir - the installed copy of this package inside that profile.
  * @param harnessVersion - the harness on `PATH`, for the failure message.
  * @returns `{ ok, detail }`, plus the field names when it reached them.
  */
-function settingsProbe(home, pluginDir, harnessVersion) {
+function settingsProbe(home, harnessVersion) {
   const result = spawnSync(
     process.execPath,
-    [join(root, 'scripts', 'probe-installed-form.mjs'), pluginDir, join(home, 'profiles', 'web', 'node_modules')],
+    [
+      join(root, 'scripts', 'probe-installed-form.mjs'),
+      // The installed copy. The probe searches from the profile's own tree first —
+      // a profile that hoisted a copy resolved that one, and it is the copy the Host
+      // would hand the plugin — then walks up from this directory, which reaches the
+      // tree `@deepseek-ai/dsh` was installed with. Both are needed: a profile need
+      // not carry the library at all, because `autoInstallPeers: false` leaves a peer
+      // to be satisfied by whatever hoisted one, or by the application tree.
+      join(home, 'profiles', 'web', 'node_modules', 'dsh-pocket-console'),
+      join(home, 'profiles', 'web', 'node_modules'),
+    ],
     { cwd: root, encoding: 'utf8', shell: process.platform === 'win32' },
   )
   const line = (result.stdout ?? '').trim().split('\n').at(-1) ?? ''
@@ -307,8 +316,7 @@ try {
   // The exit a person actually meets. Everything above this can be green while the
   // Plugins page lists a plugin whose settings cannot be edited — the shape #89
   // shipped — so the form is asked for by name, in the profile that was installed.
-  const installedDir = join(home, 'profiles', 'web', 'node_modules', 'dsh-pocket-console')
-  const form = settingsProbe(home, installedDir, harness)
+  const form = settingsProbe(home, harness)
   check('the Host serves this entry a settings form', form.ok === true, form.detail ?? '')
   if (form.ok === true) {
     check(
