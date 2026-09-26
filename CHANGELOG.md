@@ -92,12 +92,24 @@ that card's workspace; send **`/help`** for the list. A message that quotes no c
 — guessing a session would be worse than doing nothing — and is answered with one short hint instead.
 No new scope, so an installed deployment gets this without re-authorising.
 
+The two cards that are not about a session are answered the same way, because they are the cards that
+most need typing: **quote a question card** and what you wrote is the answer (an option's exact words
+select it, anything else is the typed answer the card also offers), and **quote an approval card** and
+reply **`允许`** or **`拒绝`**, or **`allow`** / **`reject`**. The word becomes the payload the card's own
+button would have sent, so the race with the desk, the mirror to the desktop half, the in-place rewrite
+of the card and the audit line are the same code: a grant given in the chat is the same `allowed-once` a
+press grants.
+
 - **The quoted card is the anchor**, because the platform sends `parent_id` only when a message replies
   to another. Instructions are deduplicated on `chat_id + message_id` (the platform delivers at least
   once and asks for exactly this key), the handler returns inside the platform's three seconds, and the
   reply is sent after the decision is returned.
+- **An approval answers to exactly two words**, in either language, and to nothing else: no `ok`, no
+  prefix, no fuzzy match. A word that is not one of them decides **nothing at all** rather than rejecting
+  by default, and the refusal names the two words that work. Anything that changes a session's *policy*
+  rather than answering the request in front of the reader stays a deliberate press on the card.
 - **The result card's prompt line teaches the convention**, since an input box replaced by a
-  convention has to say so.
+  convention has to say so. `/help` lists what a typed message can be.
 
 ## 0.9.5
 
