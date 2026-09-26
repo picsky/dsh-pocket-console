@@ -77,8 +77,11 @@ export function isServed(entry) {
 /**
  * The subtree of a schema the Host exposes as editable.
  *
- * From `lib/index.js:118-131`, transcribed whole because the shape of this
- * function *is* the contract:
+ * From `lib/index.js:118-131`, transcribed for the one thing this module is used for:
+ * which **field names** the form offers. The Host rebuilds a marked node through
+ * `plainSchema()` (`lib/index.js:103-117`); that normalisation cannot change a name, and
+ * re-implementing it without the Host's own `z` would be a second thing to keep in step,
+ * so this returns the node as it stands and the cases below assert names:
  *
  *     function volatileForm(schema) {
  *       if (schema.meta.volatile) return plainSchema(schema)
@@ -184,8 +187,6 @@ export function isLiveReference(value) {
  * not `@deepseek-ai/dsh` or `@deepseek-ai/dsh-*`
  * (`@deepseek-ai/dsh-app-boot` `lib/index.js:292-301`).
  */
-export const LIBRARY_CALLS = { writer: WRITER, helper: HELPERS }
-
 /**
  * Which of the two calls a schema library answers — the version axis a case walks.
  *
