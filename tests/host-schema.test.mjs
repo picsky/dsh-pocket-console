@@ -49,8 +49,8 @@ test('a marked leaf is named, and the walk descends objects only', () => {
   )
   assert.deepEqual(
     markedFields({ type: 'object', dict: { group: { type: 'object', meta: { volatile: true }, dict: { x: { type: 'string', meta: {} } } } } }),
-    [],
-    'a marked container whose leaves are unmarked names nothing',
+    ['group.x'],
+    'a marked container is served as its leaves, marked or not',
   )
   assert.deepEqual(
     markedFields({ type: 'object', dict: { group: { type: 'object', meta: { volatile: true }, dict: { x: { type: 'string', meta: { volatile: true } } } } } }),
@@ -119,4 +119,28 @@ test('a resolved value with a field called value is not mistaken for the wrapper
   const inspected = inspectSchema(schema, {})
   assert.equal(inspected.live, true, 'the resolved config is read as a config')
   assert.deepEqual(inspected.shapes, ['validate'])
+})
+
+test('a sample the library refuses is reported as a refusal, not as a call that is absent', () => {
+  // The standard interface answers with `issues` when it will not resolve the value it was
+  // handed. Reading that as "no such call" is how a composition run was told `live:false`
+  // for a library that resolves perfectly well — the probe had asked with a partial sample.
+  assert.deepEqual(
+    resolutionsOf({ '~standard': { validate: () => ({ issues: [{ message: 'missing required value' }] }) } }, { a: 1 }),
+    [{ shape: '~standard.validate', refused: 1 }],
+    'the refusal is named as one, with how many issues came back',
+  )
+
+  // A call that answers with a value and no issues still resolves, and the report says so.
+  assert.deepEqual(
+    resolutionsOf({ '~standard': { validate: (value) => ({ value: { a: value.a }, issues: [] }) } }, { a: 1 }),
+    [{ shape: '~standard.validate', value: { a: 1 } }],
+    'an envelope with no issues is an answer',
+  )
+
+  // And the schema inspection surfaces the refusal rather than pretending the shape is missing.
+  const inspected = inspectSchema({ '~standard': { validate: () => ({ issues: [{}, {}] }) } }, {})
+  assert.deepEqual(inspected.shapes, ['~standard.validate'])
+  assert.deepEqual(inspected.values, { '~standard.validate': 'refused (2 issues)' })
+  assert.equal(inspected.live, false, 'a refused sample is not evidence of a live reference')
 })

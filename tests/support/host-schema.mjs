@@ -36,19 +36,33 @@
  * @param blocked - whether an ancestor already carries the marker.
  * @returns the names below this node, or undefined when the node is a marked leaf.
  */
+/**
+ * The leaf paths under one node, relative to it.
+ *
+ * `''` stands for the node itself being a leaf, so a caller prefixes the key it sits
+ * under without a second special case. Markers are deliberately ignored: a marker above
+ * has already claimed this whole subtree, and the Host does not serve a marked leaf twice.
+ * @param node - one schema node.
+ * @returns the paths, deepest key last.
+ */
+function leavesOf(node) {
+  if (node === undefined || node === null) return []
+  if (node.dict !== undefined && typeof node.dict === 'object') {
+    return Object.entries(node.dict).flatMap(([key, child]) => leavesOf(child).map(name => `${key}${name === '' ? '' : `.${name}`}`))
+  }
+  return ['']
+}
+
 function markedNames(node, blocked = false) {
   if (node === undefined || node === null) return []
   if (node.meta?.volatile) {
     if (blocked) return []
     if (node.dict === undefined) return undefined
-    // The subtree is what this node contributes, so its own leaves are named even
-    // though they sit under a marker: `blocked` is about a marker *inside* another
-    // marked node's walk, not about the walk the marker itself starts.
-    return Object.entries(node.dict).flatMap(([key, child]) => {
-      const inner = markedNames(child, false)
-      if (inner === undefined) return [key]
-      return inner.length === 0 ? [] : inner.map(name => `${key}.${name}`)
-    })
+    // The marker carries the whole subtree, so what this node contributes is **every leaf
+    // under it** — not only the leaves that carry a marker of their own. `volatileForm`
+    // projects `["group.x"]` for a marked container whose leaf is unmarked; naming
+    // nothing there was this walk's own invention, and a case here used to pin it.
+    return Object.entries(node.dict).flatMap(([key, child]) => leavesOf(child).map(name => `${key}${name === '' ? '' : `.${name}`}`))
   }
   if (blocked || node.type !== 'object' || node.dict === undefined) return []
   return Object.entries(node.dict).flatMap(([key, child]) => {
@@ -106,7 +120,18 @@ export function resolutionsOf(schema, value) {
     // answer with the value itself. The wrapper is recognised by the pair, not by the
     // presence of `value`: a resolved config may legitimately have a field called
     // `value`, and unwrapping that would hand the caller a field instead of a config.
-    const envelope = typeof result === 'object' && 'value' in result && 'issues' in result
+    // The standard interface wraps its answer — `{ value, issues }`, or `{ issues }` alone
+    // when it refuses. Recognised by `issues` being a list, which is what separates a
+    // wrapper from a resolved config that happens to have a field called `value`.
+    const envelope = typeof result === 'object' && Array.isArray(result.issues)
+    // The standard interface answers with `issues` instead of a value when it refuses the
+    // sample. That is a fact about the *call*, not a missing capability, and skipping it
+    // made a probe that asked with a partial sample look exactly like a library that does
+    // not publish the call at all.
+    if (envelope && Array.isArray(result.issues) && result.issues.length > 0) {
+      found.push({ shape, refused: result.issues.length })
+      continue
+    }
     const resolved = envelope ? result.value : result
     if (resolved === undefined || resolved === null || typeof resolved !== 'object') continue
     found.push({ shape, value: resolved })
@@ -167,6 +192,10 @@ export function inspectSchema(schema, sample = undefined) {
   const values = {}
   let live = false
   for (const attempt of attempts) {
+    if (attempt.refused !== undefined) {
+      values[attempt.shape] = `refused (${attempt.refused} issues)`
+      continue
+    }
     if (attempt.value === undefined) {
       values[attempt.shape] = 'no value'
       continue

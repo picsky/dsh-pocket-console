@@ -332,7 +332,7 @@ try {
     proto.volatile = helper
   }
 
-  const inspected = inspectSchema(withHelper, { delaySeconds: 600 })
+  const inspected = inspectSchema(withHelper, { delaySeconds: 600, titlePrefix: 'DSH', resultNotify: 'idle', debug: 'off' })
   const fields = inspected.fields
   const older = inspectSchema(withoutHelper).fields
   if (JSON.stringify(fields) !== JSON.stringify(EXPECTED)) {
