@@ -23,6 +23,22 @@ research/
 # repository keeps is the fix — the changelog entry and the code say what was wrong.
 *-audit-report.md
 *-query-report.md
+# And for a proposal, which is an input to a decision record the way a report is an
+# input to a fix. The record is written to stand on its own, so the draft that led to
+# it is not kept: `internal/review-*.md` is the other case, and it is tracked because
+# the review *is* the artifact rather than an input to one.
+internal/proposal-*.md
+
+# A comparison checkout of other plugins is the same kind of material — an input to a
+# decision, and nothing published links to one. It is a whole source tree of somebody
+# else's work, measured in hundreds of megabytes, and leaving it untracked-but-not-
+# ignored means one `git add -A` commits it.
+_compare/
+
+# Worktrees are local scaffolding: one copy of this repository per branch, created and
+# removed by `git worktree`. A branch never needs them, and they turn one `git add -A`
+# into nine copies of the source tree.
+.worktrees/
 
 # Logs
 *.log
