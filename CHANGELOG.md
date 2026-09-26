@@ -85,6 +85,34 @@ line, the channel and the artifact checks; no plugin behaviour changes.
   package instead of the whole plugin; the channel's own missing transport raises a sentence that
   names the package and the install that omits it rather than a bare specifier; and a case walks
   the entry's static import graph so a bundled dependency cannot re-enter it.
+- **The settings page stages what you type and writes it when you save.** Two reports with one
+  cause: a keystroke took a visible moment to appear, and there was no save control at all. The
+  card had read the page's own form as an invitation to write on every change — each keystroke was
+  a revision-fenced document mutation, and the value only came back with the Host's next snapshot
+  — and had then left the save out, reasoning that a form which writes as it goes has nothing to
+  save. 0.1.7's own answer was already in the primitives package this bundle requires:
+  `SettingsFormModel` stages a draft and writes it once, and `SettingsForm` draws the frame and the
+  save — its header says it outright, *"a control that committed as it settled turned one edit into
+  a write the user never asked for and could not preview"*. The card now builds that model over the
+  settings controller it bound, which is the same object the Plugins page hands over as
+  `props.form` (`ui-plugin-manager` builds that as `configForms.get(id)`), and draws the Host's own
+  value fields — and its segmented control and switch for the two finite choices, which the
+  primitives describe but do not package as a field. A Host that publishes no such model —
+  `0.1.6-alpha.1` ships none of it, checked in its own tarball — keeps the form this card writes
+  itself, staged and saved, which is what that leg has always had.
+- **The settings card draws no frame of its own, and states its own type scale.** A reader reported
+  the Plugins page twice from a phone-sized window: the settings items sat in a bordered, rounded,
+  tinted box inside the page's own frame, and the text inside it came out at sizes nobody chose — a
+  row at the page's inherited size beside an app id at the browser's 13.33px monospace. Both came
+  from the same habit, a table of metrics written against nothing. The card now draws no frame (the
+  Plugins page already draws the page: `ItemDetail`'s breadcrumb, its 20px title, 32px between its
+  sections), names the whole scale it uses — 13/20 body, 12/18 for hints and identifiers, 11/18 for
+  the tag, taken from the theme's own size steps — and takes every radius and border from the
+  theme's steps (`--dsw-radius-*`, `--dsw-alias-border-l*`, `--dsw-alias-button-primary-fill`)
+  instead of literals. A case reads the style table and fails on a frame, a literal radius, an
+  unstyled identifier, or a style that is used but never declared: the last of those is how the line
+  above the QR code was found rendering at the page's inherited size, because `S.description` was
+  never defined at all.
 - **The plugin's settings form is served whenever its schema is written as the Host
   reads it**, which a stand-in can no longer get wrong on its own. The settings page was
   blank for a deployment whose profile resolved a schemastery older than the one its Host
