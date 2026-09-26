@@ -299,13 +299,18 @@ function resolveConfig(raw, messages) {
 /** One plain-text card node. */
 const plainText = (content) => ({ tag: 'plain_text', content })
 
-/** One callback button bound to the given payload. */
-const button = (label, tone, payload) => ({
+/** One callback button bound to the given payload, with an optional second confirmation. */
+const button = (label, tone, payload, confirm) => ({
   tag: 'button',
   text: plainText(label),
   type: tone,
   width: 'fill',
   behaviors: [{ type: 'callback', value: payload }],
+  // A confirmation the platform draws itself, before the press is ever sent: the one moment a
+  // privilege change can be questioned while the person still has the context to answer it.
+  ...(confirm === undefined
+    ? {}
+    : { confirm: { title: plainText(confirm.title), text: plainText(confirm.text) } }),
 })
 
 /**
@@ -376,6 +381,7 @@ export function renderCard(view, messages, onFit = () => {}, onDegrade = () => {
       node.label,
       BUTTON_TYPES.has(node.tone) ? node.tone : 'default',
       node.payload,
+      node.confirm,
     ))
   }
 

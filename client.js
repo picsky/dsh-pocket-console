@@ -34,18 +34,6 @@ window.__ModuleLoader__.load({
     const h = React.createElement
     const primitives = require('@deepseek-ai/dsh-client-ui-primitives')
     const { Modal } = primitives
-    /**
-     * The disclosure chevron, under whichever name this Host's icon set uses.
-     *
-     * 0.1.7 renamed the whole icon family from a size suffix to a weight one —
-     * `IconChevronDownOutline14` became `IconChevronDownOutlineRegular`, with no
-     * alias left behind — and an undefined element type is not a missing
-     * decoration: React throws for it on the first render, the slot renderer retires
-     * an entry that throws, and the card *and* the description beside it disappear
-     * from a page that otherwise looks perfectly healthy. So both names are asked
-     * for, and the card is drawn without a chevron when a Host ships neither.
-     */
-    const IconChevronDown = primitives.IconChevronDownOutlineRegular ?? primitives.IconChevronDownOutline14
 
     /**
      * Settings namespace. It is the `settings.plugin.item` slot key up to 0.1.6,
@@ -63,6 +51,9 @@ window.__ModuleLoader__.load({
 
     /** Where this card's page sits among the Plugins page's own pages. */
     const PLUGINS_ITEM_ORDER = 40
+
+    /** A no-op, for a card rendered without the action a control would call. */
+    const noop = () => {}
 
     /** Same-origin route prefix the host half registers. */
     const ROUTE = '/__pocket'
@@ -174,14 +165,11 @@ window.__ModuleLoader__.load({
         overridden: '已覆盖',
         reset: '恢复默认',
         invalidNumber: '请填一个数字，留空表示恢复默认。',
-        unsaved: '未保存',
         save: '保存',
         saving: '保存中…',
         discard: '放弃修改',
         saveFailed: '保存没有生效，请检查后重试。',
         readOnly: '当前设置文档只读，修改无法保存。',
-        expand: '展开',
-        collapse: '收起',
         qrAlt: '绑定二维码',
         pendingNote: state => `（${state}）`,
         requestFailed: (status, what) => `${what} 请求失败（HTTP ${status}）`,
@@ -252,14 +240,11 @@ window.__ModuleLoader__.load({
         overridden: 'Overridden',
         reset: 'Reset',
         invalidNumber: 'Enter a number, or leave it blank to inherit the default.',
-        unsaved: 'Unsaved',
         save: 'Save',
         saving: 'Saving…',
         discard: 'Discard',
         saveFailed: 'The save did not take effect. Check the values and try again.',
         readOnly: 'This settings document is read-only, so changes cannot be saved.',
-        expand: 'Expand',
-        collapse: 'Collapse',
         qrAlt: 'Binding QR code',
         pendingNote: state => ` (${state})`,
         requestFailed: (status, what) => `${what} failed (HTTP ${status})`,
@@ -292,28 +277,21 @@ window.__ModuleLoader__.load({
 
     /** Inline styles: the shipped cards' tokens and metrics, which this bundle cannot import. */
     const S = {
-      card: (open) => ({
+      /**
+       * The card's own frame.
+       *
+       * No disclosure control: the Plugins page opens a plugin's page itself, and the
+       * title, the icon and the one-liner above this frame are the page's own chrome
+       * (`ItemDetail`). A second expander inside it was a fold inside a fold, and the
+       * header it drew repeated the line the page had already printed directly above.
+       */
+      card: {
         listStyle: 'none',
-        border: `1px solid var(--dsw-alias-${open ? 'label-dimmed' : 'border-l2'})`,
+        border: '1px solid var(--dsw-alias-border-l2)',
         borderRadius: '12px',
-        background: `var(--dsw-alias-bg-layer-${open ? 2 : 3})`,
-      }),
-      header: {
-        width: '100%', appearance: 'none', border: 0, background: 'none', font: 'inherit',
-        color: 'inherit', textAlign: 'left', cursor: 'pointer', display: 'flex',
-        alignItems: 'center', gap: '12px', padding: '14px 16px', borderRadius: '12px',
+        background: 'var(--dsw-alias-bg-layer-3)',
+        padding: '0 16px 8px',
       },
-      headText: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '4px' },
-      name: { fontSize: '15px', fontWeight: 600, lineHeight: 1.4, color: 'var(--dsw-alias-label-primary)' },
-      description: { fontSize: '13px', lineHeight: 1.5, color: 'var(--dsw-alias-label-tertiary)' },
-      chevron: (open) => ({
-        // The icon takes only size and className: it fills with currentColor, so
-        // the wrapper owns colour and rotation, and inline-flex is what lets the
-        // transform apply at all.
-        display: 'inline-flex', flex: 'none',
-        color: 'var(--dsw-alias-label-tertiary)', transition: 'transform .16s',
-        ...(open ? { transform: 'rotate(180deg)' } : {}),
-      }),
       badge: {
         flex: 'none', borderRadius: '999px', padding: '1px 8px', fontSize: '11px', lineHeight: '17px',
         fontWeight: 500, whiteSpace: 'nowrap', background: 'var(--dsw-alias-bg-module-platform)',
@@ -419,23 +397,47 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Stage edits over the settings namespace and write them on save.
+     * Read and write the settings namespace, under whichever write model is in force.
      *
-     * A write is a durable, revision-fenced document mutation, so a control that
-     * committed as it settled would write something the user never asked for and
-     * could not preview. Each field shows its effective value — user layer over
-     * composition layer over schema default — and whether the user layer carries
-     * it: that presence, not a value comparison, is what marks it overridden.
-     * @param scope - the bound settings scope for this card's namespace.
+     * Two models meet here, and which one applies is the Host's answer rather than this
+     * plugin's:
+     *
+     * - **Immediate** — from 0.1.7 the Plugins page opens a card's page through
+     *   `plugins.item` with `view: 'page'` and hands over `props.form`, an owner that
+     *   already holds this entry's accepted values and the action that writes them
+     *   (`ConfigPageForm`: `state` plus `mutate`). Its contract calls that view *the form
+     *   with its own save control*, and the control is the owner's: each control submits
+     *   its own edit, and the revision fence, the conflict recovery and the
+     *   accepted-value pushback belong to it. A second save button drawn here would write
+     *   the same document twice, and a draft the owner cannot see is a value the reader
+     *   believes they set.
+     * - **Staged** — the ≤0.1.6 `settingsScope`, where nothing but this card knows the
+     *   namespace is editable and a write is a durable, revision-fenced document
+     *   mutation. There the draft-then-save model stays: a control that committed as it
+     *   settled would write something the reader never asked for and could not preview.
+     *
+     * Only the write half differs. Both project the same four fields through
+     * {@link FIELDS}, and every field reports its effective value — user layer over
+     * composition layer over schema default — and whether the user layer carries it:
+     * that presence, not a value comparison, is what marks it overridden.
+     * @param scope - the bound settings scope, or the owner form the page handed over.
+     * @param host - whether `scope` is the page's `ConfigPageForm` rather than a scope.
      * @returns the projection and the actions the card renders and calls.
      */
-    function createSettingsForm(scope) {
+    function createSettingsForm(scope, host = false) {
       const staged = new Map()
       const listeners = new Set()
       let saving = false
       let failed = false
 
-      const snapshotOf = () => scope.getSnapshot()
+      /**
+       * The owner's accepted values.
+       *
+       * Read through the owner on every projection rather than held: the page re-renders
+       * with a fresh snapshot after a write, so a value captured here would freeze the
+       * controls at mount — the failure the polling on the other model exists to avoid.
+       */
+      const snapshotOf = () => (host ? scope.state ?? { status: 'loading', writable: false } : scope.getSnapshot())
       const sectionValue = field => snapshotOf().value?.[field]
       const baseValue = field => snapshotOf().base?.[field]
       const userLayer = () => {
@@ -478,12 +480,45 @@ window.__ModuleLoader__.load({
       /** One control's state. */
       const fieldState = (field) => {
         const spec = specOf(field)
-        const edit = staged.get(field)
-        if (edit === undefined) {
-          return { text: formatValue(sectionValue(field)), overridden: stored(field), invalid: false }
+        const effective = { text: formatValue(sectionValue(field)), overridden: stored(field), invalid: false }
+        if (host) {
+          // No draft on this model, so "invalid" is a fact about the value the owner
+          // holds: a numeric field whose effective value is not a finite number is one
+          // the entry cannot resolve until somebody fixes it.
+          const raw = sectionValue(field)
+          const invalid = spec.kind === 'number' && raw !== undefined && raw !== null
+            && !Number.isFinite(Number(raw))
+          return { ...effective, invalid }
         }
+        const edit = staged.get(field)
+        if (edit === undefined) return effective
         const write = edit.clear ? { kind: 'clear' } : parseValue(spec.kind, edit.text)
         return { text: edit.text, overridden: write?.kind === 'set', invalid: write === undefined }
+      }
+
+      /**
+       * One write through the owner's form.
+       *
+       * The revision the owner last read goes with it, which is the whole point of that
+       * signature: a card that submitted without it would overwrite a change made
+       * somewhere else — the settings document is shared, and the owner is the side that
+       * knows how to recover from a conflict.
+       */
+      const commit = async (ops) => {
+        try {
+          const accepted = await scope.mutate(ops, snapshotOf().revision)
+          failed = !accepted
+          publish()
+          return accepted
+        } catch (error) {
+          // The owner's `mutate` rejects when the write never reached the document. It is
+          // answered the same way a refusal is rather than rethrown: the callers here hold
+          // no draft to keep, they dispatch with `void`, and a rethrow would leave the
+          // process with an unhandled rejection and the card with nothing to say.
+          failed = true
+          publish()
+          return false
+        }
       }
 
       /** Form-level state: what the Host serves, and what a save would do. */
@@ -495,13 +530,19 @@ window.__ModuleLoader__.load({
         // the settings contract out from under it.
         status: snapshotOf().status,
         writable: snapshotOf().writable,
+        // The owner persists each edit, so there is nothing to save and nothing that
+        // could be discarded: the footer is left out rather than drawn disabled.
+        immediate: host,
         dirty: plan().length > 0,
         invalid: plan().some(item => item.run === undefined),
         saving,
         failed,
       })
 
-      scope.subscribe(publish)
+      // The staged model has no change event of its own, so the card subscribes to the
+      // scope. The owner's model re-renders the page instead, and a subscription here
+      // would be a second source of truth for the values the owner already re-read.
+      if (!host) scope.subscribe(publish)
 
       return {
         // Derived from the same list the card renders, so a field added there is
@@ -511,8 +552,29 @@ window.__ModuleLoader__.load({
           shell: shell(),
           ...Object.fromEntries(FIELDS.map(spec => [spec.field, fieldState(spec.field)])),
         }),
-        edit(field, text) { staged.set(field, { text, clear: false }); failed = false; publish() },
+        edit(field, text) {
+          failed = false
+          if (host) {
+            const write = parseValue(specOf(field).kind, text)
+            // An unparseable draft is not sent: the owner would either refuse it or
+            // store something the reader did not type, and the control says so itself.
+            publish()
+            if (write === undefined) return
+            void commit([write.kind === 'clear'
+              ? { op: 'unset', path: [field] }
+              : { op: 'set', path: [field], value: write.value }])
+            return
+          }
+          staged.set(field, { text, clear: false })
+          publish()
+        },
         resetField(field) {
+          failed = false
+          if (host) {
+            publish()
+            void commit([{ op: 'unset', path: [field] }])
+            return
+          }
           staged.set(field, { text: formatValue(baseValue(field)), clear: true })
           failed = false
           publish()
@@ -610,7 +672,26 @@ window.__ModuleLoader__.load({
       }
       const state = props.usePocketConsole(snapshot => snapshot)
       const shell = state.shell
-      const [open, setOpen] = useState(false)
+      /**
+       * The card's own form, when the page did not hand one over.
+       *
+       * The write model was resolved at mount — see `mountCard`, which is where the
+       * scope and the model both come from — and the projection rides the hooks
+       * compartment this bundle published, so this is the same state the render reads.
+       */
+      const boundController = () => ({ ...state, shell, edit: props.edit ?? noop, resetField: props.resetField ?? noop })
+      /**
+       * The page's own owner form, in the same shape.
+       *
+       * A fresh controller per render, because the owner re-renders the page with a new
+       * snapshot after a write and its projection is read from that snapshot at use —
+       * holding one would freeze the controls at the first value the page sent.
+       * @param form - the `ConfigPageForm` the page passed in `props.form`.
+       */
+      const hostController = (form) => {
+        const controller = createSettingsForm(form, true)
+        return { ...controller.projection(), edit: controller.edit, resetField: controller.resetField }
+      }
       const [runtime, setRuntime] = useState(null)
       const [failure, setFailure] = useState(null)
       const [busy, setBusy] = useState(false)
@@ -716,8 +797,15 @@ window.__ModuleLoader__.load({
       const row = (key, label, value) => h('div', { key, style: S.row },
         h('span', { style: S.rowLabel }, label), value)
 
-      const field = (fieldSpec, label, hint) => {
-        const control = state[fieldSpec.field]
+      /**
+       * One field, under the write model its controller implements.
+       * @param controller - the form controller in force: the page's, or this card's.
+       * @param fieldSpec - the field's declaration from {@link FIELDS}.
+       * @param label - the control's label.
+       * @param hint - the control's hint.
+       */
+      const field = (controller, fieldSpec, label, hint) => {
+        const control = controller[fieldSpec.field]
         const id = `pocket-console-${fieldSpec.field}`
         // The invalid message and the hint describe this control, so a reader
         // that never sees the layout still gets them when the field is focused.
@@ -730,8 +818,8 @@ window.__ModuleLoader__.load({
               control.overridden ? h('span', { style: S.badge }, copy.overridden) : null,
               // Every field has a button called "Reset", so its accessible name
               // has to say which field it resets.
-              button(copy.reset, () => { props.resetField(fieldSpec.field) }, {
-                disabled: !control.overridden || !shell.writable,
+              button(copy.reset, () => { controller.resetField(fieldSpec.field) }, {
+                disabled: !control.overridden || !controller.shell.writable,
                 accessibleName: `${copy.reset}: ${label}`,
                 style: S.reset,
               }))),
@@ -740,20 +828,20 @@ window.__ModuleLoader__.load({
                 id,
                 style: S.input,
                 value: control.text,
-                disabled: !shell.writable,
+                disabled: !controller.shell.writable,
                 'aria-describedby': hintId,
-                onChange: event => { props.edit(fieldSpec.field, event.target.value) },
+                onChange: event => { controller.edit(fieldSpec.field, event.target.value) },
               }, fieldSpec.options.map(option => h('option', { key: option, value: option },
                 copy[fieldSpec.labels?.[option] ?? option])))
             : h('input', {
                 id,
                 style: control.invalid ? { ...S.input, ...S.inputInvalid } : S.input,
                 value: control.text,
-                disabled: !shell.writable,
+                disabled: !controller.shell.writable,
                 inputMode: fieldSpec.kind === 'number' ? 'numeric' : undefined,
                 'aria-invalid': control.invalid ? true : undefined,
                 'aria-describedby': control.invalid ? `${invalidId} ${hintId}` : hintId,
-                onChange: event => { props.edit(fieldSpec.field, event.target.value) },
+                onChange: event => { controller.edit(fieldSpec.field, event.target.value) },
               }),
           control.invalid ? h('p', { id: invalidId, style: S.invalid }, copy.invalidNumber) : null,
           h('p', { id: hintId, style: S.hint }, hint))
@@ -909,41 +997,53 @@ window.__ModuleLoader__.load({
           ]
 
       const blocked = !shell.dirty || shell.invalid || shell.saving
-      return h('li', { style: S.card(open) },
-        h('button', {
-          type: 'button',
-          style: S.header,
-          'aria-expanded': open,
-          // The label is the button's whole spoken name, so anything the button
-          // shows beside its title has to be in it: an `unsaved` badge the label
-          // omits is a state a reader who is not looking would never hear.
-          'aria-label': [
-            `${copy[open ? 'collapse' : 'expand']}: ${copy.title}`,
-            shell.dirty ? copy.unsaved : undefined,
-          ].filter(Boolean).join(', '),
-          onClick: () => { setOpen(!open) },
-        },
-          h('span', { style: S.headText },
-            h('span', { style: S.name }, copy.title),
-            h('span', { style: S.description }, copy.description)),
-          shell.dirty ? h('span', { style: S.badge, 'aria-hidden': 'true' }, copy.unsaved) : null,
-          h('span', { style: S.chevron(open) }, IconChevronDown === undefined ? null : h(IconChevronDown, {}))),
 
-        open ? h('div', { style: S.body },
-          !shell.writable ? h('p', { style: S.notice, role: 'status' }, copy.readOnly) : null,
+      /**
+       * The form's body, under one controller.
+       *
+       * `shell.immediate` is the Host owning the write — see `createSettingsForm` — and
+       * then there is no footer: the owner persists each edit, and a save button here
+       * would write the same document a second time under a revision the owner never
+       * read.
+       * @param controller - the form controller in force.
+       */
+      const body = (controller) => h('div', { style: S.body },
+        !controller.shell.writable ? h('p', { style: S.notice, role: 'status' }, copy.readOnly) : null,
 
-          h('div', { style: S.section }, runtimeRows),
+        h('div', { style: S.section }, runtimeRows),
 
-          // Derived from FIELDS, never indexed: a label and its control are the
-          // same spec by construction, which is the one thing a positional list
-          // got wrong the moment a field was inserted in the middle.
-          ...FIELDS.map(spec => field(spec, copy[spec.field], copy[`${spec.field}Hint`])),
+        // Derived from FIELDS, never indexed: a label and its control are the
+        // same spec by construction, which is the one thing a positional list
+        // got wrong the moment a field was inserted in the middle.
+        ...FIELDS.map(spec => field(controller, spec, copy[spec.field], copy[`${spec.field}Hint`])),
 
-          h('div', { style: S.footer },
-            shell.failed ? h('p', { style: S.failed, role: 'status' }, copy.saveFailed) : null,
-            button(copy.discard, props.discard, { disabled: !shell.dirty || shell.saving }),
-            button(shell.saving ? copy.saving : copy.save, props.save, { disabled: blocked, primary: true })))
-          : null)
+        controller.shell.immediate ? null : h('div', { style: S.footer },
+          controller.shell.failed ? h('p', { style: S.failed, role: 'status' }, copy.saveFailed) : null,
+          button(copy.discard, props.discard ?? noop, { disabled: !controller.shell.dirty || controller.shell.saving }),
+          button(
+            controller.shell.saving ? copy.saving : copy.save,
+            props.save ?? noop,
+            { disabled: blocked, primary: true },
+          )))
+
+      /**
+       * Render the card with one form controller.
+       *
+       * The controller is passed down rather than closed over so the two paths cannot
+       * share the fields of whichever was built first.
+       * @param controller - the form controller in force.
+       */
+      const renderWith = (controller) => h('li', { style: S.card }, body(controller))
+
+      // The page's own owner first: `view: 'page'` is documented as *the form with its
+      // own save control*, and the owner is the side that holds this entry's accepted
+      // values, the revision and the recovery path. This card's own equipment is the
+      // fallback for a Host that dispatches a page without one, which is what the
+      // ≤0.1.6 keyed slot does.
+      if (typeof props.form?.mutate === 'function') {
+        return renderWith(hostController(props.form))
+      }
+      return renderWith(boundController())
     }
 
     /**
@@ -1225,14 +1325,20 @@ window.__ModuleLoader__.load({
        * 'remote.settings']` and therefore provides `configForms` strictly after this
        * entry applies, so a one-shot read finds nothing and the card is dropped
        * without a word while the page it belongs to loads perfectly.
-       * @param scope - the bound scope or form for this plugin's namespace.
+       * The write model is not a preference: the Plugins page's `view: 'page'` calls for
+       * the owner's own save control, while a bound scope has no owner to save for it
+       * (see `createSettingsForm`). The page's owner arrives as a prop, so this card
+       * publishes its own equipment and reads `props.form` first when it renders.
+       * @param scope - the bound scope for this namespace.
        * @param slot - the slot the running Host dispatches settings pages through.
        * @param keyed - whether that slot takes the namespace as a key or as an id.
        */
       const mountCard = (scope, slot, keyed) => {
         if (mounted) return
         mounted = true
-        const form = createSettingsForm(scope)
+        // The scope is bound here rather than in the component because this is the
+        // closure that holds the service the Host answered with.
+        const form = createSettingsForm(scope, false)
         const store = createSnapshot(form.projection())
         form.subscribe(() => { store.set(form.projection()) })
         /**

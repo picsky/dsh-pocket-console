@@ -55,6 +55,57 @@ line, the channel and the artifact checks; no plugin behaviour changes.
 - **The client stand-in enforces React's rule for element types**, so the failure that emptied a
   0.1.7 page — an `undefined` component, which React throws on and the slot renderer answers by
   retiring the entry — fails the suite instead of a release.
+- **The suite's stand-ins are held to the Host's own contract.** `tests/support/host-contract.mjs`
+  transcribes the Host's settings gate with the file and line each piece was read from, the
+  schemastery stand-in models the marker (`meta.volatile`) rather than a private flag of its own,
+  and `check:parity` holds the marked field set to the card. The build also asks the question
+  inside the installed profile, against the schema library that deployment resolved, and fails the
+  run when the Host serves no form. ([#92](https://github.com/picsky/dsh-pocket-console/issues/92), [#95](https://github.com/picsky/dsh-pocket-console/issues/95))
+
+### Fixed
+
+- **The plugin's settings form is served whenever its schema is written as the Host
+  reads it**, which a stand-in can no longer get wrong on its own. The settings page was
+  blank for a deployment whose profile resolved a schemastery older than the one its Host
+  carries: `liveField` asked for a `volatile()` helper instead of writing the marker the
+  Host's form projection is keyed on, so every editable field landed unmarked, no form
+  was built for the entry, and the card could report only that the Host serves none. The
+  marker is now written through whichever call the resolved library has. ([#89](https://github.com/picsky/dsh-pocket-console/issues/89), [#91](https://github.com/picsky/dsh-pocket-console/issues/91))
+- **A form that is served but can never become ready is refused at build time.** A
+  required field with no default keeps `meta.required` in the projection, so the browser's
+  validation of the schema and the values fails and the form sits at "loading" for good —
+  visible and unusable, which reads as a broken plugin.
+- **A capability the Host does not answer is said in the deployment log.** The settings
+  service names the two probes it makes (`installSection`, `configure`) when neither is
+  there, instead of the card drawing controls that persist nowhere. ([#93](https://github.com/picsky/dsh-pocket-console/issues/93))
+- **The plugin's page is the page's own form.** The Plugins page opens a plugin's page and
+  hands its configuration owner over in `props.form`; the card drew a second disclosure
+  inside that page, repeating the title and the one-liner printed directly above it, and
+  kept a staged draft with its own Save button. It now writes each edit through the
+  owner's form — which is what carries the revision fence and the conflict recovery — and
+  the disclosure, its chevron and the icon lookup that 0.1.7 renamed are gone with it. The
+  ≤ 0.1.6 keyed settings card keeps the draft-then-save model, unchanged. ([#94](https://github.com/picsky/dsh-pocket-console/issues/94))
+
+**A card is never lost to a platform limit.** An answer ending in nine Markdown tables was refused
+whole by the platform — the reader got nothing, and the log gave no reason. Three defects met: no
+budget for the card's table count, a judge that did not recognize the refusal, and a delivery path
+whose final failure was a single warning. All three are fixed, and when every card-shaped attempt
+fails the answer now goes out as a plain-text message rather than nowhere. No configuration changes.
+
+- **Tables are budgeted, and written as text past the budget.** The platform counts tables across the
+  whole card and refuses it past five; the card renderer now keeps four, body and fold sharing one
+  counter, and turns the rest into text — the rows survive, the grid does not. A card the platform
+  refused for its table count is retried once with its tables flattened.
+- **A refusal is classified instead of guessed.** `230002` ("the bot is not in the group"), `10002`
+  ("the bot is not in the chat") and `230020` (a rate limit) were being read as size refusals, while
+  `230099` — the code that actually refuses a card — was not read at all. Each refusal now yields a
+  kind, and each kind gets the degradation that can help it; a permission or availability refusal
+  fails once, quickly, instead of being resent four times.
+- **A delivery that fails says why.** The result path reports the refusal's kind, code and message to
+  `diagnostics`, so a card that did not arrive is answerable from the deployment log.
+- **The last resort is a message.** When no card can be delivered, the answer is sent as plain text:
+  no elements, no tables, 150 KB instead of 30. It has no reply box, and arriving without one beats
+  not arriving.
 
 **Verified on DSH 0.1.6-alpha.1 and 0.1.7-rc.2**, which is the support window this release
 states.
@@ -84,6 +135,15 @@ fails the answer now goes out as a plain-text message rather than nowhere. No co
 
 ### Added
 
+**An approval card can now stop asking.** A third control, `以后不再问（完全权限）`, switches **that
+session** to the deployment's full-access preset through DSH's own permission service — so the record
+says a person chose a policy, rather than a grant this plugin made on their behalf. It appears only when
+the host offers such a preset (matched by the knobs it writes, not by its name), it asks for
+confirmation first because the desktop asks for one too, and it settles the request it was pressed on,
+since pressing it plainly means "let this one through". A switch that fails settles nothing: the card
+keeps its buttons and the ordinary answers still work. Actions that still need approval under that
+policy are **refused** rather than granted, and the card says so — as it says that this path goes quiet
+on the phone, and where to change it back.
 **A typed message in the chat is now an instruction.** The card's input box is capped at 1000
 characters by the platform — enough to reply, not enough for the first prompt of a new session — so the
 chat carries instructions too. **Quote a card** and what you type goes to that card's session, by the
