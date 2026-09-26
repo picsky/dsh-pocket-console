@@ -29,11 +29,17 @@ test('the browser half loads through the module loader and registers its card', 
       if (typeof type !== 'string' && typeof type !== 'function') {
         throw new TypeError(`Element type is invalid: expected a string (for built-in components) or a class/function but got: ${String(type)}`)
       }
+      const given = props ?? {}
+      const kids = children.flat().filter(child => child !== null && child !== undefined && child !== false)
       return {
         type,
         props: {
-          ...(props ?? {}),
-          children: children.flat().filter(child => child !== null && child !== undefined && child !== false),
+          ...given,
+          // React's own rule for the `children` *prop*: positional children replace it, and with
+          // none the prop stands. Compiling JSX puts nested children there rather than in the
+          // call's argument list, which is how the Host's own components take them — so a
+          // stand-in that always overwrote the prop would hide every child of one.
+          ...(kids.length === 0 && given.children !== undefined ? {} : { children: kids }),
         },
       }
     },
@@ -1076,6 +1082,171 @@ test('the browser half loads through the module loader and registers its card', 
       collect(render()).texts.includes(face.copy.saveFailed),
       'and so is one that never reached the document',
     )
+    applied.effects[0]()
+  }
+
+  // ---- The Host's own settings form, when the Host publishes one (0.1.7) -------------
+  //
+  // 0.1.7 moved the plugin settings form into the primitives package, and its model is the one
+  // to use: it stages what the reader types and writes it once, on save. Transcribed here from
+  // the installed package, with the file each rule was read from — the model's own header
+  // (`dsh-client-ui-primitives/lib/types/settings-form/form-model.d.ts:1-14`: *"a control that
+  // committed as it settled turned one edit into a write the user never asked for and could not
+  // preview"*), the frame that draws the save (`…/SettingsForm.d.ts:1-8`), and a value field
+  // (`…/fields.d.ts:1-6`). The shipped pages that use them are the reference for the wiring
+  // (`dsh-client-ui-settings-web-search/lib/client.js:74-130` and `:171-193`).
+  //
+  // What this case is about is the card's half: it hands the Host's model the scope it bound,
+  // renders the Host's frame, fields and choice controls, and therefore cannot turn a keystroke
+  // into a write of its own. On a Host that seeds no such form — every 0.1.6, and the seeded
+  // variants below — the card keeps its own form, which the case above pins.
+  {
+    const writes = []
+    const drafts = new Map()
+    const specs = []
+    /** The Host's form model: stage on edit, write every staged edit on save. */
+    class HostFormModel {
+      constructor(scope, given) {
+        this.scope = scope
+        specs.push(...given)
+      }
+      shell() {
+        const state = this.scope.getSnapshot()
+        return {
+          available: state.status === 'ready',
+          writable: state.writable === true,
+          dirty: drafts.size > 0,
+          invalid: false,
+          saving: false,
+          failed: false,
+        }
+      }
+      field(name) {
+        const spec = specs.find(entry => entry.field === name)
+        const state = this.scope.getSnapshot()
+        return {
+          text: drafts.has(name) ? drafts.get(name) : spec.format(state.value?.[name]),
+          overridden: Object.hasOwn(state.user ?? {}, name),
+          invalid: false,
+        }
+      }
+      actions() {
+        return {
+          edit: (name, text) => { drafts.set(name, text); this.publish?.() },
+          resetField: name => { drafts.set(name, ''); this.publish?.() },
+          discard: () => { drafts.clear(); this.publish?.() },
+          save: () => {
+            // One revision-fenced write, from every staged draft, in staging order.
+            const ops = [...drafts].flatMap(([name, text]) => {
+              const write = specs.find(entry => entry.field === name).parse(text)
+              if (write === undefined) return []
+              return [write.kind === 'clear'
+                ? { op: 'unset', path: [name] }
+                : { op: 'set', path: [name], value: write.value }]
+            })
+            writes.push({ ops, revision: this.scope.getSnapshot().revision })
+            drafts.clear()
+            this.publish?.()
+          },
+        }
+      }
+      bind(project) {
+        const listeners = new Set()
+        const store = {
+          current: project(),
+          getSnapshot() { return this.current },
+          subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
+        }
+        this.publish = () => {
+          store.current = project()
+          for (const listener of listeners) listener()
+        }
+        return store
+      }
+    }
+    const textSpec = field => ({
+      field,
+      format: value => (value === undefined || value === null ? '' : String(value)),
+      parse: text => (text.trim() === '' ? { kind: 'clear' } : { kind: 'set', value: text }),
+    })
+    const hostPrimitives = {
+      ...baseline['@deepseek-ai/dsh-client-ui-primitives'],
+      SettingsFormModel: HostFormModel,
+      SettingsForm: 'SettingsForm',
+      SettingsValueField: 'SettingsValueField',
+      SegmentedControl: 'SegmentedControl',
+      Switch: 'Switch',
+      settingsNumberField: field => ({
+        ...textSpec(field),
+        parse: text => (text.trim() === ''
+          ? { kind: 'clear' }
+          : (Number.isFinite(Number(text)) ? { kind: 'set', value: Number(text) } : undefined)),
+      }),
+      settingsTextField: textSpec,
+    }
+    const withHostForm = await load('../client.js?verify-host-form', hostPrimitives)
+    const applied = applyTo(withHostForm.exports, { surface: 'forms' })
+    const face = applied.page.options.inject()
+    FakeReact.cells = []
+    FakeReact.cursor = 0
+    const render = () => applied.page.Component({
+      ...face,
+      view: 'page',
+      usePocketConsole: selector => selector(face.hooks.pocketConsole.getSnapshot()),
+    })
+    /** Every node of one type, depth first. */
+    const nodesOfType = (tree, type) => {
+      const found = []
+      const walk = node => {
+        if (node === null || typeof node !== 'object') return
+        if (Array.isArray(node)) { for (const child of node) walk(child); return }
+        if (node.type === type) found.push(node)
+        walk(node.props?.children)
+      }
+      walk(tree)
+      return found
+    }
+
+    const first = render()
+    const form = nodesOfType(first, 'SettingsForm')[0]
+    assert.ok(form !== undefined, "the card renders the Host's own form when the Host seeds one")
+    assert.equal(form.props.state.available, true, 'and hands it the state its model reports')
+    assert.equal(form.props.state.dirty, false, 'nothing is staged before the reader types')
+    assert.deepEqual(
+      nodesOfType(first, 'SettingsValueField').map(node => node.props.id).sort(),
+      ['pocket-console-delaySeconds', 'pocket-console-titlePrefix'],
+      'a value field is the Host control',
+    )
+    assert.deepEqual(
+      nodesOfType(first, 'Switch').map(node => node.props.label),
+      [face.copy.debug],
+      'a boolean is the Host switch, under this card copy',
+    )
+    assert.deepEqual(
+      nodesOfType(first, 'SegmentedControl').map(node => node.props.options.map(option => option.label)),
+      [[face.copy.resultNotifyOff, face.copy.resultNotifyIdle]],
+      'and a finite choice is the Host segmented control, in this card copy',
+    )
+    assert.ok(!textOf(first).includes(face.copy.save), 'this card draws no save of its own')
+
+    // A keystroke stages. It does not write: the write is the save the Host's form draws, which
+    // is the whole reason for using the Host's model instead of a controller per render.
+    nodesOfType(first, 'SettingsValueField')
+      .find(node => node.props.id === 'pocket-console-delaySeconds')
+      .props.onEdit('600')
+    assert.deepEqual(writes, [], 'typing writes nothing')
+    assert.equal(face.hooks.pocketConsole.getSnapshot().delaySeconds.text, '600', 'the draft is what the control shows')
+    assert.equal(face.hooks.pocketConsole.getSnapshot().shell.dirty, true, 'and the form is dirty')
+
+    // The save writes every staged edit once, fenced by the revision the drafts were staged against.
+    nodesOfType(render(), 'SettingsForm')[0].props.onSave()
+    await sleep(10)
+    assert.deepEqual(
+      writes,
+      [{ ops: [{ op: 'set', path: ['delaySeconds'], value: 600 }], revision: 1 }],
+      'the save is one write, from the draft, at the revision the form read',
+    )
+    assert.equal(face.hooks.pocketConsole.getSnapshot().shell.dirty, false, 'and nothing is left staged')
     applied.effects[0]()
   }
 
