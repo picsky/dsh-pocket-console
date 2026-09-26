@@ -30,6 +30,7 @@ import { LOCALES, messagesFor } from './messages.js'
 import { createMirror } from './mirror.js'
 import { createPriority, DESK } from './priority.js'
 import { createWorkspaces } from './workspaces.js'
+import { createPermissions } from './permissions.js'
 import { createInbound } from './inbound.js'
 import { registerRoutes } from './routes.js'
 
@@ -425,11 +426,15 @@ export async function apply(ctx, config) {
   // above; every card producer below takes it, so nothing can be built before it exists.
   const sessionNames = createSessionNames({ ctx, messages, log, diagnostics })
 
+  // The deployment's permission presets, read through a thin seam: the card offers a full-access
+  // switch only if this host composes one, and the switch itself is DSH's own call, not ours.
+  const permissions = createPermissions({ ctx, log, messages })
+
   // The escalation machine owns the timer, the race, and the pending registry;
   // this file only wires it to the two seams and the channel's actions.
   escalation = createEscalation({
     log, channel, settings: settingsNow, mirror, messages, workspaces, priority, sessionNames,
-    diagnostics,
+    diagnostics, permissions,
   })
 
   // The activity card follows a run while it runs, but only once the phone holds the person:
