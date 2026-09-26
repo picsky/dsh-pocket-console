@@ -37,6 +37,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { dirname, join, parse } from 'node:path'
+import { inspectSchema } from '../tests/support/host-schema.mjs'
 
 /** The fields the settings card edits, in declaration order. */
 const EXPECTED = ['delaySeconds', 'titlePrefix', 'resultNotify', 'debug']
@@ -169,51 +170,6 @@ function arrowFunction(source, name) {
 }
 
 /**
- * The names a marked node contributes, or undefined when the node is itself a marked
- * leaf the caller has to name.
- *
- * The walk `@deepseek-ai/dsh-settings` runs to decide whether an entry has a form at
- * all (`lib/index.js:118-131`): a marker on a node carries its whole subtree, only
- * objects are descended, and a descendant's marker is not reached through a marked
- * ancestor. A marked leaf has no children to name — the caller names it by the key it
- * sits under — which is why this returns a sentinel rather than an empty list, since
- * an empty list is also what "nothing marked below this" looks like.
- *
- * Written out rather than imported because the Host does not export it and the plugin
- * must not import a Host package.
- * @param node - one schema node.
- * @param blocked - whether an ancestor already carries the marker.
- * @returns the names below this node, or undefined when the node is a marked leaf.
- */
-function markedNames(node, blocked = false) {
-  if (node === undefined || node === null) return []
-  if (node.meta?.volatile) {
-    if (blocked) return []
-    if (node.dict === undefined) return undefined
-    return Object.entries(node.dict).flatMap(([key, child]) => {
-      const inner = markedNames(child, true)
-      return inner === undefined ? [key] : inner
-    })
-  }
-  if (blocked || node.type !== 'object' || node.dict === undefined) return []
-  return Object.entries(node.dict).flatMap(([key, child]) => {
-    const inner = markedNames(child, false)
-    if (inner === undefined) return [key]
-    return inner.length === 0 ? [] : inner.map(name => `${key}.${name}`)
-  })
-}
-
-/**
- * The leaf names a marked field reaches, in declaration order.
- * @param node - the schema root.
- * @returns the marked leaf names, or an empty list when nothing is marked.
- */
-function markedFields(node) {
-  const names = markedNames(node)
-  return names === undefined ? [] : names
-}
-
-/**
  * One declaration out of a shipped module, by name.
  *
  * `Config` is not self-contained: `locale` is declared as `z.union(LOCALES)`, and
@@ -312,8 +268,9 @@ try {
     proto.volatile = helper
   }
 
-  const fields = markedFields(withHelper)
-  const older = markedFields(withoutHelper)
+  const inspected = inspectSchema(withHelper, { delaySeconds: 600 })
+  const fields = inspected.fields
+  const older = inspectSchema(withoutHelper).fields
   if (JSON.stringify(fields) !== JSON.stringify(EXPECTED)) {
     answer({
       ok: false,
@@ -333,20 +290,23 @@ try {
 
   // The other half of the marker: a marked field has to resolve to the live
   // reference a form writes through, or it is a setting the form shows and never
-  // changes. Asked of the library the deployment resolved, on both shapes.
-  const reads = (schema) => {
-    const value = schema['~standard'].validate({ delaySeconds: 600 })
-    return value.issues === undefined && typeof value.value?.delaySeconds?.get === 'function'
-      ? value.value.delaySeconds.get() : undefined
-  }
-  const liveCurrent = reads(withHelper)
-  if (liveCurrent !== 600) {
-    answer({ ok: false, detail: 'a marked field did not resolve to the live reference a form writes through', resolved })
+  // changes. Which call resolves it is the library's business — the shapes have moved
+  // across the versions this plugin supports — so every shape it publishes is tried
+  // and the ones that answered are reported. A library that answered none is named as
+  // such, because "no call shape I know" and "no form" are different facts.
+  if (!inspected.live) {
+    answer({
+      ok: false,
+      detail: inspected.shapes.length === 0
+        ? 'the resolved schema library answers no resolution call this probe knows'
+        : `a marked field did not resolve to the live reference a form writes through (tried: ${inspected.shapes.join(', ')})`,
+      resolved,
+    })
   }
 
   answer({
     ok: true,
-    detail: `served [${fields.join(', ')}] with library ${resolved.hasVolatile ? 'carrying' : 'lacking'} volatile()`,
+    detail: `served [${fields.join(', ')}] with library ${resolved.hasVolatile ? 'carrying' : 'lacking'} volatile(), resolving through ${inspected.shapes.join('/')}`,
     fields,
     shapeBytes: JSON.stringify(withHelper.toJSON()).length,
     resolved,
