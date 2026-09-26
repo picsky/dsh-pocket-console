@@ -36,6 +36,58 @@ window.__ModuleLoader__.load({
     const { Modal } = primitives
 
     /**
+     * The Host's own settings form, when this Host ships one.
+     *
+     * 0.1.7 moved the plugin settings form into the primitives package, and its model is the
+     * one to use: it stages what the reader types and writes it once, when they save.
+     * `SettingsFormModel`'s own words for the alternative — what this card used to do on the
+     * page's form — are that *"a control that committed as it settled turned one edit into a
+     * write the user never asked for and could not preview"*. The pieces are read once and this
+     * bundle needs every one of them or none: `SettingsFormModel` stages, `SettingsForm` draws
+     * the frame and the save, `SettingsValueField` draws a value field, and `SegmentedControl`
+     * and `Switch` are the controls for a finite choice and a boolean. `0.1.6-alpha.1` publishes
+     * none of them — checked in its own tarball, not assumed — so the card keeps the form it
+     * writes itself there, which is what `createSettingsForm` and the controls beside it are.
+     */
+    const HOST_FORM = (() => {
+      const seeded = name => primitives[name] !== undefined && primitives[name] !== null
+      const callable = name => typeof primitives[name] === 'function'
+      const controls = ['SettingsForm', 'SettingsValueField', 'SegmentedControl', 'Switch']
+      const factories = ['SettingsFormModel', 'settingsNumberField', 'settingsTextField']
+      return controls.every(seeded) && factories.every(callable) ? primitives : undefined
+    })()
+
+    /** The Host's form labels, from this card's own dictionary. */
+    const hostFormLabels = copy => ({
+      unavailable: copy.settingsUnavailable,
+      readOnly: copy.readOnly,
+      saveFailed: copy.saveFailed,
+      save: copy.save,
+      saving: copy.saving,
+    })
+
+    /**
+     * A finite-choice field on the Host's model.
+     *
+     * The primitives ship a spec for a value and none for a choice, so this is the choice half:
+     * the draft is the stored token, and one that is not one of the choices blocks the save
+     * rather than being written as something the reader never picked.
+     * @param field - the field's name inside the settings section.
+     * @param options - the tokens this field accepts, in card order.
+     * @returns the field's conversion spec.
+     */
+    const choiceField = (field, options) => ({
+      field,
+      format: value => (typeof value === 'string' ? value : ''),
+      parse: text => (options.includes(text) ? { kind: 'set', value: text } : undefined),
+    })
+
+    /** The specs the Host's model stages this card's fields with. */
+    const hostSpecs = () => FIELDS.map(spec => (spec.kind === 'select'
+      ? choiceField(spec.field, spec.options)
+      : HOST_FORM[spec.kind === 'number' ? 'settingsNumberField' : 'settingsTextField'](spec.field)))
+
+    /**
      * Settings namespace. It is the `settings.plugin.item` slot key up to 0.1.6,
      * and — because the settings document is the entry's own configuration from
      * 0.1.7 on — the profile entry id the `configForms` form and the
@@ -86,7 +138,10 @@ window.__ModuleLoader__.load({
       { field: 'delaySeconds', kind: 'number' },
       { field: 'titlePrefix', kind: 'text' },
       { field: 'resultNotify', kind: 'select', options: ['off', 'idle'], labels: { off: 'resultNotifyOff', idle: 'resultNotifyIdle' } },
-      { field: 'debug', kind: 'select', options: ['off', 'on'], labels: { off: 'debugOff', on: 'debugOn' } },
+      // `control` picks the Host's own control for a choice: a two-state switch for a boolean,
+      // the segmented control for everything else. It is this bundle's own note to itself — the
+      // Host's model stages the value either way.
+      { field: 'debug', kind: 'select', control: 'switch', options: ['off', 'on'], labels: { off: 'debugOff', on: 'debugOn' } },
     ]
 
     /** The colour each enrollment state reports itself in. */
@@ -722,7 +777,15 @@ window.__ModuleLoader__.load({
        * scope and the model both come from — and the projection rides the hooks
        * compartment this bundle published, so this is the same state the render reads.
        */
-      const boundController = () => ({ ...state, shell, edit: props.edit ?? noop, resetField: props.resetField ?? noop })
+      const boundController = () => ({
+        ...state,
+        shell,
+        // The Host's model owns the save and the frame around the fields; this card's own
+        // form draws its own, which is the difference the render branches on.
+        official: props.official === true,
+        edit: props.edit ?? noop,
+        resetField: props.resetField ?? noop,
+      })
       /**
        * The page's own owner form, in the same shape.
        *
@@ -1062,27 +1125,113 @@ window.__ModuleLoader__.load({
        * read.
        * @param controller - the form controller in force.
        */
-      const body = (controller) => h('div', { style: S.body },
-        !controller.shell.writable ? h('p', { style: S.notice, role: 'status' }, copy.readOnly) : null,
+      /**
+       * One field drawn by the Host's own settings form.
+       *
+       * A value field is the Host's control outright — its label, its hint, its reset, its
+       * overridden badge and its invalid message all come with it. A finite choice has no Host
+       * field (the primitives ship `SettingsValueField` for a value and nothing for a choice),
+       * so its control is the Host's own segmented control or switch, staged through the same
+       * model and wrapped in this card's own label, badge and reset.
+       * @param controller - the form controller in force.
+       * @param spec - the field's declaration from {@link FIELDS}.
+       * @returns the field's element.
+       */
+      const hostField = (controller, spec) => {
+        const control = controller[spec.field]
+        const id = `pocket-console-${spec.field}`
+        const label = copy[spec.field]
+        const hint = copy[`${spec.field}Hint`]
+        const disabled = !controller.shell.writable
+        if (spec.kind !== 'select') {
+          return h(HOST_FORM.SettingsValueField, {
+            key: spec.field,
+            id,
+            label,
+            hint,
+            overriddenLabel: copy.overridden,
+            resetLabel: `${copy.reset}: ${label}`,
+            invalidLabel: copy.invalidNumber,
+            numeric: spec.kind === 'number',
+            disabled,
+            ...control,
+            onEdit: text => { controller.edit(spec.field, text) },
+            onReset: () => { controller.resetField(spec.field) },
+          })
+        }
+        // A draft the field no longer accepts still has to draw: the first choice is shown
+        // while the save stays blocked, so a stored token this card dropped cannot render as
+        // a control with nothing selected.
+        const chosen = spec.options.includes(control.text) ? control.text : spec.options[0]
+        return h('div', { key: spec.field, style: S.field },
+          h('div', { style: S.fieldHead },
+            h('span', { style: S.label, id: `${id}-label` }, label),
+            h('span', { style: S.badges },
+              control.overridden ? h('span', { style: S.badge }, copy.overridden) : null,
+              button(copy.reset, () => { controller.resetField(spec.field) }, {
+                disabled: !control.overridden || disabled,
+                accessibleName: `${copy.reset}: ${label}`,
+                style: S.reset,
+              }))),
+          spec.control === 'switch'
+            ? h(HOST_FORM.Switch, {
+                checked: chosen === spec.options[1],
+                onChange: next => { controller.edit(spec.field, next ? spec.options[1] : spec.options[0]) },
+                label,
+                disabled,
+              })
+            : h(HOST_FORM.SegmentedControl, {
+                id,
+                value: chosen,
+                options: spec.options.map(option => ({ value: option, label: copy[spec.labels[option]] })),
+                onChange: next => { controller.edit(spec.field, next) },
+                label,
+                disabled,
+              }),
+          h('p', { style: S.hint }, hint))
+      }
 
+      /**
+       * The Host's own settings form: its read-only and unavailable lines, its controls, and the
+       * one save that writes every staged edit. Drawing it is what makes a keystroke cost
+       * nothing and a save cost one write — the model stages the draft, and only `save` writes.
+       * @param controller - the form controller in force.
+       * @returns the form element.
+       */
+      const hostForm = (controller) => h(HOST_FORM.SettingsForm, {
+        labels: hostFormLabels(copy),
+        state: controller.shell,
+        onSave: props.save ?? noop,
+        onDiscard: props.discard ?? noop,
+        children: FIELDS.map(spec => hostField(controller, spec)),
+      })
+
+      const body = (controller) => h('div', { style: S.body },
         h('div', { style: S.section }, runtimeRows),
 
-        // Derived from FIELDS, never indexed: a label and its control are the
-        // same spec by construction, which is the one thing a positional list
-        // got wrong the moment a field was inserted in the middle.
-        ...FIELDS.map(spec => field(controller, spec, copy[spec.field], copy[`${spec.field}Hint`])),
+        // A Host that ships its own settings form draws the form, its read-only line and its
+        // save; the card draws the binding it owns above it either way.
+        controller.official === true ? hostForm(controller) : [
+          !controller.shell.writable ? h('p', { style: S.notice, role: 'status' }, copy.readOnly) : null,
 
-        // Drawn on both models, and outside the footer on purpose: the owner persists each edit and
-        // has no footer, so a refused or dropped write there would otherwise go unmentioned.
-        controller.shell.failed ? h('p', { style: S.failed, role: 'status' }, copy.saveFailed) : null,
+          // Derived from FIELDS, never indexed: a label and its control are the
+          // same spec by construction, which is the one thing a positional list
+          // got wrong the moment a field was inserted in the middle.
+          ...FIELDS.map(spec => field(controller, spec, copy[spec.field], copy[`${spec.field}Hint`])),
 
-        controller.shell.immediate ? null : h('div', { style: S.footer },
-          button(copy.discard, props.discard ?? noop, { disabled: !controller.shell.dirty || controller.shell.saving }),
-          button(
-            controller.shell.saving ? copy.saving : copy.save,
-            props.save ?? noop,
-            { disabled: blocked, primary: true },
-          )))
+          // Drawn on both write models, and outside the footer on purpose: a Host whose form
+          // takes each edit as it settles has no footer, so a refused or dropped write there
+          // would otherwise go unmentioned.
+          controller.shell.failed ? h('p', { style: S.failed, role: 'status' }, copy.saveFailed) : null,
+
+          controller.shell.immediate ? null : h('div', { style: S.footer },
+            button(copy.discard, props.discard ?? noop, { disabled: !controller.shell.dirty || controller.shell.saving }),
+            button(
+              controller.shell.saving ? copy.saving : copy.save,
+              props.save ?? noop,
+              { disabled: blocked, primary: true },
+            )),
+        ])
 
       /**
        * Render the card with one form controller.
@@ -1098,7 +1247,11 @@ window.__ModuleLoader__.load({
       // values, the revision and the recovery path. This card's own equipment is the
       // fallback for a Host that dispatches a page without one, which is what the
       // ≤0.1.6 keyed slot does.
-      if (typeof props.form?.mutate === 'function') {
+      //
+      // A Host that ships its own settings form takes neither branch: the model built at mount
+      // reads that same controller, so the card renders from it and the page's `props.form` is
+      // only another view of what the model already holds.
+      if (props.official !== true && typeof props.form?.mutate === 'function') {
         return renderWith(hostController(props.form))
       }
       return renderWith(boundController())
@@ -1396,9 +1549,27 @@ window.__ModuleLoader__.load({
         mounted = true
         // The scope is bound here rather than in the component because this is the
         // closure that holds the service the Host answered with.
-        const form = createSettingsForm(scope, false)
-        const store = createSnapshot(form.projection())
-        form.subscribe(() => { store.set(form.projection()) })
+        //
+        // Which form stages those edits is the Host's answer to give, not this card's. With the
+        // Host's own model the scope bound here *is* the Plugins page's own form — that page's
+        // `configForm(id)` is `configForms.get(id)`, `ui-plugin-manager` builds it that way — so
+        // the drafts, the revision and the save are all the one controller the page reads, and
+        // nothing has to be bridged. The card's own form stays for the Host that publishes no
+        // such model (0.1.6's keyed slot), where it has staged and saved all along.
+        const own = HOST_FORM === undefined || keyed ? createSettingsForm(scope, false) : undefined
+        const model = own === undefined ? new HOST_FORM.SettingsFormModel(scope, hostSpecs()) : undefined
+        /** The card's state: the form's shell plus one entry per field it edits. */
+        const projection = () => (model === undefined ? own.projection() : {
+          shell: model.shell(),
+          ...Object.fromEntries(FIELDS.map(spec => [spec.field, model.field(spec.field)])),
+        })
+        const store = model === undefined
+          ? createSnapshot(projection())
+          : model.bind(projection)
+        if (own !== undefined) own.subscribe(() => { store.set(projection()) })
+        const actions = model === undefined
+          ? { edit: own.edit, resetField: own.resetField, save: own.save, discard: own.discard }
+          : model.actions()
         /**
          * The card's face, built per registration so it reads the language in force
          * when the page asks rather than at mount.
@@ -1410,10 +1581,14 @@ window.__ModuleLoader__.load({
           // the active language renders as — and never becomes the card's copy.
           copy: COPY[documentLanguage()],
           hooks: { pocketConsole: store },
-          edit: form.edit,
-          resetField: form.resetField,
-          save: form.save,
-          discard: form.discard,
+          // The page's own form is only the authority where the card has to build a
+          // controller per render for it; the Host's model reads that same controller
+          // directly, so its save is the only write this card makes.
+          official: model !== undefined,
+          edit: actions.edit,
+          resetField: actions.resetField,
+          save: actions.save,
+          discard: actions.discard,
         })
         // Named because the alternative — a card that is simply absent — has no
         // other symptom to read: this line is in the page's console, or it is not.

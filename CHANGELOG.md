@@ -64,6 +64,21 @@ line, the channel and the artifact checks; no plugin behaviour changes.
 
 ### Fixed
 
+- **The settings page stages what you type and writes it when you save.** Two reports with one
+  cause: a keystroke took a visible moment to appear, and there was no save control at all. The
+  card had read the page's own form as an invitation to write on every change — each keystroke was
+  a revision-fenced document mutation, and the value only came back with the Host's next snapshot
+  — and had then left the save out, reasoning that a form which writes as it goes has nothing to
+  save. 0.1.7's own answer was already in the primitives package this bundle requires:
+  `SettingsFormModel` stages a draft and writes it once, and `SettingsForm` draws the frame and the
+  save — its header says it outright, *"a control that committed as it settled turned one edit into
+  a write the user never asked for and could not preview"*. The card now builds that model over the
+  settings controller it bound, which is the same object the Plugins page hands over as
+  `props.form` (`ui-plugin-manager` builds that as `configForms.get(id)`), and draws the Host's own
+  value fields — and its segmented control and switch for the two finite choices, which the
+  primitives describe but do not package as a field. A Host that publishes no such model —
+  `0.1.6-alpha.1` ships none of it, checked in its own tarball — keeps the form this card writes
+  itself, staged and saved, which is what that leg has always had.
 - **The settings card draws no frame of its own, and states its own type scale.** A reader reported
   the Plugins page twice from a phone-sized window: the settings items sat in a bordered, rounded,
   tinted box inside the page's own frame, and the text inside it came out at sizes nobody chose — a
