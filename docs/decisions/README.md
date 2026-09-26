@@ -3,6 +3,12 @@
 Why the plugin is shaped the way it is, when the answer is not obvious from the
 code. A change that contradicts a record here needs a new record, not a quiet edit.
 
+Records are numbered in order, and a number is an id rather than a claim: two branches written at the
+same time cannot see each other, so both can propose the same one. **Whoever merges second renumbers**,
+and the reviewer of that pull request is who notices — the table below is sorted by number, so a
+collision shows up as two rows sharing one. Renumbering a record is a rename and a row, never a change
+to what it decides.
+
 | Record | Decision |
 |---|---|
 | [0001](0001-no-build-step.md) | Plain ESM, no build step, runtime libraries bundled in the tarball |
