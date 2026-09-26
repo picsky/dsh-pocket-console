@@ -107,32 +107,6 @@ fails the answer now goes out as a plain-text message rather than nowhere. No co
   no elements, no tables, 150 KB instead of 30. It has no reply box, and arriving without one beats
   not arriving.
 
-**Verified on DSH 0.1.6-alpha.1 and 0.1.7-rc.2**, which is the support window this release
-states.
-
-### Fixed
-
-**A card is never lost to a platform limit.** An answer ending in nine Markdown tables was refused
-whole by the platform — the reader got nothing, and the log gave no reason. Three defects met: no
-budget for the card's table count, a judge that did not recognize the refusal, and a delivery path
-whose final failure was a single warning. All three are fixed, and when every card-shaped attempt
-fails the answer now goes out as a plain-text message rather than nowhere. No configuration changes.
-
-- **Tables are budgeted, and written as text past the budget.** The platform counts tables across the
-  whole card and refuses it past five; the card renderer now keeps four, body and fold sharing one
-  counter, and turns the rest into text — the rows survive, the grid does not. A card the platform
-  refused for its table count is retried once with its tables flattened.
-- **A refusal is classified instead of guessed.** `230002` ("the bot is not in the group"), `10002`
-  ("the bot is not in the chat") and `230020` (a rate limit) were being read as size refusals, while
-  `230099` — the code that actually refuses a card — was not read at all. Each refusal now yields a
-  kind, and each kind gets the degradation that can help it; a permission or availability refusal
-  fails once, quickly, instead of being resent four times.
-- **A delivery that fails says why.** The result path reports the refusal's kind, code and message to
-  `diagnostics`, so a card that did not arrive is answerable from the deployment log.
-- **The last resort is a message.** When no card can be delivered, the answer is sent as plain text:
-  no elements, no tables, 150 KB instead of 30. It has no reply box, and arriving without one beats
-  not arriving.
-
 ### Added
 
 **An approval card can now stop asking.** A third control, `以后不再问（完全权限）`, switches **that
@@ -170,6 +144,9 @@ press grants.
   rather than answering the request in front of the reader stays a deliberate press on the card.
 - **The result card's prompt line teaches the convention**, since an input box replaced by a
   convention has to say so. `/help` lists what a typed message can be.
+
+**Verified on DSH 0.1.6-alpha.1 and 0.1.7-rc.2**, which is the support window this release
+states.
 
 ## 0.9.5
 
