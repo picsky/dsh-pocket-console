@@ -51,7 +51,7 @@ It works out of the box: the Settings card exposes four settings and nothing els
 | Result notices | `When idle` | After a session stops, the turn result goes to the phone with a box you can reply in. Its send delay reuses the desktop head start above |
 | Debug mode | `Off` | `On` writes the plugin's decision about every card to `$DSH_HOME/pocket-console-debug.log` — why a card was sent, edited, or skipped |
 
-Every row can be **Reset**, and an edit has to be saved (the card marks it **Unsaved** first).
+Every row can be **Reset**. **How an edit lands depends on the Host**: where the Host renders the form itself (DSH 0.1.7 on) each change **takes effect at once** and the card has no Save; on the older contract the card marks it **Unsaved** until **Save**. A write that fails is said on the card either way.
 
 **Anything the card does not show belongs to the deployment.** The channel, the interface language, the mirror lifetime and the like stay out of the card and are overridden in the profile layer — a patch replaces the row's entire `config`, so restate every key you want to keep:
 
