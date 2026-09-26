@@ -22,6 +22,13 @@ line, the channel and the artifact checks; no plugin behaviour changes.
 
 ### Changed
 
+- **The card's instruction box is a box a prompt can be read back in, and it says how much it
+  holds.** The platform caps an `input` at 1000 characters and cannot be asked for more, and the
+  field was left at its defaults: a single visible line, with the limit nowhere on the card. A whole
+  first prompt was therefore typed one line at a time on a phone, and the limit was met as a
+  client-side error after the text was already written. Both boxes are now `multiline_text` at three
+  rows, `max_length` is written down rather than inherited, and every placeholder names the cap
+  (`输入回答（最多 1000 字）`). No configuration changes.
 - **A version is a batch.** Everything merged since the last release goes out together, and a
   follow-up fix amends the unreleased section rather than opening a version of its own.
 - **Candidates have their own channel.** A version with a prerelease suffix (`0.9.6-rc.1`)
