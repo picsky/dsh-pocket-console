@@ -65,11 +65,25 @@ function findPackage(from, specifier) {
 }
 
 /**
- * The `@deepseek-ai/schemastery` package a deployment resolves.
- * @param from - directory to start at.
+ * The `@deepseek-ai/schemastery` the deployment resolved, from wherever it resolved
+ * it.
+ *
+ * Two roots, because a profile need not carry the library at all: `pnpm-workspace.yml`
+ * sets `autoInstallPeers: false`, so a peer may be satisfied by whatever the profile
+ * hoisted or by nothing, and the copy beside `@deepseek-ai/dsh` is the one an entry
+ * then resolves from the application tree. The directory a caller names first is the
+ * narrower one, so a profile that did hoist a copy gets that copy measured.
+ * @param roots - directories to search from, in order.
  * @returns the package directory, or undefined.
  */
-const findSchemaLibrary = (from) => findPackage(from, 'schemastery')
+function findSchemaLibrary(roots) {
+  for (const root of roots) {
+    if (root === undefined) continue
+    const found = findPackage(root, 'schemastery')
+    if (found !== undefined) return found
+  }
+  return undefined
+}
 
 /**
  * The entry module of a schema library, by the shapes it publishes.
@@ -232,9 +246,9 @@ function answer(payload) {
   process.exit(0)
 }
 
-const [pluginDir, searchFrom] = process.argv.slice(2)
+const [pluginDir, ...searchRoots] = process.argv.slice(2)
 if (pluginDir === undefined) {
-  answer({ ok: false, detail: 'usage: probe-installed-form.mjs <plugin-dir> [<search-from>]' })
+  answer({ ok: false, detail: 'usage: probe-installed-form.mjs <plugin-dir> [<search-from>...]' })
 }
 
 const source = join(pluginDir, 'index.js')
@@ -243,11 +257,13 @@ if (!existsSync(source)) {
 }
 
 try {
-  // The library this deployment resolved, wherever it resolved it from.
-  const libraryDir = findSchemaLibrary(searchFrom ?? pluginDir)
+  // The library this deployment resolved, wherever it resolved it from: the
+  // directories named by the caller first, then the installed plugin's own tree.
+  const roots = [...searchRoots, pluginDir]
+  const libraryDir = findSchemaLibrary(roots)
   const entry = schemaEntry(libraryDir)
   if (entry === undefined) {
-    answer({ ok: false, detail: `no @deepseek-ai/schemastery resolves from ${searchFrom ?? pluginDir}` })
+    answer({ ok: false, detail: `no @deepseek-ai/schemastery resolves from any of ${roots.join(', ')}` })
   }
   const library = (await import(pathToFileURL(entry).href)).default
   const field = library.string()
