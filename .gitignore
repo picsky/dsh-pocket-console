@@ -10,8 +10,8 @@ node_modules/
 Thumbs.db
 
 # One checkout per change under review. A worktree is a second working tree for a
-# branch that is still being written, so it is local tooling rather than anything
-# this package carries.
+# branch that is still being written — local tooling rather than anything this package
+# carries — and one `git add -A` would otherwise commit nine copies of the source tree.
 .worktrees/
 
 # Working notes that are not part of the project
@@ -39,11 +39,6 @@ internal/proposal-*.md
 # else's work, measured in hundreds of megabytes, and leaving it untracked-but-not-
 # ignored means one `git add -A` commits it.
 _compare/
-
-# Worktrees are local scaffolding: one copy of this repository per branch, created and
-# removed by `git worktree`. A branch never needs them, and they turn one `git add -A`
-# into nine copies of the source tree.
-.worktrees/
 
 # Logs
 *.log
