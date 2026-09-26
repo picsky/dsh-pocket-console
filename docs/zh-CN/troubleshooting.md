@@ -15,6 +15,26 @@ git 依赖会从 registry 解析它自己的依赖，于是 pnpm ≥11 会撞上
 `dsh plugin --profile web add dsh-pocket-console@0.7.6`——之后想自动跟随发布，再改回不带版本的写法。
 另外 pnpm 会缓存 registry 元数据，几分钟前刚发布的版本可能在那份缓存刷新前一直看不见。
 
+**从 `github:` 安装等于什么都没激活，启动会打 `pocket-console (dsh-pocket-console): failed to import`。**
+pnpm 不去解析 git 依赖的 `bundleDependencies`：`dsh plugin --profile web add
+github:picsky/dsh-pocket-console` 装下来的仓库**一个 `node_modules` 都没有**，而飞书通道正是
+发布 tarball 内置的那几个包之一。在 0.9.5 + DSH 0.1.7-rc.2 上实测：该条目根本不在组合树里，
+失败的那个 specifier 是 `qrcode`，而在同一个 profile 里补上通道之后，同一次安装就正常激活了。
+两条出路：装发布包（`dsh plugin --profile web add dsh-pocket-console`）或本地打包的 tarball——
+两者都自带通道；或者保留 git 安装、把通道补给 profile：`dsh plugin --profile web add
+@larksuiteoapi/node-sdk qrcode`，再把 profile 的 `pnpm-workspace.yaml` 里 `allowBuilds` 下的
+`protobufjs` 设为 `false`（上一条就是原因），重新执行一次 `dsh plugin --profile web install`。
+之后重启 `dsh web`。
+
+**任何一次启动都可能打出那句警告，而它不带任何细节。**
+`failed to import` 是宿主自己的标签：某个已配置条目始终没拿到 fiber。宿主不会附上任何细节——
+在本插件自己的副本里故意制造一个断掉的 import，打出来的就是这两行、上面什么都没有，
+终端里问不出更多。要查的是条目本身，而不是那句警告：`dsh --profile web --dump-config` 应列出
+`# == dsh-pocket-console` 层，卡片要用的接口应该存在——`http://127.0.0.1:3080/__pocket/state`
+回 `401` 表示插件在跑，回干净的 `404` 表示它根本没被加载。安装完整的树每次重启都会正常激活，
+所以包管理器改过 profile 之后请重启 `dsh web`；若警告仍在，请把 profile 的 `package.json`
+和 `dsh plugin --profile web install` 的输出一起报出来。
+
 **页面停在「Failed to load plugins」，整个界面都打不开。**
 这一页是 Web shell 拒绝启动，不是"某张卡片出错"：它要求自己加载的每个插件都进入 active 状态，
 而所需 Cordis 服务缺失的条目会永远等待——括号里写的就是缺哪个服务。DSH 0.1.7 上本插件正是那一条：
