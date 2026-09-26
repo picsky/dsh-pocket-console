@@ -32,7 +32,7 @@ Then restart `dsh web` and open **Settings → Plugins → Plugin configuration 
 2. Scan the QR code with Feishu (the link is valid for 10 minutes and can be used once).
 3. The card reports **Bound** and lists the **App**, the **Recipient** and the **Connection** (established / dropped, reconnecting…).
 
-Credentials and the recipient live in the credentials store, so every later `dsh` start reconnects the long connection by itself — no settings visit, no second scan. **Use another app** switches apps; **Unbind** stops the phone side. Installing straight from GitHub needs one build script allowed through, which [troubleshooting](docs/troubleshooting.md) covers.
+Credentials and the recipient live in the credentials store, so every later `dsh` start reconnects the long connection by itself — no settings visit, no second scan. **Use another app** switches apps; **Unbind** stops the phone side. Installing straight from GitHub arrives without that bundled transport, because pnpm resolves no bundled dependency of a git dependency; [troubleshooting](docs/troubleshooting.md) has the two commands that give the profile one.
 
 To remove it:
 

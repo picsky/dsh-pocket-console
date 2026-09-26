@@ -23,6 +23,31 @@ dsh-pocket-console@0.7.6` — and re-add the plain name later if you would rathe
 releases automatically. pnpm also caches registry metadata, so a version published
 minutes ago can stay invisible until that cache refreshes.
 
+**A `github:` install activates nothing, and a start says
+`pocket-console (dsh-pocket-console): failed to import`.**
+pnpm resolves no bundled dependency of a git dependency, so `dsh plugin --profile web add
+github:picsky/dsh-pocket-console` installs the repository with **no `node_modules` at all** — and
+the Feishu transport is one of the packages the published tarball carries inside it. Measured on
+0.9.5 against DSH 0.1.7-rc.2: the entry was absent from the composed tree, the specifier that
+failed was `qrcode`, and adding the transport to that same profile made the same install
+activate. Two ways out. Install the published package — `dsh plugin --profile web add
+dsh-pocket-console` — or a locally packed tarball; both carry the transport. Or keep the git
+install and give the profile the transport: `dsh plugin --profile web add
+@larksuiteoapi/node-sdk qrcode`, then set `protobufjs: false` under `allowBuilds` in the profile's
+`pnpm-workspace.yaml` (the entry above is why) and run `dsh plugin --profile web install` again.
+Restart `dsh web` afterwards.
+
+**Any start can print that warning, and it carries no detail.**
+`failed to import` is the harness's own label for a configured entry that never got a fiber, and
+the harness prints nothing with it: a deliberately broken import in this plugin's own copy
+produces exactly those two lines and nothing above them, so the terminal has no more to give.
+Check the entry rather than the warning: `dsh --profile web --dump-config` should list the
+`# == dsh-pocket-console` layer, and the route the card calls should exist —
+`http://127.0.0.1:3080/__pocket/state` answering `401` means the plugin is up, and a bare `404`
+means it is not loaded at all. A tree whose install is complete activates on every fresh start, so
+restart `dsh web` after the package manager changes a profile; if the warning survives that,
+report it with the profile's `package.json` and the output of `dsh plugin --profile web install`.
+
 **The page stops at "Failed to load plugins" and nothing opens at all.**
 That page is the web shell refusing to start, not a card that failed: it requires every
 plugin it loaded to reach the active state, and an entry whose required Cordis service

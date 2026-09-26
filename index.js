@@ -229,7 +229,24 @@ export async function apply(ctx, config) {
   const target = config.channel.startsWith('.') || config.channel.startsWith('/')
     ? new URL(config.channel, import.meta.url).href
     : config.channel
-  const module = await import(target)
+  let module
+  try {
+    module = await import(target)
+  } catch (error) {
+    // A channel that cannot be resolved is the first thing a `github:` install meets and
+    // the last thing anyone can explain: the transport is bundled into the published
+    // tarball, pnpm resolves no bundled dependency of a git dependency, and the failing
+    // import arrives as a bare specifier. Say which install lacks what, because the
+    // harness reduces any failure this early to `failed to import` with no detail at all.
+    const reason = error instanceof Error ? error.message.split('\n')[0] : String(error)
+    throw new Error(
+      `pocket-console: channel ${config.channel} could not be imported`
+      + ` (${String(error?.code ?? 'unknown')}): ${reason}.`
+      + ' A git-hosted install carries no bundled dependencies, so add this channel\'s'
+      + ' transport to the profile or install the published package.',
+      { cause: error },
+    )
+  }
   if (typeof module.create !== 'function') {
     throw new TypeError(`pocket-console: channel ${config.channel} must export create()`)
   }
@@ -530,7 +547,7 @@ export async function apply(ctx, config) {
   ctx.inject(['webServer'], (webCtx) => {
     const trust = (req) => ctx.get?.('connection')?.requestRejection?.(req)
     webCtx.effect(
-      () => registerRoutes(webCtx.webServer, snapshot, actions, trust),
+      () => registerRoutes(webCtx.webServer, snapshot, actions, trust, log),
       'pocket-console: routes',
     )
   })

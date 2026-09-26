@@ -61,9 +61,30 @@ line, the channel and the artifact checks; no plugin behaviour changes.
   and `check:parity` holds the marked field set to the card. The build also asks the question
   inside the installed profile, against the schema library that deployment resolved, and fails the
   run when the Host serves no form. ([#92](https://github.com/picsky/dsh-pocket-console/issues/92), [#95](https://github.com/picsky/dsh-pocket-console/issues/95))
+- **`failed to import` has a symptom page.** The harness labels any configured entry that never got
+  a fiber that way and prints nothing else with it — a deliberately broken import in this plugin's
+  own copy produces exactly those two lines and no error above them — so the same warning appears
+  whether a git-hosted install is missing its transport or a profile was still being written while
+  the process read it. The troubleshooting page now names the `github:` install as the first cause
+  with the commands that fix it, says what the label does and does not mean, and gives the checks
+  that answer the real question: whether the layer is composed and whether the plugin's own route
+  answers `401` rather than a bare `404`. The READMEs no longer promise a git install that only
+  needs a build script allowed.
 
 ### Fixed
 
+- **A `github:` install is an install the entry cannot be imported from, and now it says so.**
+  pnpm resolves no bundled dependency of a git dependency, so `dsh plugin --profile web add
+  github:picsky/dsh-pocket-console` lands the repository with no `node_modules` at all, and the
+  Feishu transport is one of the packages the published tarball carries inside it. Measured on
+  0.9.5 against DSH 0.1.7-rc.2: the entry was absent from the composed tree, the specifier that
+  failed was `routes.js`'s static `import QRCode from 'qrcode'`, and the harness reports an entry
+  that never got a fiber as `pocket-console (dsh-pocket-console): failed to import` — with no
+  detail, because by then there is none left to print. The encoder is now imported inside the
+  route that draws it, so a deployment without it loses one image and gets one warning naming the
+  package instead of the whole plugin; the channel's own missing transport raises a sentence that
+  names the package and the install that omits it rather than a bare specifier; and a case walks
+  the entry's static import graph so a bundled dependency cannot re-enter it.
 - **The plugin's settings form is served whenever its schema is written as the Host
   reads it**, which a stand-in can no longer get wrong on its own. The settings page was
   blank for a deployment whose profile resolved a schemastery older than the one its Host

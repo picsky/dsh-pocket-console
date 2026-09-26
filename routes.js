@@ -14,8 +14,6 @@
  * @module pocket-console/routes
  */
 
-import QRCode from 'qrcode'
-
 /** Same-origin route prefix the browser half calls; it never crosses the `/api` fence. */
 const ROUTE_PREFIX = '/__pocket'
 
@@ -29,9 +27,31 @@ const MAX_BODY_BYTES = 64 * 1024
  * @param snapshot - thunk returning the current state for the card.
  * @param actions - mutating operations the card may request.
  * @param trust - the connection's request fence, when the deployment has one.
+ * @param log - the deployment's logger, when the routes have one. A missing encoder is
+ *   worth one warning: the card's `<img>` shows nothing and the reason appears nowhere else.
  * @returns the disposer removing the route.
  */
-export function registerRoutes(webServer, snapshot, actions, trust = () => undefined) {
+export function registerRoutes(webServer, snapshot, actions, trust = () => undefined, log = undefined) {
+  /**
+   * The QR encoder, resolved the first time a code is asked for.
+   *
+   * It belongs to the *published tarball*, not to this module's import graph, and that
+   * difference is load-bearing: `package.json` declares it in `bundleDependencies`, and
+   * pnpm resolves no bundled dependency of a git dependency — a `github:` install lands
+   * the repository with no `node_modules` at all. A static import here therefore spends
+   * the whole entry: the harness reports `failed to import` and says nothing else, so the
+   * plugin is gone rather than one image. Importing it inside the route that needs it
+   * keeps that failure where it belongs.
+   * @returns the encoder module.
+   */
+  let encoder
+  const qrEncoder = async () => {
+    encoder ??= await import('qrcode')
+    return encoder.default ?? encoder
+  }
+
+  /** Whether the missing-encoder warning was already written for this registration. */
+  let warned = false
   const json = (res, status, body) => {
     const payload = JSON.stringify(body)
     res.writeHead(status, {
@@ -121,7 +141,26 @@ export function registerRoutes(webServer, snapshot, actions, trust = () => undef
             res.end()
             return
           }
-          const svg = await QRCode.toString(url, { type: 'svg', margin: 1, width: 240 })
+          let svg
+          try {
+            const QRCode = await qrEncoder()
+            svg = await QRCode.toString(url, { type: 'svg', margin: 1, width: 240 })
+          } catch (error) {
+            // One image is missing, not the plugin. The card still binds by credentials, so an
+            // encoder that cannot be loaded *or* cannot render is an unavailable resource and
+            // the deployment's log carries the reason — once, because a card reloads its image
+            // on every render.
+            if (!warned) {
+              warned = true
+              log?.warn?.(
+                'the QR encoder (qrcode) is unavailable, so the enrollment card shows no code;'
+                + ' install the published package, or add qrcode to this profile',
+                error,
+              )
+            }
+            json(res, 503, { error: 'the QR encoder (qrcode) is unavailable' })
+            return
+          }
           res.writeHead(200, {
             'content-type': 'image/svg+xml',
             'cache-control': 'no-store',
