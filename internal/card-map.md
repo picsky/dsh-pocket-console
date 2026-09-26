@@ -110,6 +110,7 @@
 | 单卡文字预算 | **32 KB**（按转义后的请求体计） | `CARD_TEXT_BUDGET` |
 | 整卡请求体预算 | **96 KB** | `CARD_BODY_BUDGET`；实测平台接受 131 KB、拒绝 164 KB |
 | 卡片元素上限 | **120** | `CARD_ELEMENT_BUDGET`；实测平台 180 通过、200 被拒 |
+| 卡片表格上限 | **4**（正文与折叠共用一个计数） | `CARD_TABLE_BUDGET`；实测平台 5 张通过、6 张整卡被拒（[0031](../docs/decisions/0031-a-limit-changes-the-card-never-whether-it-arrives.md)）。超出的表**写成文本**，不丢行 |
 
 ## 明确**没有**的东西
 

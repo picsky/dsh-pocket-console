@@ -29,6 +29,9 @@ const COPY = {
   logNoticeStoreUnavailable: 'store unavailable', logNoticeStoreReadFailed: 'read failed',
   logNoticeRestoreFailed: 'restore failed', logNoticeStored: () => 'stored',
   noticeStale: 'Stale',
+  logNoticeTablesFlattened: tables => `flattened ${tables}`,
+  logNoticeFellBackToText: 'fell back to text', logNoticeFallbackFailed: 'fallback failed',
+  fallbackHeadline: 'the card could not be delivered',
 }
 
 /**
@@ -169,4 +172,77 @@ test('a result refused for size is retried with the fold given up, smaller', asy
   assert.equal(deliveries[0].details, undefined, 'the fold is what is given up')
   assert.ok(deliveries[0].body[0].length < 100, 'the retry carries the answer, clipped')
   assert.equal(typeof deliveries[0].forms[0].payload.nid, 'string', 'and the reply box is still there')
+})
+
+/** A Markdown table, so a case can be refused for its count the way the platform refused one. */
+const TABLE = '| 项目 | 值 |\n| --- | --- |\n| 表格里的数字 | 42 |'
+
+/** The refusal the platform gives a card with too many tables (issue #74, verbatim). */
+const tableRefusal = () => Object.assign(new Error('Request failed with status code 400'), {
+  response: {
+    status: 400,
+    data: {
+      code: 230099,
+      msg: 'Failed to create card content, ext=ErrCode: 11310; ErrMsg: card table number over limit; ErrorValue: table; ',
+    },
+  },
+})
+
+test('a result refused for its tables is sent again with them written as text', async () => {
+  let attempts = 0
+  const deliveries = []
+  const { notifier, sink } = setup({
+    channel: {
+      async deliver(view) {
+        attempts += 1
+        if (attempts === 1) throw tableRefusal()
+        deliveries.push(view)
+        return 'msg_1'
+      },
+      async update() {},
+    },
+  })
+  runTurn(sink, { id: 's1' }, { answer: TABLE })
+  await waitForFire()
+
+  assert.equal(attempts, 2, 'a table refusal gets one retry')
+  assert.equal(deliveries.length, 1, 'and the retry is what lands')
+  const body = deliveries[0].body.join('\n')
+  assert.ok(!body.includes('| --- | --- |'), 'no table is left in the card')
+  assert.ok(body.includes('项目 · 值') && body.includes('42'), 'the cells are still there, as text')
+  // The tables were the complaint, so nothing else is given up: the reply box stays, and the answer
+  // is not clipped the way a size refusal clips it. (This fixture's run has no fold to keep — the
+  // fold-preserving half of the same rule is asserted where a fold exists, in the size case above,
+  // where the fold is deliberately the thing that goes.)
+  assert.equal(typeof deliveries[0].forms[0].payload.nid, 'string', 'and the reply box is still there')
+})
+
+test('when no card can be delivered, the answer goes out as a text message', async () => {
+  const texts = []
+  const { sink } = setup({
+    channel: {
+      async deliver() { throw tableRefusal() },
+      async update() {},
+      async sendText(text) { texts.push(text); return 'text_1' },
+    },
+  })
+  runTurn(sink, { id: 's1' }, { answer: TABLE })
+  await waitForFire()
+
+  assert.equal(texts.length, 1, 'the plain-text message is the last resort and it ran')
+  assert.ok(texts[0].includes('42'), 'the content reached the reader even though no card could')
+  assert.ok(texts[0].includes('the card could not be delivered'), 'and the message says why it is not a card')
+})
+
+test('a channel with no text fallback fails honestly instead of throwing', async () => {
+  const { sink } = setup({
+    channel: {
+      async deliver() { throw tableRefusal() },
+      async update() {},
+    },
+  })
+  runTurn(sink, { id: 's1' }, { answer: TABLE })
+  // Nothing to await but the failure itself: if the fallback branch threw, this case would fail
+  // with an unhandled rejection rather than completing.
+  await waitForFire()
 })
