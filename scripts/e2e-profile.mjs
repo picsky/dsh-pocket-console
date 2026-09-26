@@ -38,7 +38,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, realpathSync, rmSync, readdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, resolve } from 'node:path'
 import { join } from 'node:path'
@@ -181,6 +181,79 @@ function bootManifest(html) {
   return undefined
 }
 
+/**
+ * Where the `dsh` on PATH actually lives, and the tree around it.
+ *
+ * A global install is a link, so the path a shell reports is not the tree the packages
+ * are in: the real path is followed first, then the two directories a package tree can
+ * sit in — beside the binary's own `node_modules`, and beside the one above it.
+ * @returns directories to search from, outermost first.
+ */
+function applicationRoots() {
+  const which = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['dsh'], { encoding: 'utf8' })
+  const binary = (which.stdout ?? '').trim().split('\n')[0]?.trim()
+  if (binary === undefined || binary === '') return []
+  let real
+  try {
+    real = realpathSync(binary)
+  } catch {
+    real = binary
+  }
+  const bin = dirname(real)
+  return [dirname(bin), bin, join(bin, 'node_modules')]
+}
+
+/**
+ * The settings form this deployment's Host actually builds for the entry.
+ *
+ * Booting the application proves the Host half activated, and the boot manifest
+ * proves the browser half is the tarball's. Neither says whether a person can see
+ * the settings: the form exists only if the marker the Host's projection is keyed on
+ * reached the Host's own copy of the schema library. That is what #89 cost — a
+ * profile resolved a schemastery older than the Host's, the plugin asked for a helper
+ * that copy did not have, no marker was written, and the Plugins page listed the
+ * plugin with nothing to edit while every check here and in the unit suite passed.
+ *
+ * `scripts/probe-installed-form.mjs` does the asking, in its own process and against
+ * the real library the profile resolved: a stand-in is exactly what could not see
+ * this failure. The version the probe found is reported, because "a form is served"
+ * means different things on a library with `volatile()` and one without, and both are
+ * shapes a deployment may legitimately resolve.
+ * @param home - the scratch `DSH_HOME`.
+ * @param harnessVersion - the harness on `PATH`, for the failure message.
+ * @returns `{ ok, detail }`, plus the field names when it reached them.
+ */
+function settingsProbe(home, harnessVersion) {
+  const result = spawnSync(
+    process.execPath,
+    [
+      join(root, 'scripts', 'probe-installed-form.mjs'),
+      // The installed copy. The probe searches from the profile's own tree first —
+      // a profile that hoisted a copy resolved that one, and it is the copy the Host
+      // would hand the plugin — then walks up from this directory, which reaches the
+      // tree `@deepseek-ai/dsh` was installed with. Both are needed: a profile need
+      // not carry the library at all, because `autoInstallPeers: false` leaves a peer
+      // to be satisfied by whatever hoisted one, or by the application tree.
+      join(home, 'profiles', 'web', 'node_modules', 'dsh-pocket-console'),
+      join(home, 'profiles', 'web', 'node_modules'),
+      // And the application's own tree, read off the `dsh` this run installed. On the
+      // runner the 0.1.7 profile has no `@deepseek-ai` directory of its own while its
+      // plugin activates, so the library it resolves is reachable only from wherever
+      // that `dsh` lives — which is what this names, through the real path because a
+      // global install is itself a link.
+      ...applicationRoots(),
+    ],
+    { cwd: root, encoding: 'utf8', shell: process.platform === 'win32' },
+  )
+  const line = (result.stdout ?? '').trim().split('\n').at(-1) ?? ''
+  try {
+    return JSON.parse(line)
+  } catch {
+    const last = (result.stderr ?? '').trim().split('\n').at(-1)
+    return { ok: false, detail: `${harnessVersion}: the probe answered nothing usable (${last ?? `status ${result.status}`})` }
+  }
+}
+
 let server
 try {
   // An argument names an artifact to verify; without one the working tree is packed,
@@ -267,6 +340,19 @@ try {
     snapshot.settings?.delaySeconds !== undefined && snapshot.settings?.mirrorTtlSeconds !== undefined,
     JSON.stringify(snapshot.settings ?? {}),
   )
+
+  // The exit a person actually meets. Everything above this can be green while the
+  // Plugins page lists a plugin whose settings cannot be edited — the shape #89
+  // shipped — so the form is asked for by name, in the profile that was installed.
+  const form = settingsProbe(home, harness)
+  check('the Host serves this entry a settings form', form.ok === true, form.detail ?? '')
+  if (form.ok === true) {
+    check(
+      'and the form offers exactly the fields the card edits',
+      JSON.stringify(form.fields) === JSON.stringify(['delaySeconds', 'titlePrefix', 'resultNotify', 'debug']),
+      (form.fields ?? []).join(', '),
+    )
+  }
 
   const refused = await fetch(`${origin}/__pocket/state`)
   check('and refuses a caller the connection does not trust', refused.status === 401, `status ${refused.status}`)

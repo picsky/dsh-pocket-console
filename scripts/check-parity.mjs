@@ -64,14 +64,23 @@ function schemaFields(source, marker) {
   // the field the 0.1.7 settings form may edit in place — so the `z.` that proves
   // this line is a schema sits one optional call in, not necessarily right after
   // the colon. Anything else at this indentation is still not a field.
-  return [...block.matchAll(/^ {2}([A-Za-z][\w]*): (?:[A-Za-z][\w]*\()?z\.[^\n]*/gm)].map((match) => {
+  return [...block.matchAll(/^ {2}([A-Za-z][\w]*): (?:(liveField)\(|[A-Za-z][\w]*\()?z\.[^\n]*/gm)].map((match) => {
     const defaults = [...match[0].matchAll(/\.default\(/g)]
     // The last `.default()` is the effective one: `z.string().default(a).default(b)` ships b.
     const last = defaults.at(-1)
     const argument = last === undefined
       ? undefined
       : callArgument(match[0], last.index + last[0].length - 1)
-    return { field: match[1], ...(argument === undefined ? {} : { default: normalize(argument) }) }
+    return {
+      field: match[1],
+      // The marker the Host reads is written by `liveField`, so the wrapper *is* the
+      // declaration of "this field is editable in the settings form". A field is
+      // required to have a default when marking it would otherwise leave the form
+      // unready, which is what `requiredWithoutDefault` is for.
+      volatile: match[2] !== undefined,
+      required: /\.required\(\)/.test(match[0]),
+      ...(argument === undefined ? {} : { default: normalize(argument) }),
+    }
   })
 }
 
@@ -227,6 +236,45 @@ const cardNames = card.map(entry => entry.field)
 // nothing more, so a field the card can write is a field the section must carry.
 same('SectionSchema vs Config', sectionNames, configNames.filter(name => sectionNames.includes(name)))
 same('client FIELDS vs SectionSchema', cardNames, sectionNames)
+
+/**
+ * The set of fields the Host will serve as editable, held to the card.
+ *
+ * `liveField` writes the marker the Host's form projection is keyed on, and
+ * `index.js` turns the Host's own generated page off with
+ * `configure({ auto: false })`. Together those two mean the marked set *is* the
+ * settings surface: a field marked and absent from the card is editable on no
+ * surface at all, and a card field left unmarked is a control the Host never sends.
+ * Neither shows up as a failure anywhere — the first is a setting nobody can
+ * change, the second an empty control — so both are refused here.
+ *
+ * The failure already happened once in the other direction: a `liveField` that
+ * asked for a helper the profile's library did not have wrote no marker at all, the
+ * Host built no form for the entry, and the page was blank while this gate passed
+ * (#89). This is the gate that would have caught it.
+ */
+const marked = config.filter(entry => entry.volatile).map(entry => entry.field)
+same('Config fields carrying the volatile marker vs client FIELDS', marked, cardNames)
+if (marked.length === 0) {
+  fail('Config: no field carries the volatile marker, so the Host serves no form at all')
+}
+
+/**
+ * A required field with no default is a form that never becomes ready.
+ *
+ * `plainSchema` keeps `meta.required` on every non-secret node
+ * (`dsh-settings/lib/index.js:103-117`), and the Host describes an entry when at
+ * least one field is marked. A marked required field with no value resolves to
+ * nothing, the browser's rehydration of the schema and the projected value fails
+ * validation, and the form sits at "loading" for good — served, visible and
+ * unusable, which reads to a person as a broken plugin rather than as a missing
+ * setting. So every field this plugin declares keeps a default.
+ */
+for (const entry of config) {
+  if (entry.required && entry.default === undefined) {
+    fail(`Config: '${entry.field}' is required with no default, so the settings form would never become ready`)
+  }
+}
 
 /** The two config tables: the English reference page, and its Chinese counterpart. */
 const tables = [
@@ -433,4 +481,4 @@ if (problems.length > 0) {
   for (const problem of problems) console.error(`  ${problem}`)
   process.exit(1)
 }
-console.log(`check-parity: ${config.length} config fields agree across Config, SectionSchema, the card, both config pages, and the bundle patch — names and defaults; every published document links only to published files; and a quoted card-text budget matches budget.js`)
+console.log(`check-parity: ${config.length} config fields agree across Config, SectionSchema, the card, both config pages, and the bundle patch — names and defaults; the ${marked.length} fields carrying the volatile marker are exactly the card's, so the Host's form and the card cannot disagree about what is editable; every published document links only to published files; and a quoted card-text budget matches budget.js`)
