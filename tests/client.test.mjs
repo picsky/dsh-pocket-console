@@ -335,9 +335,13 @@ test('the browser half loads through the module loader and registers its card', 
     return found
   }
 
+  // The card renders in the page's language. Its own name is not part of that any
+  // more — the Plugins page draws the title from the label this entry registers, and
+  // repeating it inside the page was the fold-inside-a-fold this change removes — so
+  // this is asserted on copy the card alone draws: a field's own label.
   assert.ok(
-    textOf(renderFor(first).render()).includes('Pocket console'),
-    'the card renders its own name, resolved from the page language',
+    textOf(renderFor(first).render()).includes(renderFor(first).face.copy.titlePrefix),
+    "the card renders its field copy in the page's language",
   )
 
   // Both dictionaries carry the same keys, and every one is a string or a
@@ -577,11 +581,17 @@ test('the browser half loads through the module loader and registers its card', 
     const chinese = await load('../client.js?verify-zh')
     const localized = applyTo(chinese.exports)
     const zhRender = renderFor(localized)
+    const zhLabel = zhRender.face.copy.titlePrefix
     const zhText = textOf(zhRender.render())
-    assert.ok(zhText.includes('口袋控制台'), `the card renders in the page's language: ${JSON.stringify(zhText.slice(0, 4))}`)
-    // A language the copy has no table for still lands on one of the two.
+    assert.ok(zhText.includes(zhLabel), `the card renders in the page's language: ${JSON.stringify(zhText.slice(0, 4))}`)
+    // A language the copy has no table for still lands on one of the two, and the
+    // label it lands on is the other language's, not the one it just rendered.
     globalThis.document.documentElement.lang = 'fr'
-    assert.ok(textOf(zhRender.render()).includes('Pocket console'), 'an unknown language falls back to English')
+    const enLabel = renderFor(localized).face.copy.titlePrefix
+    const enText = textOf(renderFor(localized).render())
+    assert.ok(enText.includes(enLabel), 'an unknown language falls back to a table the copy has')
+    assert.notEqual(enLabel, zhLabel, 'and that table is a different language')
+    assert.ok(!enText.includes(zhLabel), 'with the previous language no longer rendered')
     // This apply exists for its copy alone; its own mirror must not outlive it.
     localized.effects[0]()
   } finally {
@@ -607,7 +617,6 @@ test('the browser half loads through the module loader and registers its card', 
   const collect = (tree) => {
     const labels = new Map()
     const controls = []
-    const chevrons = []
     const dialogs = []
     const texts = []
     const walk = (node) => {
@@ -624,31 +633,39 @@ test('the browser half loads through the module loader and registers its card', 
       }
       if (node.type === 'label') labels.set(node.props.htmlFor, node.props.children.join(''))
       if (node.type === 'input' || node.type === 'select') controls.push(node)
-      if (node.type === 'span' && node.props.style?.display === 'inline-flex'
-        && String(node.props.style.color ?? '').includes('label-tertiary')) {
-        chevrons.push(node)
-      }
       if (node.type === 'Modal') dialogs.push(node)
-      if (typeof node === 'string') texts.push(node)
       walk(node.props?.children)
     }
     walk(tree)
-    return { labels, controls, chevrons, dialogs, texts }
+    return { labels, controls, dialogs, texts }
   }
-  // The card is a disclosure: it starts collapsed, and opening it is the only way
-  // its fields exist at all. The cells are seeded rather than inferred, because
-  // this stand-in shares one cell table across every render in the case.
-  FakeReact.cells = [false]
-  const collapsed = collect(renderCard())
-  assert.equal(collapsed.controls.length, 0, 'a collapsed card renders no controls')
+  /**
+   * Seed one of the card's state cells.
+   *
+   * The stand-in keys cells by the order the card calls `useState`, which is a fact
+   * about the component rather than about what is being asserted — so the indices are
+   * named here once. The card's own order is: the runtime snapshot, then its failure,
+   * busy, copied, unbind-confirm, app-id and typed-pair cells.
+   */
+  const CARD_STATE = { runtime: 0, failure: 1, busy: 2, copied: 3, confirmingUnbind: 4, askingAppId: 5, existing: 6 }
+  const seedState = (name, value) => { FakeReact.cells[CARD_STATE[name]] = value }
 
-  /** The card's disclosure header, wherever it sits in the tree. */
-  const headerOf = (tree) => (function find(node) {
-    if (node === null || typeof node !== 'object') return undefined
-    if (Array.isArray(node)) return node.map(find).find(Boolean)
-    if (node.type === 'button' && node.props['aria-expanded'] !== undefined) return node
-    return find(node.props?.children)
-  })(tree)
+  // There is no disclosure to open: the Plugins page opened this page itself, and the
+  // card is its body. So the fields exist on the first render, and there is no header
+  // repeating the title and the description the page already printed above it.
+  FakeReact.cells = []
+  const firstRender = collect(renderCard())
+  assert.ok(firstRender.controls.length >= 3, `the card renders its controls straight away: ${firstRender.controls.length}`)
+  assert.equal(
+    (function find(node) {
+      if (node === null || typeof node !== 'object') return undefined
+      if (Array.isArray(node)) return node.map(find).find(Boolean)
+      if (node.props?.['aria-expanded'] !== undefined) return node
+      return find(node.props?.children)
+    })(renderCard()),
+    undefined,
+    'and draws no second disclosure inside the page it was opened in',
+  )
   /** Every node that announces a change on its own. */
   const liveRegionsOf = (tree) => {
     const found = []
@@ -662,24 +679,11 @@ test('the browser half loads through the module loader and registers its card', 
     return found
   }
 
-  // A reader who is not looking. A label replaces the button's text as its spoken
-  // name, so a badge the label omits is a state nobody hears; and the enrollment
-  // state moves on its own, so its row has to announce itself.
-  const dirty = renderFor(renderedCard)
-  dirty.face.edit('delaySeconds', '300')
-  assert.match(
-    String(headerOf(dirty.render()).props['aria-label']),
-    new RegExp(dirty.face.copy.unsaved),
-    "an unsaved card says so in the header's own accessible name",
-  )
-  dirty.face.discard()
-
-  // The status row only exists once the card has a state to show, which is what
-  // the seed provides; the live region is asserted on an open card that has one.
-  FakeReact.cells[1] = { enrollment: { state: 'unbound' }, settings: {}, pending: [] }
-  const stateHeader = headerOf(renderCard())
-  assert.ok(stateHeader !== undefined, 'the card has a disclosure header')
-  const live = liveRegionsOf(stateHeader.props.onClick() ?? renderCard())
+  // A reader who is not looking. The enrollment state moves on its own, so its row
+  // has to announce itself. The status row only exists once the card has a state to
+  // show, which the seed provides.
+  seedState('runtime', { enrollment: { state: 'unbound' }, settings: {}, pending: [] })
+  const live = liveRegionsOf(renderCard())
   assert.ok(
     live.some(node => node.props.role === 'status' && String(node.props['aria-live']) === 'polite'),
     `the enrollment state is a polite live region, so a change announces itself: ${JSON.stringify(live.map(node => node.props))}`,
@@ -702,19 +706,13 @@ test('the browser half loads through the module loader and registers its card', 
     'the projection follows the FIELDS list the card renders from',
   )
 
-  // The icon takes only size and className, so the wrapper owns colour and
-  // rotation: without it the chevron kept the header's colour and never turned.
-  // Opening the card is the only way its fields exist, so the same click that
-  // opens it is what turns the chevron; both are read off the frame it produces.
-  // The runtime seed is cleared first, so the frame holds exactly the card's own
-  // fields — the per-state sections are asserted on their own below.
-  FakeReact.cells[1] = null
-  FakeReact.cells[0] = false
-  const openHeaderOfFields = headerOf(renderCard())
-  const openedTree = openHeaderOfFields.props.onClick() ?? renderCard()
-  const { labels, controls, chevrons } = collect(openedTree)
+  // One control per field, each showing its own value under its own label. The
+  // runtime seed is cleared first, so the frame holds exactly the card's own fields —
+  // the per-state sections are asserted on their own below.
+  seedState('runtime', null)
+  const { labels, controls } = collect(renderCard())
 
-  assert.ok(controls.length >= 3, `an open card renders its controls: ${controls.length}`)
+  assert.ok(controls.length >= 3, `the card renders its controls: ${controls.length}`)
   for (const control of controls) {
     const field = String(control.props.id).replace('pocket-console-', '')
     assert.ok(projection[field] !== undefined, `${field} is a projected field`)
@@ -727,18 +725,10 @@ test('the browser half loads through the module loader and registers its card', 
   // field's name under another field.
   assert.equal(new Set([...labels.values()]).size, labels.size, 'no two fields share a label')
 
-  assert.equal(chevrons.length, 1, 'the chevron is wrapped in its own element')
-  assert.equal(chevrons[0].props.children.length, 1, 'and the icon sits inside it')
-  assert.equal(
-    chevrons[0].props.style.transform,
-    'rotate(180deg)',
-    'an open card points its chevron up, the way every other plugin card does',
-  )
-
   // Binding is one decision with two answers; re-binding was a third button that
   // did what the first one does, because the channel reconnects on its own. The
   // binding row lives in the runtime section, so the card needs a state to show.
-  FakeReact.cells[1] = { enrollment: { state: 'unbound' }, settings: {}, pending: [] }
+  seedState('runtime', { enrollment: { state: 'unbound' }, settings: {}, pending: [] })
   const unbound = collect(renderCard())
   assert.ok(unbound.texts.includes(pairFace.copy.bind), 'the card offers creating an app: ' + JSON.stringify(unbound.texts.slice(0, 12)))
   assert.ok(unbound.texts.includes(pairFace.copy.bindExisting), 'and binding one that already exists')
@@ -747,7 +737,7 @@ test('the browser half loads through the module loader and registers its card', 
 
   // Unbinding asks through the GUI's own dialog, not the browser's confirm().
   const boundRuntime = { enrollment: { state: 'bound', recipient: 'ou_scanner' }, settings: {}, pending: [] }
-  FakeReact.cells[1] = boundRuntime
+  seedState('runtime', boundRuntime)
   const pressed = []
   const previousUnbindFetch = globalThis.fetch
   globalThis.fetch = async (url, options) => {
@@ -784,7 +774,7 @@ test('the browser half loads through the module loader and registers its card', 
 
     // Binding an existing app asks which one: the launch page only learns the app
     // from the id it is carried with, so the card collects it first.
-    FakeReact.cells[1] = { enrollment: { state: 'unbound' }, settings: {}, pending: [] }
+    seedState('runtime', { enrollment: { state: 'unbound' }, settings: {}, pending: [] })
     pressed.length = 0
     const bindExisting = (function find(node) {
       if (node === null || typeof node !== 'object') return undefined
@@ -832,25 +822,25 @@ test('the browser half loads through the module loader and registers its card', 
     // Which of the two ways to bind applies depends on whether the reader has
     // scanned before, and only the copy can say so: an app created through the
     // scan already carries the permissions the other path has to be trusted with.
-    FakeReact.cells[1] = { enrollment: { state: 'unbound' }, settings: {}, pending: [] }
+    seedState('runtime', { enrollment: { state: 'unbound' }, settings: {}, pending: [] })
     const guidance = collect(renderCard())
     assert.ok(guidance.texts.includes(pairFace.copy.guideFirst), 'a first-time reader is told to scan')
     assert.ok(guidance.texts.includes(pairFace.copy.guideReturning), 'and a returning one to reuse that app')
 
     // A pair the platform refused has to say so where the attempt was made.
     const refusedReason = 'App Secret 不正确，请在开发者后台的「凭证与基础信息」里重新复制'
-    FakeReact.cells[1] = { enrollment: { state: 'failed', message: refusedReason }, settings: {}, pending: [] }
+    seedState('runtime', { enrollment: { state: 'failed', message: refusedReason }, settings: {}, pending: [] })
     const refused = collect(renderCard())
     assert.ok(refused.texts.includes(refusedReason), 'the reason is on the card')
     assert.ok(refused.texts.includes(pairFace.copy.bind), 'and both ways to bind are still offered')
 
     // Silence was the complaint: a connected deployment names the app, the
     // recipient, and whether the connection is up.
-    FakeReact.cells[1] = {
+    seedState('runtime', {
       enrollment: { state: 'bound', appId: 'cli_connected', recipient: null, connected: true },
       settings: {},
       pending: [],
-    }
+    })
     const connected = collect(renderCard())
     assert.ok(connected.texts.includes('cli_connected'), 'the card names the app it is bound to')
     assert.ok(connected.texts.includes(pairFace.copy.recipientNone), 'says the recipient is still unbound')
@@ -860,15 +850,15 @@ test('the browser half loads through the module loader and registers its card', 
     assert.ok(connected.dialogs.every(dialog => dialog.props.open !== true), 'nothing is modal')
 
     // A pair the store could not keep is reported beside the working connection.
-    FakeReact.cells[1] = {
+    seedState('runtime', {
       enrollment: { state: 'bound', appId: 'cli_connected', recipient: 'ou_x', connected: true, persisted: false },
       settings: {},
       pending: [],
-    }
+    })
     assert.ok(collect(renderCard()).texts.includes(pairFace.copy.persistFailed), 'and an unkept pair says so')
 
     // A connection still being established reads as such, and never as bound.
-    FakeReact.cells[1] = { enrollment: { state: 'starting' }, settings: {}, pending: [] }
+    seedState('runtime', { enrollment: { state: 'starting' }, settings: {}, pending: [] })
     const connecting = collect(renderCard())
     assert.ok(connecting.texts.includes(pairFace.copy.startingConnecting), 'the card says it is connecting')
     assert.ok(!connecting.texts.includes(pairFace.copy.connected), 'and claims nothing it does not have')
@@ -876,21 +866,21 @@ test('the browser half loads through the module loader and registers its card', 
 
     // Making the app is a different wait from connecting to it: the QR code is still
     // on its way, and the click must never look like nothing happened.
-    FakeReact.cells[1] = { enrollment: { state: 'starting', stage: 'creating' }, settings: {}, pending: [] }
+    seedState('runtime', { enrollment: { state: 'starting', stage: 'creating' }, settings: {}, pending: [] })
     assert.ok(
       collect(renderCard()).texts.includes(pairFace.copy.startingCreating),
       'creating the app says so while the code is on its way',
     )
-    FakeReact.cells[1] = { enrollment: { state: 'starting', stage: 'creating', slow: true }, settings: {}, pending: [] }
+    seedState('runtime', { enrollment: { state: 'starting', stage: 'creating', slow: true }, settings: {}, pending: [] })
     assert.ok(
       collect(renderCard()).texts.includes(pairFace.copy.startingCreatingSlow),
       'and a slow creation reads differently again',
     )
-    FakeReact.cells[1] = { enrollment: { state: 'starting', stage: 'connecting', slow: true }, settings: {}, pending: [] }
+    seedState('runtime', { enrollment: { state: 'starting', stage: 'connecting', slow: true }, settings: {}, pending: [] })
     assert.ok(collect(renderCard()).texts.includes(pairFace.copy.startingConnectingSlow), 'as does a slow connection')
 
     const code = 'https://open.feishu.cn/page/launcher?user_code=X'
-    FakeReact.cells[1] = { enrollment: { state: 'awaiting', verifyUrl: code }, settings: {}, pending: [] }
+    seedState('runtime', { enrollment: { state: 'awaiting', verifyUrl: code }, settings: {}, pending: [] })
     const scanning = collect(renderCard())
     assert.ok(scanning.texts.includes(pairFace.copy.scan), 'a code that arrived shows the code')
     assert.ok(!scanning.texts.includes(pairFace.copy.startingCreating), 'and stops reporting the wait')
@@ -898,7 +888,7 @@ test('the browser half loads through the module loader and registers its card', 
     // The page and the process serving it are replaced separately, so a card can
     // call a route the running host does not have. What a reader saw for that was a
     // bare 404; the card has to name the cause and the fix.
-    FakeReact.cells[1] = { enrollment: { state: 'unbound' }, settings: {}, pending: [] }
+    seedState('runtime', { enrollment: { state: 'unbound' }, settings: {}, pending: [] })
     globalThis.fetch = async () => ({ ok: false, status: 404, json: async () => ({}) })
     const startBinding = (function find(node) {
       if (node === null || typeof node !== 'object') return undefined
@@ -976,6 +966,101 @@ test('the browser half loads through the module loader and registers its card', 
   await modernFace.save()
   assert.equal(section.delaySeconds, 120, 'and a reset re-inherits it again')
 
+  // The page's own owner form, which is what `view: 'page'` is documented to carry.
+  // This is the shape the Plugins page passes in `props.form`: accepted values plus
+  // the write action, with the revision the owner last read. The card has to write
+  // through it rather than stage a draft of its own — a second save control would
+  // write the same document twice, and a draft the owner cannot see is a value the
+  // reader believes they set.
+  //
+  // Its own module instance, because a card mounts once per bundle and the instance
+  // above already mounted its own.
+  {
+    const writes = []
+    const hostState = {
+      status: 'ready',
+      value: { delaySeconds: 120, titlePrefix: 'DSH', resultNotify: 'idle', debug: 'off' },
+      base: { delaySeconds: 120, titlePrefix: 'DSH', resultNotify: 'idle', debug: 'off' },
+      user: undefined,
+      revision: 7,
+      writable: true,
+      mode: 'host',
+    }
+    const hostForm = {
+      state: hostState,
+      async mutate(ops, revision) {
+        writes.push({ ops, revision })
+        return true
+      },
+    }
+    const owner = await load('../client.js?verify-owner-form')
+    const applied = applyTo(owner.exports, { surface: 'forms' })
+    const face = applied.page.options.inject()
+    FakeReact.cells = []
+    FakeReact.cursor = 0
+    const render = () => applied.page.Component({
+      ...face,
+      form: hostForm,
+      view: 'page',
+      usePocketConsole: selector => selector(face.hooks.pocketConsole.getSnapshot()),
+    })
+
+    const { controls, texts } = collect(render())
+    assert.equal(controls.length, 4, "the four fields are drawn from the page owner's values")
+    assert.equal(controls[0].props.value, '120', "and each shows the owner's accepted value")
+    assert.ok(
+      !texts.includes(face.copy.save) && !texts.includes(face.copy.discard),
+      'with no second save control, because the owner persists each edit',
+    )
+
+    // An edit is one mutation, fenced by the revision the owner last read.
+    const number = controls.find(control => control.props.id === 'pocket-console-delaySeconds')
+    number.props.onChange({ target: { value: '600' } })
+    await sleep(10)
+    assert.deepEqual(
+      writes,
+      [{ ops: [{ op: 'set', path: ['delaySeconds'], value: 600 }], revision: 7 }],
+      'an edit goes to the owner as one set, with the revision it read',
+    )
+
+    // A reset clears the field rather than writing the default, which is what lets
+    // the entry inherit the composition layer again.
+    writes.length = 0
+    const reset = (function find(node) {
+      if (node === null || typeof node !== 'object') return undefined
+      if (Array.isArray(node)) return node.map(find).find(Boolean)
+      if (node.type === 'button' && node.props.children?.[0] === face.copy.reset) return node
+      return find(node.props?.children)
+    })(render())
+    reset.props.onClick()
+    await sleep(10)
+    assert.deepEqual(
+      writes,
+      [{ ops: [{ op: 'unset', path: ['delaySeconds'] }], revision: 7 }],
+      'a reset clears the field through the owner',
+    )
+
+    // An unparseable draft is never sent: the owner would refuse it or store
+    // something the reader did not type, and the control says so itself.
+    writes.length = 0
+    const { controls: afterEdit } = collect(render())
+    const bad = afterEdit.find(control => control.props.id === 'pocket-console-delaySeconds')
+    bad.props.onChange({ target: { value: 'not-a-number' } })
+    await sleep(10)
+    assert.deepEqual(writes, [], 'an invalid number is not written through the owner')
+
+    // The owner's own contract says `mutate` rejects when the write never reached the
+    // document. Letting that rejection out of `commit` makes it an unhandled one, which is
+    // a failure nothing reports — and the run itself is half the assertion here, because
+    // Node fails this file on an unhandled rejection.
+    hostForm.mutate = async () => { throw new Error('the transport dropped') }
+    collect(render()).controls
+      .find(control => control.props.id === 'pocket-console-delaySeconds')
+      .props.onChange({ target: { value: '301' } })
+    await sleep(10)
+    applied.effects[0]()
+  }
+
   // A Host that offers neither surface still has to boot this entry: the mirror is
   // the part that must work without one, and the card is the only thing lost. A
   // hard `inject` on either name is what turned that loss into a page that would
@@ -987,44 +1072,29 @@ test('the browser half loads through the module loader and registers its card', 
   bare.effects[0]()
   modern.effects[0]()
 
-  /**
-   * Open a card and hand back the chevron it drew.
-   * @param applied - one `applyTo` result.
-   * @returns the chevron wrappers the render produced.
-   */
-  const chevronsOf = (applied) => {
-    const rendered = renderFor(applied)
-    FakeReact.cells = [false]
-    const header = headerOf(rendered.render())
-    assert.ok(header !== undefined, 'the card has a disclosure header')
-    return collect(header.props.onClick() ?? rendered.render()).chevrons
+  // The card draws no icon of its own, and that is now a fact rather than a promise:
+  // the disclosure chevron went with the disclosure, so the icon name 0.1.7 renamed
+  // (`IconChevronDownOutline14` → `…Regular`) is no longer asked for at all. A Host
+  // that seeds neither name, either one, or both renders the same card — which is the
+  // strongest form of the fix, because there is no undefined element type left to
+  // throw on and retire the entry from the page.
+  for (const [marker, seeded] of [
+    ['verify-icons-017', { Modal: 'Modal', IconChevronDownOutlineRegular: () => null }],
+    ['verify-icons-016', { Modal: 'Modal', IconChevronDownOutline14: () => null }],
+    ['verify-icons-none', { Modal: 'Modal' }],
+  ]) {
+    const variant = await load(`../client.js?${marker}`, seeded)
+    const applied = applyTo(variant.exports)
+    FakeReact.cells = []
+    const texts = textOf(renderFor(applied).render())
+    assert.ok(texts.length > 0, `${marker}: the card renders whatever the Host seeds`)
+    assert.deepEqual(
+      variant.requested.filter(name => String(name).includes('Icon')),
+      [],
+      `${marker}: no icon name is requested from the Host at all`,
+    )
+    applied.effects[0]()
   }
-
-  // 0.1.7 renamed the whole icon family — a size suffix became a weight suffix —
-  // and left no alias. An undefined element type is not a missing decoration: React
-  // throws for it on the first render, the slot renderer retires an entry that
-  // throws, and the card *and* the description beside it disappear from a page that
-  // otherwise looks perfectly healthy. That is what an empty 0.1.7 page was.
-  const weightNamed = await load('../client.js?verify-icons-017', {
-    Modal: 'Modal',
-    IconChevronDownOutlineRegular: () => null,
-  })
-  const weightChevrons = chevronsOf(applyTo(weightNamed.exports))
-  assert.equal(weightChevrons.length, 1, 'the 0.1.7 icon name still draws the chevron')
-  assert.equal(typeof weightChevrons[0].props.children[0].type, 'function', 'and it is the component the Host seeded')
-
-  const sizeNamed = await load('../client.js?verify-icons-016', {
-    Modal: 'Modal',
-    IconChevronDownOutline14: () => null,
-  })
-  const sizeChevrons = chevronsOf(applyTo(sizeNamed.exports))
-  assert.equal(sizeChevrons.length, 1, 'the ≤ 0.1.6 icon name still draws it')
-  assert.equal(typeof sizeChevrons[0].props.children[0].type, 'function', 'from the same seed')
-
-  const unnamed = await load('../client.js?verify-icons-none', { Modal: 'Modal' })
-  const unnamedChevrons = chevronsOf(applyTo(unnamed.exports))
-  assert.equal(unnamedChevrons.length, 1, 'a Host that seeds neither name still gets the card')
-  assert.deepEqual(unnamedChevrons[0].props.children, [], 'drawn without a chevron rather than crashing')
 
   // A form that is not ready is said out loud, never rendered as nothing: an entry
   // that draws no card is indistinguishable from a page that has no settings, which
@@ -1054,4 +1124,3 @@ test('the browser half loads through the module loader and registers its card', 
   assert.ok(hookless.includes(hooklessFace.copy.settingsUnavailable), 'a card handed no form hook explains itself instead of crashing')
   hooklessApplied.effects[0]()
 })
-
