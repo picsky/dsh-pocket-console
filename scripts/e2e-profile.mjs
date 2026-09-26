@@ -181,6 +181,42 @@ function bootManifest(html) {
   return undefined
 }
 
+/**
+ * The settings form this deployment's Host actually builds for the entry.
+ *
+ * Booting the application proves the Host half activated, and the boot manifest
+ * proves the browser half is the tarball's. Neither says whether a person can see
+ * the settings: the form exists only if the marker the Host's projection is keyed on
+ * reached the Host's own copy of the schema library. That is what #89 cost — a
+ * profile resolved a schemastery older than the Host's, the plugin asked for a helper
+ * that copy did not have, no marker was written, and the Plugins page listed the
+ * plugin with nothing to edit while every check here and in the unit suite passed.
+ *
+ * `scripts/probe-installed-form.mjs` does the asking, in its own process and against
+ * the real library the profile resolved: a stand-in is exactly what could not see
+ * this failure. The version the probe found is reported, because "a form is served"
+ * means different things on a library with `volatile()` and one without, and both are
+ * shapes a deployment may legitimately resolve.
+ * @param home - the scratch `DSH_HOME`.
+ * @param pluginDir - the installed copy of this package inside that profile.
+ * @param harnessVersion - the harness on `PATH`, for the failure message.
+ * @returns `{ ok, detail }`, plus the field names when it reached them.
+ */
+function settingsProbe(home, pluginDir, harnessVersion) {
+  const result = spawnSync(
+    process.execPath,
+    [join(root, 'scripts', 'probe-installed-form.mjs'), pluginDir, join(home, 'profiles', 'web', 'node_modules')],
+    { cwd: root, encoding: 'utf8', shell: process.platform === 'win32' },
+  )
+  const line = (result.stdout ?? '').trim().split('\n').at(-1) ?? ''
+  try {
+    return JSON.parse(line)
+  } catch {
+    const last = (result.stderr ?? '').trim().split('\n').at(-1)
+    return { ok: false, detail: `${harnessVersion}: the probe answered nothing usable (${last ?? `status ${result.status}`})` }
+  }
+}
+
 let server
 try {
   // An argument names an artifact to verify; without one the working tree is packed,
@@ -267,6 +303,20 @@ try {
     snapshot.settings?.delaySeconds !== undefined && snapshot.settings?.mirrorTtlSeconds !== undefined,
     JSON.stringify(snapshot.settings ?? {}),
   )
+
+  // The exit a person actually meets. Everything above this can be green while the
+  // Plugins page lists a plugin whose settings cannot be edited — the shape #89
+  // shipped — so the form is asked for by name, in the profile that was installed.
+  const installedDir = join(home, 'profiles', 'web', 'node_modules', 'dsh-pocket-console')
+  const form = settingsProbe(home, installedDir, harness)
+  check('the Host serves this entry a settings form', form.ok === true, form.detail ?? '')
+  if (form.ok === true) {
+    check(
+      'and the form offers exactly the fields the card edits',
+      JSON.stringify(form.fields) === JSON.stringify(['delaySeconds', 'titlePrefix', 'resultNotify', 'debug']),
+      (form.fields ?? []).join(', '),
+    )
+  }
 
   const refused = await fetch(`${origin}/__pocket/state`)
   check('and refuses a caller the connection does not trust', refused.status === 401, `status ${refused.status}`)
