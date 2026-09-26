@@ -8,7 +8,10 @@
  * authoritative and nothing waits on a message that will never arrive.
  *
  * This module owns the timer, the race, the pending registry, the rendered
- * views, and the two decoders that turn a phone action into an answer.
+ * views, and the two decoders that turn a phone action into an answer. A typed
+ * message that quotes one of these cards is answered through the same two
+ * decoders: the card names the request, and the text becomes the payload a
+ * press would have carried.
  *
  * @module pocket-console/escalation
  */
@@ -23,6 +26,43 @@ import { randomUUID } from 'node:crypto'
 const ALLOW = 'allowed-once'
 /** Approval outcome meaning "do not proceed". */
 const REJECT = 'rejected'
+
+/**
+ * The words a typed answer to an approval card accepts, and the outcome each one means.
+ *
+ * Deliberately tiny, and deliberately exact. A tool grant is not a conversation: `ok`, `yes`, `好`,
+ * `行`, every prefix and every near miss are refused, because refusing a word somebody meant costs one
+ * more message while accepting one they did not costs a tool call nobody authorized. The refusal says
+ * which two words work.
+ *
+ * Both languages are always accepted, whichever language the card is written in: a person types what
+ * they think, and a rule they cannot see — that the Chinese word works only on a Chinese card — is a
+ * rule they cannot learn.
+ *
+ * The full-access switch is **not** here and must never be. It changes a session's policy rather than
+ * answering the request in front of the reader, and the card makes it pass a platform confirmation
+ * first; a word typed into a chat must not do what a deliberate press cannot.
+ */
+const APPROVAL_WORDS = new Map([
+  ['允许', ALLOW],
+  ['allow', ALLOW],
+  ['拒绝', REJECT],
+  ['reject', REJECT],
+])
+
+/**
+ * What a typed answer to an approval card means.
+ *
+ * Exported rather than kept in the closure so the accepted set can be read — and tested — on its own:
+ * the reachable outcomes are exactly the two values in the table above, which is the property that
+ * keeps a typed answer from ever producing a third one.
+ * @param text - what the reader typed.
+ * @returns the outcome, or undefined when the text is not one of the accepted words.
+ */
+export function approvalOutcomeFor(text) {
+  return APPROVAL_WORDS.get(String(text ?? '').trim().toLowerCase())
+}
+
 /** Form field carrying the chosen options, or the typed answer when none are offered. */
 const FORM_VALUE_FIELD = 'value'
 /** Form field carrying a typed answer beside a multi-select's options. */
@@ -68,6 +108,18 @@ export function createEscalation({
 }) {
   /** Live escalations keyed by the opaque id embedded in their action payloads. */
   const open = new Map()
+  /**
+   * Live escalations keyed by the message their card was delivered into.
+   *
+   * The id inside a payload is what a press carries, and it is this registry's only key — but a typed
+   * message carries no payload at all, only the message it quotes. So an answer that arrives as text
+   * needs the other direction, and this is it: written when the card lands, dropped by {@link release}
+   * along with everything else the record holds. That is what makes a text answer able to reach only a
+   * request that is still waiting, and nothing here is persisted, for the same reason nothing else is:
+   * the desktop branch is what remains authoritative after a restart, and a text answer to a request
+   * this process no longer knows is answered with a hint rather than a guess.
+   */
+  const byHandle = new Map()
   /** Set by close(): an escalation started after disposal must not arm a timer. */
   let closed = false
 
@@ -333,6 +385,10 @@ export function createEscalation({
         record.timer = undefined
       }
       open.delete(record.id)
+      // The card is answered or gone, so a typed answer quoting it must not reach a record the phone
+      // can no longer decide anything about. Dropped here, in the one function that knows everything a
+      // record holds, rather than at each of the three places that release it.
+      if (record.handle !== undefined) byHandle.delete(record.handle)
       request.signal?.removeEventListener('abort', record.onAbort)
     }
 
@@ -422,6 +478,9 @@ export function createEscalation({
           // after a restart finds no record, and rewriting that card must still be able
           // to name the session it belonged to.
           workspaces?.record(handle, record.workspace)
+          // And the same message is how a *typed* answer finds its way back to this record: it
+          // carries no payload, only the card it quotes.
+          if (typeof handle === 'string' && handle !== '') byHandle.set(handle, record)
         }).catch((error) => {
           log.warn(messages().logDeliveryGivenUp(DELIVERY_MAX_TRIES), error)
           // The card never arrived, so there is no phone decision to wait for.
@@ -727,6 +786,69 @@ export function createEscalation({
         : decodeQuestion(record, payload, values)
       if (outcome === undefined) return { toast: messages().actionUnknown, accepted: false }
       return { toast: outcome.toast, accepted: true }
+    },
+    /**
+     * Which live request one card on the phone is waiting on.
+     *
+     * The other side of {@link handleAction}'s key: a press names the request it answers, a typed
+     * message names only the card it quotes. Read before the text is interpreted, because *that* is
+     * what decides whether the text is an answer or an instruction for a session.
+     * @param handle - the message the card lives in.
+     * @returns the kind of request waiting there, or undefined when none is.
+     */
+    requestAt(handle) {
+      return typeof handle === 'string' ? byHandle.get(handle)?.kind : undefined
+    },
+    /**
+     * Answer a live request from a typed message.
+     *
+     * The text is turned into **the payload the card itself would have sent** and handed to the same
+     * decoder a press goes through, so everything a press does — settling the race, mirroring the
+     * decision to the browser half, rewriting the card in place, counting the person as being at the
+     * phone — happens here for the same reasons and in the same order. There is no second answer path
+     * to keep in step, which is the whole point: an approval granted by a word is the same
+     * `allowed-once` a button grants, and nothing downstream can tell them apart because there is
+     * nothing to tell apart.
+     *
+     * Two shapes of question answer exist, and the card's own question decides which: text equal to an
+     * option's label *is* that option, and anything else is the typed answer the card offers beside its
+     * choices. A multi-select question cannot be given several selections in one line of text, and
+     * rather than guess at separators the text becomes exactly one selection when it names one option
+     * and a custom answer when it does not.
+     * @param answer - the message the card lives in, and what was typed.
+     * @returns whether the request took the answer, and why not when it did not.
+     */
+    answerByHandle({ handle, text } = {}) {
+      const record = typeof handle === 'string' ? byHandle.get(handle) : undefined
+      // No live record: the request has been answered already, or this process never had it — it
+      // arrived before a restart, or the card belongs to another path entirely. A reason rather than a
+      // bare false, because telling the reader is the only useful thing left to do.
+      if (record === undefined) return { ok: false, reason: 'request-gone' }
+      const typed = String(text ?? '').trim()
+      if (typed === '') return { ok: false, reason: 'empty' }
+
+      if (record.kind === 'approval') {
+        const outcome = approvalOutcomeFor(typed)
+        // Nothing is settled on a word this card does not answer to. Not "reject by default": a
+        // typo must not decide anything either way.
+        if (outcome === undefined) return { ok: false, reason: 'not-an-answer' }
+        return { ok: true, toast: decodeApproval(record, { rid: record.id, v: outcome })?.toast }
+      }
+
+      // The question this card is asking: the first one left unanswered, which is the same one
+      // `buildView` puts in front of the reader.
+      const current = record.request.questions.find(question => !record.answers.has(question.id))
+      if (current === undefined) return { ok: false, reason: 'request-gone' }
+      // Matched trimmed and case-insensitively: a label is a name rather than a token, and a reader who
+      // types it with a stray space or in another case meant that option.
+      const named = (current.options ?? []).find(
+        option => option.label.trim().toLowerCase() === typed.toLowerCase(),
+      )
+      const decoded = named === undefined
+        ? decodeQuestion(record, { rid: record.id, q: current.id, submit: true }, { [FORM_VALUE_FIELD]: typed })
+        : decodeQuestion(record, { rid: record.id, q: current.id, v: named.label })
+      if (decoded === undefined) return { ok: false, reason: 'not-an-answer' }
+      return { ok: true, toast: decoded.toast }
     },
     /**
      * What the state route reports as open.
