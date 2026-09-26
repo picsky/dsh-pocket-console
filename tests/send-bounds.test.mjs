@@ -66,18 +66,19 @@ test('an answer that does not name the message is not a delivery', async () => {
 
 test('the deadline on a write is the only thing that ends a call that never answers', () => {
   // Asserted by reading rather than by waiting: the deadline is twenty seconds, and a case that sat
-  // through it would be a case nobody runs. What matters is that the bound exists and wraps **both**
-  // writes — a send that never answers leaves the activity record's `sending` flag set for good, and
-  // an edit that never answers holds the flush. Deleting either `withDeadline` call would put both
-  // back, so the reading is the check.
+  // through it would be a case nobody runs. What matters is that the bound exists and wraps **every**
+  // write — a send that never answers leaves the activity record's `sending` flag set for good, an
+  // edit that never answers holds the flush, and the plain-text fallback a result falls back to when
+  // no card can be delivered would hold the notifier just the same. Deleting any `writeBounded` call
+  // puts its own version of that back, so the reading is the check.
   const source = readFileSync(new URL('../providers/feishu.js', import.meta.url), 'utf8')
   assert.match(source, /const SEND_TIMEOUT_MS = \d/, 'there is a deadline')
   assert.match(source, /withDeadline\(/, 'and a helper that enforces it')
-  // Both writes go through the one bounded helper, so neither can be left unbounded by accident:
-  // one line defines it, and the send and the edit are its only two callers.
+  // Every write goes through the one bounded helper, so none can be left unbounded by accident:
+  // one line defines it, and the three callers are the send, the edit, and the text fallback.
   assert.equal(
     [...source.matchAll(/await writeBounded\(/g)].length,
-    2,
-    'the send and the edit both go through it',
+    3,
+    'the send, the edit and the text fallback all go through it',
   )
 })
