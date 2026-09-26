@@ -38,7 +38,10 @@ repository as executable code.**
    `volatileForm`, `plainSchema`'s effect on `meta`, `describe()`'s admission test, the
    live reference a marked field resolves to — each with the file and line it was read
    from. A case asserts against those functions, so a stand-in can only be wrong in a
-   way that fails a test.
+   way that fails a test. `tests/support/host-schema.mjs` is the other half and the one a
+   build can run inside a profile: the same marker rules as a walk over the entry's own
+   `Config`, plus the resolution calls asked **of the library the deployment resolved** —
+   the two questions the composition job needs answered.
 2. **Cases assert the user-visible exit.** `formOf(Config)` answers "is a form served,
    and with which fields", and that is what a case about the settings surface asserts —
    not "was the marker written".

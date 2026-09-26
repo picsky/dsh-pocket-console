@@ -70,6 +70,17 @@ window.__ModuleLoader__.load({
      */
     const MIRROR_FETCH_TIMEOUT_MS = 5_000
 
+    /**
+     * Write failures the owner's model has to keep between renders.
+     *
+     * The card on the Plugins page builds its controller per render — the page hands over a fresh
+     * `form` snapshot after every write — so a flag held only by that controller is gone by the time
+     * anything could draw it, and a refused or dropped write becomes a failure the page never
+     * mentions. Keyed by the owner's own form object, which outlives the controller; a WeakMap so a
+     * page that is closed takes its entry with it.
+     */
+    const ownerWriteFailures = new WeakMap()
+
     /** Section fields this card edits, in render order. */
     const FIELDS = [
       { field: 'delaySeconds', kind: 'number' },
@@ -508,6 +519,7 @@ window.__ModuleLoader__.load({
         try {
           const accepted = await scope.mutate(ops, snapshotOf().revision)
           failed = !accepted
+          if (host) remember(accepted)
           publish()
           return accepted
         } catch (error) {
@@ -516,9 +528,22 @@ window.__ModuleLoader__.load({
           // no draft to keep, they dispatch with `void`, and a rethrow would leave the
           // process with an unhandled rejection and the card with nothing to say.
           failed = true
+          if (host) remember(false)
           publish()
           return false
         }
+      }
+
+      /**
+       * Keep this write's outcome where the owner's next render can read it.
+       *
+       * Only that model needs it: its controller is rebuilt per render, so the flag it holds dies
+       * with it. The staged model re-renders from its own subscription.
+       * @param ok - whether the write was accepted.
+       */
+      const remember = (ok) => {
+        if (ok) ownerWriteFailures.delete(scope)
+        else ownerWriteFailures.set(scope, true)
       }
 
       /** Form-level state: what the Host serves, and what a save would do. */
@@ -554,6 +579,7 @@ window.__ModuleLoader__.load({
         }),
         edit(field, text) {
           failed = false
+          if (host) remember(true)
           if (host) {
             const write = parseValue(specOf(field).kind, text)
             // An unparseable draft is not sent: the owner would either refuse it or
@@ -570,6 +596,7 @@ window.__ModuleLoader__.load({
         },
         resetField(field) {
           failed = false
+          if (host) remember(true)
           if (host) {
             publish()
             void commit([{ op: 'unset', path: [field] }])
@@ -690,7 +717,15 @@ window.__ModuleLoader__.load({
        */
       const hostController = (form) => {
         const controller = createSettingsForm(form, true)
-        return { ...controller.projection(), edit: controller.edit, resetField: controller.resetField }
+        const projection = controller.projection()
+        return {
+          ...projection,
+          // A failure outlives this controller: the page hands over a new `form` snapshot after
+          // every write, so the flag is read back from the form rather than from the controller.
+          shell: { ...projection.shell, failed: projection.shell.failed || ownerWriteFailures.get(form) === true },
+          edit: controller.edit,
+          resetField: controller.resetField,
+        }
       }
       const [runtime, setRuntime] = useState(null)
       const [failure, setFailure] = useState(null)
@@ -1017,8 +1052,11 @@ window.__ModuleLoader__.load({
         // got wrong the moment a field was inserted in the middle.
         ...FIELDS.map(spec => field(controller, spec, copy[spec.field], copy[`${spec.field}Hint`])),
 
+        // Drawn on both models, and outside the footer on purpose: the owner persists each edit and
+        // has no footer, so a refused or dropped write there would otherwise go unmentioned.
+        controller.shell.failed ? h('p', { style: S.failed, role: 'status' }, copy.saveFailed) : null,
+
         controller.shell.immediate ? null : h('div', { style: S.footer },
-          controller.shell.failed ? h('p', { style: S.failed, role: 'status' }, copy.saveFailed) : null,
           button(copy.discard, props.discard ?? noop, { disabled: !controller.shell.dirty || controller.shell.saving }),
           button(
             controller.shell.saving ? copy.saving : copy.save,

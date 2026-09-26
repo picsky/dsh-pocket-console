@@ -33,7 +33,7 @@ Closes #
 - [ ] `npm test` is green, and new behaviour has a case in `tests/` that fails without it
 - [ ] A user-visible change moves `CHANGELOG.md`, under **Unreleased**
 - [ ] A new or changed setting agrees in all six places (`npm run check:parity`)
-- [ ] `README.md` and `README.zh-CN.md` are updated together, or only one changed for a reason below
+- [ ] `README.md` and `README.en.md` are updated together, or only one changed for a reason below
 - [ ] A non-obvious choice is recorded in `docs/decisions/`, or an existing record is cited
 - [ ] A change to `files`, `exports`, or `bundleDependencies` leaves the tarball installable (`npm run e2e`)
 - [ ] A security property that moved is a line in `SECURITY.md` and a case in `tests/`
