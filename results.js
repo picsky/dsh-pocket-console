@@ -1364,6 +1364,57 @@ export function createResultNotifier({
      */
     handleAction,
     /**
+     * Hand an instruction to the session one card belongs to, found by that card's message.
+     *
+     * This is what a **typed** instruction uses: the reader quoted a result card and wrote in the
+     * chat, so the card's message id — which the platform sends as `parent_id` — is the whole anchor.
+     * The work is deliberately the same as a reply typed into the card's form (claim the notice, hand
+     * the instruction to the agent, put the notice back if the send did not land), because the reader
+     * means the same thing either way.
+     * @param handle - the message the quoted card lives in.
+     * @param text - what the person asked for.
+     * @returns whether the instruction reached the session, and the session it was for.
+     */
+    async replyByHandle({ handle, text }) {
+      const found = [...notices.entries()].find(([, notice]) => notice.handle === handle)
+      if (found === undefined) return { ok: false, reason: 'no-notice' }
+      const [id, notice] = found
+      const agent = ctx.get?.('agents')?.get?.(notice.session)
+      if (agent === undefined) return { ok: false, reason: 'no-agent', session: notice.session }
+      // Claim before sending, exactly as the form path does: the instruction is taken once, and the
+      // rid stops meaning anything the moment it is.
+      notices.delete(id)
+      void store.remove(id)
+      const delivered = await send(agent, text, notice)
+      if (delivered) return { ok: true, session: notice.session }
+      // Not taken after all, so the card stays answerable — from the chat as well as from its box.
+      noticeSet(id, notice)
+      void store.put({
+        rid: id,
+        session: notice.session,
+        handle: notice.handle,
+        workspace: notice.workspace,
+        seq: await sessionSeq(notice.session),
+        sentAt: now(),
+      }).catch(() => {})
+      return { ok: false, reason: 'not-sent', session: notice.session }
+    },
+    /**
+     * The session one card's message belongs to, when the notice store still knows it.
+     *
+     * The in-memory registry the cards are recorded in is not durable; this one is, because the
+     * notices are. A restart therefore loses no anchor a reader could still quote.
+     * @param handle - the message a card lives in.
+     * @returns the session id, or undefined.
+     */
+    sessionOfMessage(handle) {
+      if (typeof handle !== 'string') return undefined
+      for (const notice of notices.values()) {
+        if (notice.handle === handle) return notice.session
+      }
+      return undefined
+    },
+    /**
      * Close a card whose next-task offer has been taken.
      *
      * Called by the offer's own module once the new session exists. It is this module's job because

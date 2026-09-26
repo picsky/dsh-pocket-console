@@ -82,6 +82,23 @@ fails the answer now goes out as a plain-text message rather than nowhere. No co
   no elements, no tables, 150 KB instead of 30. It has no reply box, and arriving without one beats
   not arriving.
 
+### Added
+
+**A typed message in the chat is now an instruction.** The card's input box is capped at 1000
+characters by the platform — enough to reply, not enough for the first prompt of a new session — so the
+chat carries instructions too. **Quote a card** and what you type goes to that card's session, by the
+same path a form reply takes; quote one and start with **`/new <what to do>`** to open a new session in
+that card's workspace; send **`/help`** for the list. A message that quotes no card is **not** acted on
+— guessing a session would be worse than doing nothing — and is answered with one short hint instead.
+No new scope, so an installed deployment gets this without re-authorising.
+
+- **The quoted card is the anchor**, because the platform sends `parent_id` only when a message replies
+  to another. Instructions are deduplicated on `chat_id + message_id` (the platform delivers at least
+  once and asks for exactly this key), the handler returns inside the platform's three seconds, and the
+  reply is sent after the decision is returned.
+- **The result card's prompt line teaches the convention**, since an input box replaced by a
+  convention has to say so.
+
 ## 0.9.5
 
 **The settings card shows on DSH 0.1.7, and says so when it cannot.** 0.9.4 finally
