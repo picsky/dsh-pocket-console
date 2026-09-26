@@ -10,7 +10,7 @@
  * `isVolatile` boolean, and that single divergence is how a `liveField` that never
  * wrote the marker passed 277 cases while the settings page was blank for a real
  * deployment (`tests/support/host-contract.mjs` states the contract, and
- * `docs/decisions/0031-*` records the incident).
+ * `docs/decisions/0032-*` records the incident).
  *
  * The library's own axes are modelled too, because the plugin's peer range is `*`:
  *
