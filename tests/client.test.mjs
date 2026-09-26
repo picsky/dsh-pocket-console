@@ -1048,6 +1048,16 @@ test('the browser half loads through the module loader and registers its card', 
     bad.props.onChange({ target: { value: 'not-a-number' } })
     await sleep(10)
     assert.deepEqual(writes, [], 'an invalid number is not written through the owner')
+
+    // The owner's own contract says `mutate` rejects when the write never reached the
+    // document. Letting that rejection out of `commit` makes it an unhandled one, which is
+    // a failure nothing reports — and the run itself is half the assertion here, because
+    // Node fails this file on an unhandled rejection.
+    hostForm.mutate = async () => { throw new Error('the transport dropped') }
+    collect(render()).controls
+      .find(control => control.props.id === 'pocket-console-delaySeconds')
+      .props.onChange({ target: { value: '301' } })
+    await sleep(10)
     applied.effects[0]()
   }
 

@@ -505,10 +505,20 @@ window.__ModuleLoader__.load({
        * knows how to recover from a conflict.
        */
       const commit = async (ops) => {
-        const accepted = await scope.mutate(ops, snapshotOf().revision)
-        failed = !accepted
-        publish()
-        return accepted
+        try {
+          const accepted = await scope.mutate(ops, snapshotOf().revision)
+          failed = !accepted
+          publish()
+          return accepted
+        } catch (error) {
+          // The owner's `mutate` rejects when the write never reached the document. It is
+          // answered the same way a refusal is rather than rethrown: the callers here hold
+          // no draft to keep, they dispatch with `void`, and a rethrow would leave the
+          // process with an unhandled rejection and the card with nothing to say.
+          failed = true
+          publish()
+          return false
+        }
       }
 
       /** Form-level state: what the Host serves, and what a save would do. */
