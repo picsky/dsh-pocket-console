@@ -123,20 +123,59 @@ export function resolutionsOf(schema, value) {
  * @returns `{ fields, live, shapes }`: the marked field names, whether a marked field
  *   resolved to a live reference on some call shape, and which shapes answered.
  */
+/**
+ * What one resolved value looks like, for a report.
+ *
+ * A probe that cannot be run against every version it will meet has to say what it
+ * found rather than only whether it was happy: "the marked field is a number" and "the
+ * field is missing" are different facts about a Host, and a bare boolean hides which one
+ * a run met.
+ * @param value - one field of a resolved config.
+ * @returns a short description of its shape.
+ */
+function describeValue(value) {
+  if (value === undefined) return 'absent'
+  if (value === null) return 'null'
+  if (typeof value !== 'object') return typeof value
+  if (Array.isArray(value)) return `array(${value.length})`
+  const keys = Object.keys(value).slice(0, 4).join(',')
+  return typeof value.get === 'function' ? 'live reference' : `object{${keys}}`
+}
+
+/**
+ * What a reader of the Plugins page would find, and what the calls that were tried
+ * answered.
+ *
+ * Two facts, and they are deliberately separate:
+ *
+ * - **`fields`** — the marked leaves the Host would serve a form for. This is the gate
+ *   `volatileForm` applies, and it is what a form's existence depends on, so it is what
+ *   a build fails on.
+ * - **`values`** — how the resolved value of each marked field looked, per call shape.
+ *   A marked field is supposed to resolve to a live reference the form writes through,
+ *   and reporting what it actually resolved to is how a version this probe cannot be
+ *   run against locally stays diagnosable.
+ *
+ * @param schema - the plugin's `Config`, built by the resolved library.
+ * @param sample - a config to resolve, or undefined to resolve the defaults.
+ * @returns `{ fields, live, shapes, values }`.
+ */
 export function inspectSchema(schema, sample = undefined) {
   const fields = markedFields(schema)
   const attempts = resolutionsOf(schema, sample)
   const shapes = attempts.map(attempt => attempt.shape)
+  const values = {}
   let live = false
   for (const attempt of attempts) {
-    if (attempt.value === undefined) continue
-    const marked = fields.find(name => name.split('.')[0] === 'delaySeconds')
+    if (attempt.value === undefined) {
+      values[attempt.shape] = 'no value'
+      continue
+    }
     const candidate = attempt.value.delaySeconds
-      ?? (marked === undefined ? undefined : attempt.value[marked.split('.')[0]])
+    values[attempt.shape] = describeValue(candidate)
     if (candidate !== null && typeof candidate === 'object' && typeof candidate.get === 'function') {
       live = true
-      break
     }
   }
-  return { fields, live, shapes }
+  return { fields, live, shapes, values }
 }

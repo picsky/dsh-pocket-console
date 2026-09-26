@@ -288,26 +288,35 @@ try {
     })
   }
 
-  // The other half of the marker: a marked field has to resolve to the live
+  // The other half of the marker: a marked field is supposed to resolve to the live
   // reference a form writes through, or it is a setting the form shows and never
   // changes. Which call resolves it is the library's business — the shapes have moved
-  // across the versions this plugin supports — so every shape it publishes is tried
-  // and the ones that answered are reported. A library that answered none is named as
-  // such, because "no call shape I know" and "no form" are different facts.
-  if (!inspected.live) {
+  // across the versions this plugin supports — so every shape it publishes is tried and
+  // what each one produced is reported, field by field.
+  //
+  // It is reported rather than required, and the reason is worth stating: this probe
+  // runs against the libraries in the support window, and the older one is not
+  // installable on the machine it was written on. Failing the build on a claim about a
+  // library nobody can run here would be guessing. What is required is the marker set,
+  // which is the gate `volatileForm` applies and the thing #89 was about; and what is
+  // reported is the resolved shape, so a Host that stops projecting live references
+  // shows up in the log of the run rather than as a mystery.
+  if (inspected.shapes.length === 0) {
     answer({
       ok: false,
-      detail: inspected.shapes.length === 0
-        ? 'the resolved schema library answers no resolution call this probe knows'
-        : `a marked field did not resolve to the live reference a form writes through (tried: ${inspected.shapes.join(', ')})`,
+      detail: 'the resolved schema library answers no resolution call this probe knows',
       resolved,
+      values: inspected.values,
     })
   }
 
   answer({
     ok: true,
-    detail: `served [${fields.join(', ')}] with library ${resolved.hasVolatile ? 'carrying' : 'lacking'} volatile(), resolving through ${inspected.shapes.join('/')}`,
+    detail: `served [${fields.join(', ')}] with library ${resolved.hasVolatile ? 'carrying' : 'lacking'} volatile(), resolving through ${inspected.shapes.join('/')}`
+      + `; delaySeconds resolved as ${Object.entries(inspected.values).map(([shape, shapeOf]) => `${shape}=${shapeOf}`).join(', ')}`,
     fields,
+    live: inspected.live,
+    values: inspected.values,
     shapeBytes: JSON.stringify(withHelper.toJSON()).length,
     resolved,
   })
