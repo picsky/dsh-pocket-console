@@ -34,7 +34,7 @@
  * Prints one JSON line: `{ ok, detail, fields?, resolved? }`.
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { dirname, join, parse } from 'node:path'
 import { inspectSchema } from '../tests/support/host-schema.mjs'
@@ -81,6 +81,23 @@ function findPackage(from, specifier) {
     if (parent === current || current === parse(current).root) return undefined
     current = parent
   }
+}
+
+/**
+ * Whether the library lives in the directory the running Node resolves from.
+ *
+ * This is the fallback the profile layout makes necessary. A profile may install its
+ * packages as links into a store — the runner's 0.1.7 profile has no `@deepseek-ai`
+ * directory of its own at all, while its plugin activates and therefore did resolve the
+ * library — and a link is followed by Node, not by a walk over the links' own parent
+ * directories. So the search is run a second time in the shape the loader itself uses:
+ * from the directory holding the interpreter, which is the tree the application was
+ * installed into.
+ * @param specifier - package name, such as `schemastery`.
+ * @returns the package directory, or undefined.
+ */
+function packageBesideNode(specifier) {
+  return findPackage(dirname(process.execPath), specifier)
 }
 
 /**
@@ -258,12 +275,13 @@ try {
   // The library this deployment resolved, wherever it resolved it from: the
   // directories named by the caller first, then the installed plugin's own tree.
   const roots = [...searchRoots, pluginDir]
-  const libraryDir = findSchemaLibrary(roots)
+  const libraryDir = findSchemaLibrary(roots) ?? packageBesideNode('schemastery')
   const entry = schemaEntry(libraryDir)
   if (entry === undefined) {
     answer({
       ok: false,
       detail: `no @deepseek-ai/schemastery resolves from any of ${roots.join(', ')}`
+        + `, nor from the interpreter's own tree (${dirname(process.execPath)})`
         + ` — layout: ${roots.map(describeRoot).join(' | ')}`,
     })
   }
