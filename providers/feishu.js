@@ -67,6 +67,25 @@ const SEND_TIMEOUT_MS = 20_000
 /** Button styles Feishu accepts. */
 const BUTTON_TYPES = new Set(['default', 'primary', 'danger'])
 
+/**
+ * What one input box holds, and the cap the platform puts on it.
+ *
+ * `max_length` is a hard platform ceiling — the accepted range is `[1,1000]` and it cannot be raised —
+ * so the number is stated here rather than inherited from the platform's own default. The copy beside
+ * each box says it too: a reader whose first prompt is long should learn the limit from the card, not
+ * from a client-side error after typing past it. Two surfaces now carry an instruction, and this one is
+ * the short one — the chat is where a long one goes. See `internal/feishu-limits.md` §3.1.
+ *
+ * The box is multi-line for the same reason the limit is worth stating: on a phone a single-line box
+ * shows one line of a whole prompt, so what was typed cannot be read back before it is sent. Three
+ * rows rather than the platform's default five, because the result card carries two of these boxes and
+ * every reader pays for the height. `auto_resize` and `max_rows` are deliberately not sent: they are
+ * PC-only fields, so they would be card content that only one of the two surfaces can use.
+ */
+export const INPUT_MAX_LENGTH = 1000
+/** The rows one input box shows. See {@link INPUT_MAX_LENGTH} for why it is not the platform default. */
+export const INPUT_ROWS = 3
+
 /** Header templates per channel-neutral tone. */
 const TEMPLATES = {
   warning: 'orange',
@@ -290,6 +309,26 @@ const button = (label, tone, payload) => ({
 })
 
 /**
+ * One input box, declared the same way wherever a card offers one.
+ *
+ * Both boxes a card can carry — the answer, and the note that rides beside a multi-select's choices —
+ * are this one function's output, so the fields the platform is asked for cannot drift between them:
+ * a card that offered a multi-line box in one place and a single-line one in another would be a
+ * difference nobody chose. See {@link INPUT_MAX_LENGTH} for what the fields are and why.
+ * @param name - the form-scoped field name the submit reads back.
+ * @param placeholder - what the box says it is for, the view's own or the copy's fallback.
+ * @returns the input element.
+ */
+const inputBox = (name, placeholder) => ({
+  tag: 'input',
+  name,
+  placeholder: plainText(placeholder),
+  input_type: 'multiline_text',
+  rows: INPUT_ROWS,
+  max_length: INPUT_MAX_LENGTH,
+})
+
+/**
  * Render one channel-neutral view as a card JSON 2.0 document.
  *
  * Exported because the body budget is a property of this function and is only checkable by handing it
@@ -359,14 +398,10 @@ export function renderCard(view, messages, onFit = () => {}, onDegrade = () => {
       name: `form_${index}`,
       elements: [
         form.options === undefined
-          ? {
-              tag: 'input',
-              name: name(form.fieldId),
-              // A view may name its own placeholder, which matters when two forms share one card:
-              // the answer box and the next-task box ride the same result card, and a shared
-              // placeholder would make them read as the same control.
-              placeholder: plainText(form.placeholder ?? messages().answerPlaceholder),
-            }
+          // A view may name its own placeholder, which matters when two forms share one card: the
+          // answer box and the next-task box ride the same result card, and a shared placeholder
+          // would make them read as the same control.
+          ? inputBox(name(form.fieldId), form.placeholder ?? messages().answerPlaceholder)
           : {
               tag: 'checker',
               name: name(form.fieldId),
@@ -379,7 +414,7 @@ export function renderCard(view, messages, onFit = () => {}, onDegrade = () => {
         // pair the desktop card offers; one submit carries both names.
         ...(form.customFieldId === undefined
           ? []
-          : [{ tag: 'input', name: name(form.customFieldId), placeholder: plainText(messages().notePlaceholder) }]),
+          : [inputBox(name(form.customFieldId), messages().notePlaceholder)]),
         {
           ...button(form.submitLabel, 'primary', { ...form.payload, submits }),
           form_action_type: 'submit',
