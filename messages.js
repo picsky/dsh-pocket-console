@@ -103,6 +103,17 @@ const zh = {
   emptyInstruction: '指令为空，未发送',
   noAgent: '会话已不在运行，指令未发送',
   sent: '已发送给 agent',
+  /**
+   * What the reader is told when the session was already working and the instruction had to wait.
+   *
+   * A reply used to be steered into the turn in flight, which is the behaviour this wording replaces:
+   * the instruction went inside work the reader never saw, and against a goal round it did not even
+   * hold the goal back. Waiting is what the reader can act on, so it is what they are told — and when
+   * a goal round is what is running, the wait has the round's own number, which is the same number
+   * the card shows.
+   */
+  sentQueued: '**已排队**：当前这一轮跑完就轮到它。',
+  sentQueuedRound: (round, max) => `**已排队**：目标第 ${round}/${max} 轮跑完就开始。`,
   notSent: '**没能送出去**，这条指令没有进入会话。输入框还在，请再试一次。',
   received: '**已收到指令**，已排入该会话。',
   workIntro: '在一个**新会话**里开一轮，工作区沿用这个会话的。',
@@ -153,7 +164,7 @@ const zh = {
   /** Typed messages: the help text, the hints, and the two ways an instruction can fail. */
   helpText: [
     '这个机器人怎么用：',
-    '· **引用回复**一张卡（结果卡/执行中卡）= 把下一步交给那个会话；跑着的时候会插进当前那一轮。',
+    '· **引用回复**一张卡（结果卡/执行中卡）= 把下一步交给那个会话；它正在跑的时候，你的话**排在当前这一轮之后**，不会插进去打断它。',
     '· 引用一张卡后发 **`/new <内容>`** = 在那个卡的工作区里开一个**新会话**（工作区沿用，不能自己选）。',
     '· 引用一张**提问卡**，直接把你想要的答案写在消息里 = 那就是这道题的答复（选项文字写对就是选它，写别的就是"其他"）。',
     '· 引用一张**审批卡**，回「**允许**」或「**拒绝**」= 和按按钮一样（只认这两个词）。',
@@ -284,7 +295,8 @@ const zh = {
   logNoticeRestoreEmpty: '上次运行没有留下结果通知。',
   logNoticeRestoreRetired: (rid, reason) => `恢复通知 ${rid} 时作废：${reason}`,
   logInstructionQueued: '已把手机上的指令排入会话。',
-  logInstructionSteered: '会话正在跑，已把手机上的指令作为 steer 送进当前这一轮。',
+  logQueuedNotTaken: id => `排队的指令没有被会话取走（消息 ${id}），已改用 steer 送进会话。`,
+  logQueuedNotTakenNoSteer: id => `排队的指令没有被会话取走（消息 ${id}），而这个 agent 不支持 steer，指令没有送达。`,
   /** The face of a result card for a turn that stopped before it finished. */
   noticeUnfinished: (kind, why) => {
     const headline = kind === 'max-tokens'
@@ -365,6 +377,8 @@ const en = {
   emptyInstruction: 'The instruction was empty, so nothing was sent',
   noAgent: 'That session is no longer running, so nothing was sent',
   sent: 'Sent to the agent',
+  sentQueued: '**Queued** — it starts when the turn in flight ends.',
+  sentQueuedRound: (round, max) => `**Queued** — it starts after goal round ${round} of ${max}.`,
   notSent: '**It did not get through** — the instruction never reached the session. The box is still there, so please try again.',
   received: '**Instruction received** and queued for that session.',
   workIntro: 'Start a turn in a **new session**, using this one\'s workspace.',
@@ -404,7 +418,7 @@ const en = {
   logFullAccessFailed: 'reading or writing the permission presets failed.',
   helpText: [
     'How this bot is used:',
-    '· **Reply to a card** (a result card or the running card) = hand the next step to that session; if it is running, it is steered into the current turn.',
+    '· **Reply to a card** (a result card or the running card) = hand the next step to that session; while it is running, your message **waits for the turn in flight** rather than interrupting it.',
     '· Reply to a card and start with **`/new <what to do>`** = open a **new session** in that card\'s workspace (inherited, never chosen).',
     '· Quote a **question card** and write the answer as the message = that is the answer (an option\'s exact words select it; anything else is the typed answer).',
     '· Quote an **approval card** and reply **`allow`** or **`reject`** = the same as pressing the button (those two words only).',
@@ -520,7 +534,8 @@ const en = {
   logNoticeRestoreEmpty: 'the last run left no result notices behind.',
   logNoticeRestoreRetired: (rid, reason) => `restored notice ${rid} was retired: ${reason}`,
   logInstructionQueued: 'the instruction from the phone was queued for the session.',
-  logInstructionSteered: 'the session was already running, so the instruction from the phone was steered into its current turn.',
+  logQueuedNotTaken: id => `a queued instruction was never taken by its session (message ${id}), so it was steered into the session instead.`,
+  logQueuedNotTakenNoSteer: id => `a queued instruction was never taken by its session (message ${id}) and this agent cannot steer, so the instruction was not delivered.`,
   noticeUnfinished: (kind, why) => {
     const headline = kind === 'max-tokens'
       ? '**The output hit its ceiling** and this turn was cut off before it finished.'

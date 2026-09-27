@@ -81,6 +81,23 @@ line, the channel and the artifact checks; no plugin behaviour changes.
 
 ### Fixed
 
+- **A reply typed while the session is working is now queued behind it instead of being steered into
+  it.** A reply sent from the phone reached a running turn through `agent.steer()`, which puts the
+  reader's words *inside* that turn at its next step boundary and holds the turn open until they are
+  consumed (`dsh-agent-loop/lib/index.js:800-814`, `:983-990`): the work in flight is commandeered,
+  and the reader never saw it. Against an automatic goal round it was worse — a steered message lands
+  in `next-step`, while the goal driver's competing-input rule reads `next-turn`
+  (`dsh-goal-round-driver/lib/index.js:237-244`) — so the round was hijacked *and* the goal carried on
+  afterwards, and the instruction never became a turn of its own. A reply is now queued as a turn of
+  its own, the door the harness's own client uses for a person speaking
+  (`dsh-api-session-controller/lib/index.js:882-883`), the reader is told it is waiting — naming the
+  goal round when one is running — and a goal waits for them the way the host's own rules intend.
+  Queueing is not proof, and this repository has measured that: a follow-up queued against a running
+  session was once observed never to open its turn (`internal/boundaries.md`). So the queue is
+  **watched**: the message's own `user/message` event is the proof of admission, and a session that
+  goes idle without it gets the instruction through `steer` as a fallback, with the phenomenon written
+  to the deployment log. Supersedes [0023](docs/decisions/0023-a-reply-into-a-running-session-steers.md);
+  see [0038](docs/decisions/0038-a-reply-is-queued-behind-the-turn-in-flight.md). (#123)
 - **A goal's automatic round is a card that says what it is.** A session with an active goal keeps
   working after a round ends — `dsh-goal-round-driver` opens the next one the moment the agent goes
   idle, with a `<goal_round>` prompt whose source is `{ kind: 'goal' }`

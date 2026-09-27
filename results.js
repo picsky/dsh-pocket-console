@@ -227,6 +227,19 @@ export function createResultNotifier({
   /** Per-session observation: the newest turn, its last message, and when we last spoke. */
   const tracks = new Map()
   /**
+   * Instructions this plugin queued into a session that was already working, until that session
+   * proves what became of them.
+   *
+   * `followup` returns void, and a queued turn is not a delivered turn: on the real machine one was
+   * observed never to open at all — the notice was consumed, the card moved, and no turn ever came
+   * (`internal/boundaries.md`). The proof of admission is the message's own `user/message` event,
+   * which is the same field the host's goal driver reads to answer the same question
+   * (`dsh-goal-round-driver/lib/index.js:258-259`); a session that goes **idle** without it never
+   * took the message, and that is when the fallback in {@link resolveQueued} runs. Keyed by session,
+   * because one session has at most one instruction waiting on this.
+   */
+  const queued = new Map()
+  /**
    * Notices whose rid is still live, keyed by that rid.
    *
    * Each notice also carries the card it went out as, under {@link VIEW}, because a notice's card is
@@ -1082,6 +1095,15 @@ export function createResultNotifier({
   /** Observe one session event. */
   const onEvent = (session, event) => {
     if (session?.id === undefined) return
+    // The proof that a queued instruction was admitted is its own event, and it arrives before the
+    // `turn/start` that opens the turn holding it — the host's goal driver reads the same field for
+    // the same question (`dsh-goal-round-driver/lib/index.js:258-259`). Read before anything else,
+    // because whether an instruction was delivered must not depend on what the rest of this handler
+    // decides to do with the event.
+    if (event.type === 'user/message' && queued.size > 0) {
+      const waiting = queued.get(session.id)
+      if (waiting !== undefined && event.data?.id === waiting.id) resolveQueued(session.id, true)
+    }
     const source = event.data?.source ?? event.data?.message?.source
     // Only a session a person started is worth reporting; a delegated one is reported through the
     // session that asked for it. That sentence used to stand over a test of `source.kind === 'user'`
@@ -1268,24 +1290,29 @@ export function createResultNotifier({
       }).then(() => { log.info(messages().logNoticeStored(id)) }).catch(() => {})
       return { toast: messages().notSent, accepted: false }
     }
-    return { toast: messages().sent, accepted: true }
+    return { toast: delivered, accepted: true }
   }
 
   /**
    * Hand one instruction to the session, then record it on the notice's own message.
    *
-   * The return value is the whole point: `true` only once the instruction has actually been given
-   * to the agent. Everything after that — the card rewrite, the durable bookkeeping — is about a
-   * card, not about the instruction, and a failure there must not be reported as a failure to send.
-   * The caller answers the reader's toast on this value, so "the instruction did not go" and "the
-   * card did not get rewritten" stay distinguishable.
+   * The return value is the whole point: it is the line the reader is answered with, and it is only
+   * produced once the instruction has actually been given to the agent. Everything after that — the
+   * card rewrite, the durable bookkeeping — is about a card, not about the instruction, and a failure
+   * there must not be reported as a failure to send. The caller answers the reader's toast on this
+   * value, so "the instruction did not go" and "the card did not get rewritten" stay distinguishable
+   * — and so a reply that has to wait says that it is waiting, which is the one thing a reader can
+   * act on when a session is in the middle of a long run.
    *
    * @param agent - the session's live agent.
    * @param text - what the reader typed.
    * @param notice - the notice the reply was made against.
-   * @returns whether the instruction was queued in the session.
+   * @returns the line to answer the reader with, or `false` when the instruction never reached the
+   *   session.
    */
   async function send(agent, text, notice) {
+    /** What the reader is told this reply did, once the instruction has reached the session. */
+    let toastAnswer = messages().sent
     try {
       // A reply typed on the phone is a person at the phone, so the head start stops
       // applying to whatever this session does next. Re-timed on the spot, so the calm
@@ -1306,20 +1333,41 @@ export function createResultNotifier({
         // injected context instead.
         source: { kind: 'user' },
       })
-      // Which of the two doors this instruction goes through depends on whether the session is
-      // already working, and the difference is not cosmetic: `followup` queues a turn of its own,
-      // and on the real machine a follow-up queued against a **running** session was never
-      // delivered — the notice was consumed, the card turned into a run, and no turn ever came of
-      // it. Steering is the harness's own answer for a person speaking while it works: the running
-      // driver consumes it at its next step boundary, and an idle one starts a turn. See issue #50.
-      if (agent.status === 'running' && typeof agent.steer === 'function') {
-        agent.steer(message)
-        log.info(messages().logInstructionSteered)
-        diagnostics(`回复：会话正在跑，指令以 steer 送进当前这一轮（消息 ${String(notice.handle ?? '')}）。`)
-      } else {
-        agent.followup(message)
-        log.info(messages().logInstructionQueued)
+      // **A reply typed while the session works is queued, not steered.** `steer` puts the reader's
+      // words inside the turn already running — at its next step boundary, with the turn held open
+      // until they are consumed (`dsh-agent-loop/lib/index.js:800-814`, `:983-990`) — so it
+      // commandeers work the reader never saw. Against a goal round it is worse than rude: a steered
+      // message lands in `next-step`, while the driver's competing-input rule reads `next-turn`
+      // (`dsh-goal-round-driver/lib/index.js:237-244`), so the round in flight is hijacked *and* the
+      // goal carries on afterwards — the report that produced this change. `followup` is the door the
+      // harness's own client uses for a person speaking (the gateway steers only when the caller asks
+      // for it by name, `dsh-api-session-controller/lib/index.js:882-883`): it queues a turn of its
+      // own, the loop drains it when the current one ends (`dsh-agent-loop/lib/index.js:1020-1024`),
+      // and the goal driver counts it as competing input — so the person is answered first and the
+      // goal resumes after them rather than being derailed.
+      //
+      // Queueing is not proof, which is why a queued instruction is watched rather than announced as
+      // delivered. See `queued`.
+      const running = agent.status !== 'idle'
+      agent.followup(message)
+      log.info(messages().logInstructionQueued)
+      if (running) {
+        queued.set(notice.session, { id: message.id, message, agent })
+        diagnostics(`回复：会话不在空闲（status=${String(agent.status)}），指令已排队（消息 ${String(notice.handle ?? '')}，${message.id}）—— 这一轮结束后核对它是否真的开了。`)
       }
+      // What the reader is told, which is the part they can act on: an instruction handed to a session
+      // that is working waits for the turn in flight, and when a goal round is what is running, the
+      // wait has a name — the same round number the card is already showing.
+      const goal = running ? goals?.stateOf?.(notice.session) : undefined
+      const round = goal?.phase === 'active' && Number.isInteger(goal?.round) && goal.round > 0
+        && Number.isInteger(goal?.maxRounds)
+        ? { round: goal.round, maxRounds: goal.maxRounds }
+        : undefined
+      toastAnswer = !running
+        ? messages().sent
+        : round === undefined
+          ? messages().sentQueued
+          : messages().sentQueuedRound(round.round, round.maxRounds)
     } catch (error) {
       log.warn(messages().logInstructionFailed, error)
       return false
@@ -1376,7 +1424,46 @@ export function createResultNotifier({
     } catch (error) {
       log.warn(messages().logNoticeCardFailed, error)
     }
-    return true
+    return toastAnswer
+  }
+
+  /**
+   * Close the watch on one queued instruction, and take the fallback when the session never took it.
+   *
+   * Called **with proof** when the message's own `user/message` event arrives: the instruction is in
+   * the session, which is all this ever wanted to know. Called **without** proof when the session
+   * went *idle* with the instruction still unaccounted for — the loop drains everything pending
+   * before it reports idle (`dsh-agent-loop/lib/index.js:1020-1024`), so nothing is going to claim
+   * it, and the reader is owed the delivery they asked for.
+   *
+   * The fallback is `steer`, the door this plugin used for every running reply until now: on an idle
+   * driver it starts a turn of its own, which is exactly the turn the queue promised. It is a
+   * fallback and not a quiet one — the phenomenon is the one `internal/boundaries.md` recorded and
+   * could not prove a mechanism for, and the deployment log is the only place with room for it: a
+   * card rewritten minutes later would change under a reader who was told the instruction was
+   * waiting, and the platform notifies nothing for an edit.
+   * @param session - the session whose instruction is being accounted for.
+   * @param proved - `true` when the session's own event showed the message, nothing otherwise.
+   * @returns nothing.
+   */
+  const resolveQueued = (session, proved) => {
+    const pending = queued.get(session)
+    if (pending === undefined) return
+    queued.delete(session)
+    if (proved === true) return
+    try {
+      if (typeof pending.agent?.steer !== 'function') {
+        // Nothing left to try, and saying so is the whole difference between a lost instruction and
+        // a lost instruction nobody hears about.
+        log.warn(messages().logQueuedNotTakenNoSteer(String(pending.id)))
+        return
+      }
+      pending.agent.steer(pending.message)
+      log.warn(messages().logQueuedNotTaken(String(pending.id)))
+      diagnostics(`回复：排队的指令没有被会话取走（消息 ${pending.id}），已改用 steer 送进会话。`)
+    } catch (error) {
+      log.warn(messages().logInstructionFailed, error)
+    }
   }
 
   return {
@@ -1387,12 +1474,24 @@ export function createResultNotifier({
     install() {
       disposed = false
       const off = ctx.on('session/event', onEvent)
+      // The other end of the watch on queued instructions: a session that reaches **idle** with one
+      // still unaccounted for has drained everything it was going to run
+      // (`dsh-agent-loop/lib/index.js:1020-1024`), so nothing will claim it. The message's own event
+      // is the confirming half, read in {@link onEvent}; this is the one that acts.
+      const offStatus = ctx.on('agent/status', ({ agent, status }) => {
+        if (status !== 'idle' || agent?.id === undefined) return
+        resolveQueued(agent.id, undefined)
+      })
       // Tried here as well as when the storage service arrives: whichever finds the
       // medium up does the work, and the other becomes a no-op.
       void restore().catch(error => { log.warn(messages().logNoticeRestoreFailed, error) })
       return () => {
         disposed = true
         off()
+        offStatus()
+        // A watch that outlived its deployment would steer into a session nobody is watching any
+        // more: the instruction is not this plugin's to deliver once it is unloaded.
+        queued.clear()
         for (const track of tracks.values()) {
           if (track.timer !== undefined) clearTimeout(track.timer)
         }
