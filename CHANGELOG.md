@@ -4,14 +4,22 @@ Notable changes, newest first. A version names the point in the history it was c
 `git log` can fill in the detail. A version that was numbered in the working tree and never
 published says so, because its work ships with the next release that is.
 
-The project is pre-1.0: a minor bump can carry a behaviour change, and one is called
-out when it does.
+The version line is a promise from 1.0 on: a breaking change to what a deployment configures or
+calls is a major bump, and every version names the DSH versions it was verified against.
 
 A version's GitHub Release body is assembled from two sources, Chinese first: the
 version's section of `RELEASE-NOTES.zh.md`, then this file's section for that version
 as the English half.
 
-## Unreleased
+## 1.0.0
+
+**This is the first 1.x, so the version line starts meaning something.** The batch below is what
+the 0.9.x line was reaching for: a typed message and a quoted card are answered as instructions,
+the answer words are exactly two per language, full access is a policy the deployment switches
+rather than a grant this plugin makes, the instruction box states the platform's limit, and the
+settings card is the Host's own form, staging every edit and writing them on save. From here a
+breaking change to what a deployment configures or calls — the settings keys, the `/__pocket`
+routes, the card, the channel contract — is a major bump; anything else is a minor or a patch.
 
 **A release is a batch a person has run, and `latest` only ever points at one.** Three stable
 versions went out in one afternoon while one problem was being fixed — 0.9.3, 0.9.4, 0.9.5 —
@@ -194,8 +202,12 @@ press grants.
 - **The result card's prompt line teaches the convention**, since an input box replaced by a
   convention has to say so. `/help` lists what a typed message can be.
 
-**Verified on DSH 0.1.6-alpha.1 and 0.1.7-rc.2**, which is the support window this release
-states.
+**Verified on DSH 0.1.6-alpha.1 and 0.1.7-rc.2**, which is the support window this release names.
+Both are `real composition` legs on every pull request, and again on this release's own tarball: it
+is installed into a scratch profile and booted on each harness, its routes are read, the boot
+manifest is checked for this plugin, and the client bundle the shell would serve is compared with
+the one the tarball installed. A person also ran the same build in a real profile for two days
+before this version was cut, which is the one gate no machine here can stand in for.
 
 ## 0.9.5
 
