@@ -23,6 +23,7 @@ import { createEscalation } from './escalation.js'
 import { createActivity } from './activity.js'
 import { createDiagnostics } from './diagnostics.js'
 import { isDelegated } from './delegated.js'
+import { createGoals } from './goal.js'
 import { createRunRecord } from './run-record.js'
 import { createSessionNames } from './session-names.js'
 import { createWork } from './work.js'
@@ -447,8 +448,14 @@ export async function apply(ctx, config) {
   // switch only if this host composes one, and the switch itself is DSH's own call, not ours.
   const permissions = createPermissions({ ctx, log, messages })
 
-  // The escalation machine owns the timer, the race, and the pending registry;
-  // this file only wires it to the two seams and the channel's actions.
+  // What each session's goal is doing between a person's messages. A goal keeps the session working
+  // after a round ends, and every card here is drawn at a person's sentence — so without this the
+  // phone sees a session that stopped. It is inert unless the deployment composes the goal panel, and
+  // it tells the card when a goal moves so the round cap, a pause, and completion are not silent.
+  const goals = createGoals({ ctx, messages, log, diagnostics })
+
+  // The escalation machine owns the timer, the race, and the pending registry; this file only
+  // wires it to the two seams and the channel's actions.
   escalation = createEscalation({
     log, channel, settings: settingsNow, mirror, messages, workspaces, priority, sessionNames,
     diagnostics, permissions,
@@ -458,7 +465,7 @@ export async function apply(ctx, config) {
   // while the desk has them, the run is visible where they already are.
   const activity = createActivity({
     ctx, log, channel, settings: settingsNow, messages, priority, workspaces, sessionNames,
-    diagnostics,
+    goals, diagnostics,
   })
 
   // What each run did, kept on its own account rather than on a card: the result card shows it, so
@@ -492,6 +499,9 @@ export async function apply(ctx, config) {
     activity,
     // Which session each card belongs to, for the small line under its title.
     sessionNames,
+    // What a session's goal is doing, so a round a machine started is reported as the goal's work
+    // rather than as a result the reader is expected to answer.
+    goals,
   })
 
   // The other input surface: a typed message in the chat. Built after the notifier because a quoted
@@ -510,6 +520,16 @@ export async function apply(ctx, config) {
     pending: escalation.pending(),
     /** How many runs the activity card follows, and which one it would forget next. */
     activity: { tracked: activity.tracked(), order: activity.order() },
+    /**
+     * Which sessions have a goal, and where each one stands.
+     *
+     * A goal keeps a session working between a person's messages, and the cards that say so are
+     * written when the events arrive — so a page that was just opened, or a deployment that was just
+     * restarted, would otherwise show a session sitting still. Read live for every live agent, which
+     * is what makes this answer for a session whose round happened before the page asked. Nothing
+     * secret: a phase, a round, a cap, and one clipped line of the objective the person wrote.
+     */
+    goal: goals.report(),
     enrollment: await channel.enrollmentState?.() ?? { state: 'unsupported' },
     ...mirror.state(),
   })
@@ -572,6 +592,11 @@ export async function apply(ctx, config) {
     )
     const offResults = results.install()
     const offActivity = activity.install()
+    // The goal domain, followed so a round nobody typed is a boundary the phone can see — and so the
+    // three transitions that end a goal without the session saying anything (the round cap, a pause
+    // after an interrupted round, completion) reach the card that is already on the phone.
+    const offGoals = goals.install()
+    const offGoalCards = goals.subscribe((session) => { activity.onGoalChanged(session) })
     // What one run did, recorded per session and independently of any card. It is a third reader of
     // the same firehose rather than part of the activity card, because the card only exists while
     // the phone holds the person — and the run somebody asks about afterwards may well have happened
@@ -655,6 +680,8 @@ export async function apply(ctx, config) {
       offQuestion()
       offResults()
       offActivity()
+      offGoals()
+      offGoalCards()
       offRunRecord()
       offSessionNames()
       offRunStream()

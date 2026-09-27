@@ -29,6 +29,7 @@
     "routes.js",
     "mirror.js",
     "escalation.js",
+    "goal.js",
     "messages.js",
     "budget.js",
     "providers/feishu.js",

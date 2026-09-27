@@ -197,6 +197,26 @@ const zh = {
   activityFailed: reason => `**失败**：${reason}`,
   activityNothingYet: '（这一步还没有文本输出）',
   activityTruncated: '输出达到上限而中断，任务没有做完。',
+  /**
+   * The goal a session is working toward between a person's messages.
+   *
+   * A goal round is a turn nobody typed: the driver starts it the moment the session goes idle
+   * (`dsh-goal-round-driver/lib/index.js:123-154`). Without a line of its own the card stays on the
+   * round before, so a reader cannot tell a goal that is still working from one that has stopped —
+   * and the same is true of the three transitions that end one silently: the round cap, a pause after
+   * an interrupted round, and completion.
+   */
+  goalRunning: (round, max) => `目标进行中 · 第 ${round}/${max} 轮（自动继续）`,
+  /** An active goal the host has disarmed: still the session's goal, and nothing continues it. */
+  goalInactive: (round, max) => `目标未运行 · 第 ${round}/${max} 轮`,
+  goalPaused: '目标已暂停（本轮被打断）',
+  goalAtRoundLimit: '目标已达轮数上限，已暂停',
+  goalBlocked: '目标已受阻',
+  goalComplete: '目标已完成',
+  /** The objective, one clipped line, under the line that says which round it is on. */
+  goalObjective: objective => `**目标**：${objective}`,
+  logGoalReadFailed: reason => `读取目标状态失败：${reason}`,
+  logGoalListenerFailed: '把目标状态变化告诉卡片时出错',
   /** Label over the folded record of a finished run, on the frozen card. */
   activityProcess: '本次执行过程',
   activityFrozen: '已结束',
@@ -427,6 +447,15 @@ const en = {
   activityFailed: reason => `**Failed**: ${reason}`,
   activityNothingYet: '(no text from this step yet)',
   activityTruncated: 'the output hit its ceiling and stopped, so the work did not finish.',
+  goalRunning: (round, max) => `Goal in progress · round ${round} of ${max} (continuing automatically)`,
+  goalInactive: (round, max) => `Goal not running · round ${round} of ${max}`,
+  goalPaused: 'The goal paused (this round was interrupted)',
+  goalAtRoundLimit: 'The goal reached its round limit and paused',
+  goalBlocked: 'The goal is blocked',
+  goalComplete: 'The goal is complete',
+  goalObjective: objective => `**Goal**: ${objective}`,
+  logGoalReadFailed: reason => `reading the goal state failed: ${reason}`,
+  logGoalListenerFailed: 'telling a card that the goal moved failed',
   activityProcess: 'What this run did',
   activityFrozen: 'Finished',
   activityToolFailed: (name, reason) => `**Tool failed**: \`${name}\`${reason === '' ? '' : ` — ${reason}`}`,
