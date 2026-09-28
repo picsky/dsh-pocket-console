@@ -81,6 +81,23 @@ line, the channel and the artifact checks; no plugin behaviour changes.
 
 ### Fixed
 
+- **A goal's automatic round is a card that says what it is.** A session with an active goal keeps
+  working after a round ends — `dsh-goal-round-driver` opens the next one the moment the agent goes
+  idle, with a `<goal_round>` prompt whose source is `{ kind: 'goal' }`
+  (`dsh-goal-round-driver/lib/index.js:123-154`) — and none of that reached the phone: the card sat on
+  the finished face of the round before, with no state change and no description, so a reader could not
+  tell a session that was still working from one that had stopped. Every key here read "a person spoke"
+  (`results.js:1062` set its eligible flag only for `{ kind: 'user' }`; `activity.js:893` dropped every
+  event on a settled record but a person's own message, and `:953` turned away the rest), and the plugin
+  never read `ctx.goals` at all. A round is now a run boundary that names itself —
+  `目标进行中 · 第 N/M 轮（自动继续）`, with one clipped line of the objective, read from the goal
+  service rather than parsed out of the prompt — and the three transitions that end a goal silently (the
+  round cap, a pause after an interrupted round, and completion) are drawn in place on the card that is
+  already on the phone, with no message of their own. A card reporting a round leads with where the goal
+  stands instead of a finished result and offers no next task, an active goal the host has disarmed is
+  not drawn as one that continues, and a deployment that composes no goal panel keeps every card exactly
+  as it was (`tests/goal-round.test.mjs`, `docs/decisions/0037-a-goal-round-is-a-run-boundary.md`).
+
 - **A `github:` install is an install the entry cannot be imported from, and now it says so.**
   pnpm resolves no bundled dependency of a git dependency, so `dsh plugin --profile web add
   github:picsky/dsh-pocket-console` lands the repository with no `node_modules` at all, and the

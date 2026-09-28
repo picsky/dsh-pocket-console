@@ -26,6 +26,7 @@ import {
   refusalIsRetryable,
 } from './budget.js'
 import { isDelegated } from './delegated.js'
+import { goalLine } from './goal.js'
 import { titleOf, workspaceLabel } from './identity.js'
 import { PHONE as PRIORITY_PHONE, DESK as PRIORITY_DESK } from './priority.js'
 import { RESTORE_LIMIT, createNoticeStore } from './notice-store.js'
@@ -221,7 +222,7 @@ function runGroups(entries, dropped, copy, budget, maxGroups) {
  */
 export function createResultNotifier({
   ctx, log, channel, settings, messages, workspaces, priority, runRecord, nextTask, activity,
-  sessionNames, diagnostics = () => {}, now = () => Date.now(),
+  sessionNames, goals, diagnostics = () => {}, now = () => Date.now(),
 }) {
   /** Per-session observation: the newest turn, its last message, and when we last spoke. */
   const tracks = new Map()
@@ -335,6 +336,17 @@ export function createResultNotifier({
       track = {
         turn: undefined, message: undefined, ended: undefined,
         timer: undefined, sentAt: undefined, eligible: false, touched: now(),
+        /**
+         * The goal this turn is a round of, when a goal round opened it.
+         *
+         * A goal round is a turn nobody typed: the driver starts it the moment the session goes idle,
+         * with `source: { kind: 'goal' }` (`dsh-goal-round-driver/lib/index.js:123-154`). The round is
+         * still a turn that ends, and what it has to report is where the goal stands rather than a
+         * finished result — a card that reads like a completed piece of work is exactly what made a
+         * reader believe the session had stopped. Cleared when a person speaks, because the run that
+         * follows is theirs.
+         */
+        goal: undefined,
       }
       tracks.set(session, track)
     } else {
@@ -449,12 +461,22 @@ export function createResultNotifier({
     // session kept working, and the newer one owns the next notice.
     if (!track.eligible || track.ended === undefined || track.ended !== track.turn) return
     const unfinished = track.reason !== undefined && track.reason.kind !== 'completed'
+    // Where the goal stands at the moment this fires, read live rather than taken from the round's
+    // opening snapshot: a round ending is exactly when the goal's own transitions land — the cap, a
+    // pause after an interrupted round, completion — and the state the round began with is the one
+    // that says the least.
+    const goalState = track.goal === undefined ? undefined : (goals?.stateOf?.(session) ?? track.goal)
+    const goalText = goalLine(goalState, messages())
     // A turn that **ran to the end** is only worth a card when it ended on an answer: an intermediate
     // round that ended on a tool call is process, not a result, and the card would be asking the
     // reader to reply to something that was never said. A turn that **stopped short** is worth one
     // whatever it ended on, because the news is that it stopped — and it very often ends on the
     // message that called the tool that failed, which carries no text at all.
-    if (!unfinished && !isAnswer(track.message)) return
+    //
+    // A **goal round** is the third case, and it is the one this module used to drop: what it has to
+    // say is where the goal stands, and a round that ended on a tool call with the goal still going is
+    // precisely the state a reader cannot tell from a session that has stopped.
+    if (!unfinished && !isAnswer(track.message) && goalText === undefined) return
     const delay = settings().resultNotifyCooldownSeconds * 1000
     if (track.sentAt !== undefined && now() - track.sentAt < delay) {
       log.debug(messages().logNoticeCooling)
@@ -476,7 +498,19 @@ export function createResultNotifier({
     const id = noticeId()
     // What the face says. A long result would otherwise be refused by the platform and the notice
     // would never arrive, which is worse than a clipped one that says so.
-    const face = faceOf(track)
+    //
+    // A goal round leads with where the goal stands, because that is the news a reader cannot get
+    // anywhere else: a card that opens on the round's own last words reads as a finished piece of
+    // work. Its objective goes under the line — one clipped line, so the reader knows *which* goal is
+    // still running — and the round's words follow. Only when the round stopped short does the old
+    // headline stand in for words it never said; a goal round that simply ended with nothing to report
+    // is not a failure, and saying "这一轮出错了" over it would be the lie this change exists to avoid.
+    const said = isAnswer(track.message) ? track.message.text : (track.spoke ?? '')
+    const goalLines = goalText === undefined
+      ? []
+      : [goalText, ...(goalState?.objective === undefined ? [] : [messages().goalObjective(goalState.objective)])]
+    const news = said !== '' ? [said] : unfinished ? [faceOf(track)] : []
+    const face = [...goalLines, ...news].join('\n\n')
     let answer = clipToBytes(face, messages().truncated)
     // One live notice per session: the newest result is the one worth replying
     // to, and an older card that still accepted a reply would inject an
@@ -555,13 +589,17 @@ export function createResultNotifier({
       // Derived from the body rather than from the copy: matching sentences would break silently the
       // day the wording changes, and the failure is a card that lies about what it can do.
       const ends = Math.max(1, base.body.length - 1)
-      if (priority?.get?.() !== PRIORITY_PHONE) return { ...base, [RESULT_ENDS]: ends }
+      // The goal's own machinery decides what comes next, so a card reporting a goal round offers no
+      // next task: an offer to start something else reads as "this is over", which is the belief that
+      // had a reader type into a session that was still working. The goal line above the answer already
+      // says what the state is — running, paused, capped, or done.
+      if (priority?.get?.() !== PRIORITY_PHONE || goalText !== undefined) return { ...base, [RESULT_ENDS]: ends }
       const merged = typeof nextTask?.mergeInto === 'function' ? nextTask.mergeInto(base, session) : base
       return { ...merged, [RESULT_ENDS]: ends }
     }
     /** Assemble the card once, so the marker, the fold and the offer cannot disagree. */
     const cardFor = (text) => {
-      const base = { ...view, body: [text, messages().replyHint] }
+      const base = { ...view, body: [...goalLines, text, messages().replyHint] }
       return offer(base)
     }
     // Declared out here because the failure path reads it: what the platform refused decides what
@@ -1059,8 +1097,25 @@ export function createResultNotifier({
       return
     }
     const track = trackOf(session.id)
+    // A goal round is a turn nobody typed, and it is reportable work like any other: the driver opens
+    // it with a `user/message` whose source is `{ kind: 'goal' }`
+    // (`dsh-goal-round-driver/lib/index.js:123-154`, `:134-142`). Every key in this module used to
+    // read "a person spoke", so `eligible` stayed false and the round's `turn/end` produced no card at
+    // all — which is how a session that kept working looked exactly like one that had stopped.
+    //
+    // It is deliberately **not** treated as a person's message: no desk-presence signal is read off
+    // it, and the live notice is not retired, because the reply box on that notice is still the
+    // reader's to use. A machine continuing its own work is not somebody speaking.
+    if (event.type === 'user/message' && goals?.roundOf?.(event) !== undefined) {
+      track.eligible = true
+      track.goal = goals.stateOf(session.id) ?? undefined
+      return
+    }
     if (event.type === 'user/message' && source?.kind === 'user') {
       track.eligible = true
+      // The run this opens is the person's; a goal round that was being reported is no longer what
+      // the session is doing in front of them, though the goal itself carries on.
+      track.goal = undefined
       // Somebody spoke — at the desk or from the phone. Whatever the notice
       // carried is no longer the session's latest word, so it stops taking
       // replies instead of injecting one into a conversation that moved on.

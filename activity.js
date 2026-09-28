@@ -31,6 +31,7 @@
 
 import { CARD_TEXT_BUDGET, classifyRefusal, clipTailToBytes, clipToBytes, flattenViewTables } from './budget.js'
 import { isDelegated } from './delegated.js'
+import { goalLine } from './goal.js'
 import { titleOf, workspaceLabel } from './identity.js'
 import { PHONE } from './priority.js'
 
@@ -125,7 +126,7 @@ const rawBytes = (value) => Buffer.byteLength(String(value ?? ''), 'utf8')
  */
 export function createActivity({
   ctx, log, channel, settings, messages, priority, workspaces, sessionNames,
-  diagnostics = () => {}, now = () => Date.now(),
+  goals, diagnostics = () => {}, now = () => Date.now(),
 }) {
   /** One record per session being shown: what it is doing, and the message its card lives in. */
   const activities = new Map()
@@ -258,6 +259,20 @@ export function createActivity({
       workspace: undefined,
       turn: undefined,
       step: undefined,
+      /**
+       * The goal this run is a round of, when a goal round is what opened it.
+       *
+       * A goal round is a turn nobody typed: the driver starts it the moment the session goes idle,
+       * with a `<goal_round>` prompt and a `{ kind: 'goal' }` source
+       * (`dsh-goal-round-driver/lib/index.js:123-154`). Every other boundary on this card is drawn at
+       * a person's sentence, so without this a round would be folded into the run before it and the
+       * card would sit on the finished face of a session that is working again. Set from the round's
+       * own message and cleared when a person speaks, because the run a person starts is theirs.
+       *
+       * What a card draws from it is the state in force *now* — the round number, the cap, the
+       * objective, and the phase the goal has since moved to — rather than this snapshot.
+       */
+      goal: undefined,
       /** The tool being waited on, for the status line. */
       tool: undefined,
       /** The last tool called, because a tool result names no tool of its own. */
@@ -377,6 +392,26 @@ export function createActivity({
   }
 
   /**
+   * The goal state this record's card draws from, or undefined when this run is not a goal round.
+   *
+   * The live state wins over the snapshot the round was recorded with, because the three transitions
+   * that end a goal — the round cap, a pause after an interrupted round, completion — append nothing
+   * to the session log this card follows. The goal domain's own event is what says they happened, and
+   * {@link module:pocket-console/goal}'s map is where that landed.
+   *
+   * The state of a **different** goal is not used. A completed goal can be replaced by a new one, and
+   * the new goal's first round is not the round this card is about: rendered from it, the card would
+   * say "round 1" about a run that is on round four.
+   * @param record - the session's record.
+   * @returns the state to draw, or undefined.
+   */
+  const goalOf = (record) => {
+    if (record.goal === undefined) return undefined
+    const live = goals?.stateOf?.(record.session)
+    return live !== undefined && live.id === record.goal.id ? live : record.goal
+  }
+
+  /**
    * What the run is doing, in one word.
    *
    * Read from the agent rather than derived from the log: the log is the record of what
@@ -389,6 +424,12 @@ export function createActivity({
     // A failure outranks the turn being over: every failed turn ends, and reporting the end
     // instead of the failure would hide the one thing the reader has to act on.
     if (record.failed !== undefined) return copy.activityError
+    // A goal round is the one run whose status is not "what is the agent doing": a round that has
+    // ended and a goal that is still going look identical from here, and the goal's own state is the
+    // only thing that tells them apart. It outranks the frozen face for that reason — a card that
+    // says 已结束 over a session that will work again is the silence this line exists to end.
+    const goal = goalLine(goalOf(record), copy)
+    if (goal !== undefined) return goal
     if (record.settled) return copy.activityFrozen
     if (record.tool !== undefined) return copy.activityWaiting
     return copy.activityRunning
@@ -503,16 +544,28 @@ export function createActivity({
    */
   const buildView = (record, budget = CARD_TEXT_BUDGET) => {
     const copy = messages()
-    const parts = [statusOf(record, copy)]
+    const goal = goalOf(record)
+    const goalText = goalLine(goal, copy)
+    const parts = [goalText ?? statusOf(record, copy)]
     // The step is named only once it is known: a turn that has started but whose first step
     // has not been announced yet has no step number, and printing one would print `undefined`.
-    if (record.turn !== undefined && record.step !== undefined) {
+    //
+    // A goal round names itself by its round and its cap instead, and the turn it runs in is a
+    // different counter: `turn 9 · round 3/8` beside each other reads as one number that disagrees
+    // with itself, which is worse than saying less. The round is the one a reader is following.
+    if (goalText !== undefined) {
+      // Nothing beside it: the goal line carries the number that matters.
+    } else if (record.turn !== undefined && record.step !== undefined) {
       parts.push(copy.activityStep(record.turn, record.step))
     } else if (record.turn !== undefined) {
       parts.push(copy.activityTurn(record.turn))
     }
     parts.push(copy.activityElapsed(Math.max(0, Math.round((now() - record.startedAt) / 1000))))
     const body = [`**${parts.join(' · ')}**`]
+    // What the session is working toward, since a round number alone does not say. One clipped line,
+    // carried on the run's record and not re-read: the goal may be replaced while this card is on the
+    // phone, and the card is about the goal its round belonged to.
+    if (goal?.objective !== undefined) body.push(copy.goalObjective(goal.objective))
     if (record.tool !== undefined) body.push(copy.activityTool(record.tool))
     if (record.failed !== undefined) {
       body.push(copy.activityFailed(clipToBytes(record.failed, copy.truncated, Math.min(600, budget))))
@@ -870,12 +923,14 @@ export function createActivity({
 
     // A person's own message builds the record if nothing has yet, because that sentence is the
     // anchor of everything the card will show and the `turn/start` that follows cannot restore it.
-    // Only while the phone holds the person: a record exists to feed a card, and building one for
-    // every desk session would push live ones out of a map that is bounded on purpose.
+    // A **goal round** builds one for the same reason from the other side: its message is the only
+    // event that carries the round number, and the `turn/start` behind it cannot say that the work was
+    // a machine's. Only while the phone holds the person: a record exists to feed a card, and building
+    // one for every desk session would push live ones out of a map that is bounded on purpose.
+    const boundary = type === 'user/message'
+      && (event.data?.source?.kind === 'user' || goals?.roundOf?.(event) !== undefined)
     const record = activities.get(session.id)
-      ?? (type === 'user/message' && event.data?.source?.kind === 'user' && phoneHasIt()
-        ? recordOf(session.id)
-        : undefined)
+      ?? (boundary && phoneHasIt() ? recordOf(session.id) : undefined)
     if (record === undefined) return
 
     // An event from a turn this card has already closed, or from one it has not opened yet. The
@@ -945,6 +1000,22 @@ export function createActivity({
       return
     }
     if (type === 'user/message') {
+      // A goal round is a boundary that says what it is. The driver opens one the moment the session
+      // goes idle and its source is `{ kind: 'goal' }` (`dsh-goal-round-driver/lib/index.js:123-154`,
+      // `:134-142`), so this is the only event that tells the card a machine started the work in front
+      // of the reader. It takes the run boundary and nothing of the anchor: it is **not** a person's
+      // words, and `human` is the one mark the fold has, so noting it there would put the driver's own
+      // prompt on the card as something the reader said.
+      const round = goals?.mark?.(record.session, event)
+      if (round !== undefined) {
+        const opened = record.settled
+        clearRun(record)
+        if (opened) resetFace(record)
+        record.goal = round
+        record.dirty = true
+        if (phoneHasIt()) armRefresh()
+        return
+      }
       // Only a person's own words start a run. Every other `user/message` — a subagent settling, an
       // agent-to-agent message, the injected runtime context — is part of what this run was *told*,
       // not a new thing it was asked: closing the run there would cut one answer into pieces and could
@@ -960,6 +1031,9 @@ export function createActivity({
       // step is still streaming, and clearing the stream buffers there would drop the text of a step
       // that is still going — the text the fold exists to end with.
       if (opened) resetFace(record)
+      // The run this opens is the person's. Whatever goal round was on this card stops being what the
+      // run is — the goal is the session's, and it keeps running or waiting on its own.
+      record.goal = undefined
       // What the person asked for belongs at the top of the run: it is the thing the rest of it is
       // an answer to, and the fold marks it so a reader can find it without reading the whole run.
       note(record, textOf(event.data?.content), 'human')
@@ -1131,6 +1205,26 @@ export function createActivity({
       for (const record of activities.values()) record.dirty = true
       if (tookOn) armRefresh()
       else touch()
+    },
+    /**
+     * React to a goal moving under a card that is already on the phone.
+     *
+     * The three transitions that end a goal — the round cap, a pause after an interrupted round, and
+     * completion — append nothing to the session log this card follows: the goal domain records them,
+     * and the driver acts on them, without the session saying anything a card watches. So without this
+     * the card keeps the state of the round that ended, which is precisely the silence this feature
+     * exists to end, and it is the state a reader most needs: after these three, nothing else happens
+     * on its own.
+     *
+     * A session with no card is left alone: a card is minted by the phone taking the person over, and
+     * this is not that.
+     * @param session - the session whose goal moved.
+     */
+    onGoalChanged(session) {
+      const record = activities.get(session)
+      if (record === undefined) return
+      record.dirty = true
+      if (phoneHasIt()) armRefresh()
     },
     /** How many sessions are being shown, for the suite and for diagnostics. */
     tracked: () => activities.size,

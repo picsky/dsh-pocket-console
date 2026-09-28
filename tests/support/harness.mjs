@@ -263,12 +263,17 @@ function disposePrevious() {
   /**
    * The agent registry the deployment and the cases see.
    *
-   * The real registry always hands back a session that carries its own id; the fake stores agents
-   * without one, so the id is supplied on the way in. The map is wrapped rather than copied on `get`,
-   * because a case mutates an agent in place to model a session that starts working mid-turn
-   * (`agents.get(id).status = 'running'`) and a copy would hide that from the deployment.
+   * A real agent always carries its own id — the same string as its session's, checked on the way into
+   * the registry — and a session that carries it too; the fake stores neither, so both are supplied on
+   * the way in. Both are needed: the card modules follow a run by `agent.session.id`, and the goal
+   * service resolves an agent by `agent.id` (`dsh-goal/lib/index.js:767`), so a stand-in missing
+   * either one would fail a caller the Host answers.
+   *
+   * The map is wrapped rather than copied on `get`, because a case mutates an agent in place to model a
+   * session that starts working mid-turn (`agents.get(id).status = 'running'`) and a copy would hide
+   * that from the deployment.
    */
-  const withSessionId = (id, agent) => ({ ...agent, session: { id, ...agent.session } })
+  const withSessionId = (id, agent) => ({ id, ...agent, session: { id, ...agent.session } })
   const registry = {
     set: (id, agent) => { agents.set(id, withSessionId(id, agent)); return registry },
     get: (id) => agents.get(id),
@@ -323,9 +328,54 @@ function disposePrevious() {
     },
   }
 
-  /** The session log as the query service reports it; durable, so declared above. */
-  const sessionQuery = {
+  /**
+   * The goal service, as far as this plugin reads it.
+   *
+   * `get(agent)` is the whole surface: a `GoalView` for the session whose goal is current, and
+   * `undefined` when there is none (`dsh-goal/lib/index.js:611`). Two properties of the real one are
+   * modelled rather than smoothed over, because a stand-in that accepts more than the Host does hides
+   * the caller that has stopped asking correctly:
+   *
+   * - It answers **only for the registry's live instance of that agent**. The real service asserts
+   *   exact identity and throws otherwise (`:767`), which is the branch a session whose agent has gone
+   *   takes.
+   * - `undefined` means "this session has no goal" — a goal that was cleared or replaced — and is not
+   *   the same answer as a read that failed, which is a throw. The plugin distinguishes them, so a
+   *   case can hold a session whose goal is gone without also making the read fail.
+   *
+   * Nothing here is composed unless a case asks for it: `goals` is not part of the default service
+   * list, so every other case in the suite runs on a deployment without the goal panel — which is the
+   * shape the plugin has to keep working in.
+   */
+  const goals = {
+    /** What `get` answers per session id: a `GoalView`, or nothing for no current goal. */
+    views: new Map(),
     /**
+     * Publish one session's current goal, the way the host's projection would report it.
+     * @param session - the session id.
+     * @param view - the `GoalView`, or undefined for a session with no current goal.
+     * @returns this service, for chaining.
+     */
+    set(session, view) {
+      if (view === undefined) goals.views.delete(session)
+      else goals.views.set(session, view)
+      return goals
+    },
+    /**
+     * Read the current goal for one exact live agent.
+     * @param agent - the agent the caller resolved from the registry.
+     * @returns the view, or undefined when no goal is current.
+     */
+    get(agent) {
+      if (agent === undefined || agent === null || registry.get(agent.id) !== agent) {
+        throw new Error(`agent "${String(agent?.id ?? '')}" is not live in this registry`)
+      }
+      return goals.views.get(agent.id)
+    },
+  }
+
+  /** The session log as the query service reports it; durable, so declared above. */
+  const sessionQuery = {    /**
      * Note that a session exists, with the highest seq its log has reached.
      * @param session - the session id.
      * @param lastSeq - the highest event seq, defaulting to 1 for a session with a log.
@@ -487,6 +537,7 @@ function disposePrevious() {
     if (name === 'webServer') return webServer
     if (name === 'settings') return settings
     if (name === 'storageDomain') return storageDomain
+    if (name === 'goals') return goals
     return undefined
   }
 
@@ -568,6 +619,7 @@ function disposePrevious() {
       if (name === 'storageDomain') return storageDomain
       if (name === 'sessionQuery') return sessionQuery
       if (name === 'sessionController') return sessionController
+      if (name === 'goals') return goals
       // The title service reads one session's folded title, which is what a card falls back to when
       // the plugin never saw that session's `session/title` event.
       if (name === 'sessionTitle') {
@@ -671,6 +723,7 @@ function disposePrevious() {
     bound, setRejection: (status) => { rejection = status },
     config, ctx, listeners, disposers, warnings, infos, debugs, values, records,
     routes, sections, route, json, state, listenerOf, compose, agents: registry, titles, emitToAll, emitFrame,
+    goals,
     lastDelivered, cardFrom, cardsSent, cardTitled,
     sessionQuery, storageDomain, sessionController,
     /** The page policies a plugin registered, on a Host that projects forms. */

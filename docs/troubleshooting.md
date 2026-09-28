@@ -134,6 +134,19 @@ the desktop can answer meanwhile; the channel is deliberately not treated as rea
 then, so a request stays with the desktop instead of waiting on a card that cannot
 return. **Failed** carries the platform's reason for the credentials.
 
+**The card still says 已结束 while the session is working.**
+The session has a goal, and the goal is what continued: `dsh-goal-round-driver` opens each next round
+the moment the agent goes idle, without anybody typing. A card reading
+`目标进行中 · 第 N/M 轮（自动继续）` is reporting one of those rounds. A card that says 已结束 while the
+session works means this deployment composes no goal panel — `goals` is optional, and a deployment
+without it draws no goal line, which is the one thing that turns this off.
+`http://127.0.0.1:3080/__pocket/state` answers `goal.available`, and for every live session with a goal
+its `phase`, `round` and the objective, so "is anything still going" is answerable without the desk.
+`目标已完成`, `目标已暂停（本轮被打断）` and `目标已达轮数上限，已暂停` are the three ways a goal stops;
+after any of them nothing else happens until a person speaks, so a card carrying one is the current
+state rather than a stale one. An active goal that reads `目标未运行` is one the host disarmed: nothing
+will continue it until somebody resumes it in DSH itself.
+
 ## Questions about the setup itself
 
 **Is it safe to run alongside another Feishu bot?**
