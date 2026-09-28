@@ -324,11 +324,13 @@ test('a second press on the card the reply came from does not overwrite the run'
   assert.equal(followed.length, 1, 'and the second press sent nothing to the session')
 })
 
-test('a reply that arrives while the session is running is steered into it', async () => {
-  // A reply from the phone is a person speaking. If the session is already working, the instruction
-  // has to go **into** that work: `followup` queues a turn of its own, and on the real machine a
-  // follow-up queued against a running session was never delivered — the notice was consumed, the
-  // card turned into a run, and no turn ever came of it. See issue #50.
+test('a reply that arrives while the session is running waits as its own turn', async () => {
+  // A reply from the phone is a person speaking. While the session works, that used to be steered
+  // **into** the turn in flight — which commandeers work the reader never saw, and against a goal
+  // round is worse: a steered message lands in `next-step`, while the driver's competing-input rule
+  // reads `next-turn` (`dsh-goal-round-driver/lib/index.js:237-244`), so the round is hijacked and
+  // the goal still continues afterwards. Queueing is what the harness's own client does with a
+  // person's message, and what makes a goal wait for them. See issue #123.
   const { result, scaffolded, followed } = await afterARun()
   const steered = []
   const agent = scaffolded.agents.get('s_1')
@@ -338,39 +340,75 @@ test('a reply that arrives while the session is running is steered into it', asy
   const reply = callbackValues(result.card).find(value => value.submit === true)
   const outcome = await clickCard(reply, { [reply.submits.value]: '先别改那个文件' }, { messageId: result.handle })
 
-  assert.match(String(outcome.toast.content), /已发送/, 'the press is accepted')
-  assert.equal(steered.length, 1, 'and the instruction went in as steering')
-  assert.equal(followed.length, 0, 'not as a turn queued behind the running one')
-  assert.equal(steered[0].content[0].text, '先别改那个文件', 'the words are the reader’s own')
-  assert.equal(steered[0].source.kind, 'user', 'and are attributed to the person who typed them')
+  assert.match(String(outcome.toast.content), /已排队/, 'the reader is told the instruction is waiting')
+  assert.equal(followed.length, 1, 'the instruction is queued as its own turn')
+  assert.equal(steered.length, 0, 'and not steered into the turn in flight')
+  assert.equal(followed[0].content[0].text, '先别改那个文件', 'the words are the reader’s own')
+  assert.equal(followed[0].source.kind, 'user', 'and are attributed to the person who typed them')
 })
 
-test('a reply to a session that is not running waits as its own turn', async () => {
+test('a reply to a session that is not running is not told it is waiting', async () => {
   // The other half of the same rule, and the reason the branch is on the agent's status rather than
-  // on "steer exists": a finished run's answer is what the reader is replying to, and what comes
-  // next is a turn, not a correction to work that is over.
+  // on "steer exists": an idle session starts the turn immediately, so "已排队" there would invent a
+  // wait that is not happening.
+  const { result, followed } = await afterARun()
+  const reply = callbackValues(result.card).find(value => value.submit === true)
+
+  const outcome = await clickCard(reply, { [reply.submits.value]: '接着做' }, { messageId: result.handle })
+
+  assert.match(String(outcome.toast.content), /已发送/, 'an idle session is answered as sent')
+  assert.equal(followed.length, 1, 'and its instruction is queued as the next turn')
+})
+
+test('a queued instruction the session admits is not steered afterwards', async () => {
+  // `followup` returns void, so the queue is watched rather than trusted. The message's own
+  // `user/message` event is the proof it was admitted — the same field the host's goal driver reads
+  // to answer the same question (`dsh-goal-round-driver/lib/index.js:258-259`) — and a session that
+  // admitted it must not be steered into later.
   const { result, scaffolded, followed } = await afterARun()
   const steered = []
-  scaffolded.agents.get('s_1').steer = (message) => { steered.push(message) }
+  const agent = scaffolded.agents.get('s_1')
+  agent.status = 'running'
+  agent.steer = (message) => { steered.push(message) }
 
   const reply = callbackValues(result.card).find(value => value.submit === true)
-  await clickCard(reply, { [reply.submits.value]: '接着做' }, { messageId: result.handle })
+  await clickCard(reply, { [reply.submits.value]: '先别改那个文件' }, { messageId: result.handle })
+  assert.equal(followed.length, 1, 'the instruction is queued')
 
-  assert.equal(steered.length, 0, 'an idle session is not steered')
-  assert.equal(followed.length, 1, 'its instruction is queued as the next turn')
+  const queued = followed[0]
+  scaffolded.emitToAll('session/event', { id: 's_1' }, {
+    type: 'user/message',
+    surfaceOp: 'append',
+    data: { id: queued.id, source: { kind: 'user' }, content: [{ type: 'text', text: '先别改那个文件' }] },
+  })
+  scaffolded.emitToAll('agent/status', { agent: { id: 's_1' }, status: 'idle' })
+
+  assert.equal(steered.length, 0, 'a session that took the instruction is left alone')
 })
 
-test('a session whose agent cannot be steered still takes the instruction', async () => {
-  // A deployment whose agent predates `steer` keeps the old path rather than losing the reply: the
-  // queue is what every release before this one used, and refusing to send would be worse than the
-  // risk it avoids.
+test('an instruction the session never takes is steered in, and the log says so', async () => {
+  // The phenomenon `internal/boundaries.md` recorded and could not prove a mechanism for: a follow-up
+  // queued against a running session that never opened its turn. A session that reaches **idle** with
+  // the instruction unaccounted for has drained everything it was going to run
+  // (`dsh-agent-loop/lib/index.js:1020-1024`), so the fallback runs — and it is said out loud,
+  // because a silent rescue is how the phenomenon stayed invisible for as long as it did.
   const { result, scaffolded, followed } = await afterARun()
-  scaffolded.agents.get('s_1').status = 'running'
+  const steered = []
+  const agent = scaffolded.agents.get('s_1')
+  agent.status = 'running'
+  agent.steer = (message) => { steered.push(message) }
 
   const reply = callbackValues(result.card).find(value => value.submit === true)
-  await clickCard(reply, { [reply.submits.value]: '还在吗' }, { messageId: result.handle })
+  await clickCard(reply, { [reply.submits.value]: '先别改那个文件' }, { messageId: result.handle })
+  scaffolded.emitToAll('agent/status', { agent: { id: 's_1' }, status: 'idle' })
 
-  assert.equal(followed.length, 1, 'the instruction still reaches the session')
+  assert.equal(followed.length, 1, 'the instruction was queued first')
+  assert.equal(steered.length, 1, 'and the session that never took it gets it the other way')
+  assert.equal(steered[0].content[0].text, '先别改那个文件', 'the same words, once')
+  assert.ok(
+    scaffolded.warnings.some(line => String(line).includes('没有被会话取走')),
+    'and the deployment log carries the phenomenon',
+  )
 })
 
 test('a reply that never reached the session is not reported as sent', async () => {

@@ -21,7 +21,7 @@ const COPY = {
   emptyInstruction: 'Empty instruction', noAgent: 'No agent', sent: 'Sent', received: 'Received',
   notSent: 'Not sent', resultProcess: 'Process', resultOmitted: bytes => `omitted ${bytes}`,
   logRunFold: () => 'run fold', logResultView: () => 'result view', logNoticeSent: 'sent',
-  logNoticeTooLarge: 'too large', logNoticeRetrying: () => 'retrying', logInstructionQueued: 'queued', logInstructionSteered: 'steered',
+  logNoticeTooLarge: 'too large', logNoticeRetrying: () => 'retrying', logInstructionQueued: 'queued', logQueuedNotTaken: () => 'queued but never taken', logQueuedNotTakenNoSteer: () => 'queued, never taken, no steer',
   logReplyCardRewritten: () => 'rewritten', logReplyCardAdopted: () => 'adopted',
   logReplyCardNotRewritten: () => 'not rewritten', logNoticeRetired: () => 'retired',
   logNoticeFailed: 'failed', logNoticeCardFailed: 'card failed',

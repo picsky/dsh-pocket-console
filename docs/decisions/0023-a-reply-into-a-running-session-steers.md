@@ -1,6 +1,10 @@
 # 0023 — 会话正在跑的时候，回复是"插话"而不是"排队"
 
-**Status:** accepted.
+**Status:** superseded by [0038](0038-a-reply-is-queued-behind-the-turn-in-flight.md). The evidence
+this record rests on still stands — a follow-up queued against a running session was once observed
+never to open its turn (`internal/boundaries.md`) — but steering pays for that risk with work the
+reader never saw, and against a goal round it does not even hold the goal back. 0038 queues the reply
+instead and watches the queue, falling back to `steer` only when the session proves it never took it.
 
 ## Context
 
