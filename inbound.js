@@ -4,8 +4,9 @@
  * The card's input box is capped at 1000 characters by the platform — enough for a reply, not enough
  * for the first prompt of a new session — and typing in the chat beats filling in a form anyway. So a
  * message can carry an instruction, and the whole design rests on one anchor: **the platform sends
- * `parent_id` only when a message replies to another**, and it is that message's id. A card's id is
- * ours already, so "which card is this about" is a lookup we can always answer.
+ * `parent_id` only when a message replies to another**, and it is that message's id. A card's id —
+ * and the id of the plain-text message a result falls back to when no card can be delivered — is
+ * ours already, so "which conversation is this about" is a lookup we can always answer.
  *
  * Four rules decide everything else, and each one was chosen by the person who uses this:
  *
@@ -169,10 +170,14 @@ export function createInbound({
       if (decision.action === 'reply') {
         const outcome = await results.replyByHandle({ handle: parentId, text: decision.text })
         // Arriving is the confirmation, so a success says nothing: the card the reader quoted turns
-        // into the running card on its own. Only a failure needs words.
-        if (outcome?.ok === true) return undefined
+        // into the running card on its own. Only a failure needs words — and the one success with no
+        // card behind it, where saying nothing is indistinguishable from an instruction that went
+        // nowhere. A quoted plain-text fallback message is that success.
+        if (outcome?.ok === true) {
+          return outcome.cardless === true ? { reply: messages().messageReplyFromText } : undefined
+        }
         log.warn(messages().logInstructionFailed, new Error(String(outcome?.reason ?? 'unknown')))
-        return { reply: messages().messageReplyFailed(outcome?.reason) }
+        return { reply: messages().messageReplyFailed(outcome?.reason, outcome?.cardless === true) }
       }
       if (decision.action === 'new') {
         const started = await work.startFromMessage(decision.session, decision.prompt).catch((error) => {

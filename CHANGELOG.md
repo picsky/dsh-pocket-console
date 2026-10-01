@@ -11,6 +11,28 @@ A version's GitHub Release body is assembled from two sources, Chinese first: th
 version's section of `RELEASE-NOTES.zh.md`, then this file's section for that version
 as the English half.
 
+## Unreleased
+
+**A result no card could carry is still a conversation the reader can continue.** The plain-text
+message that path falls back to now names the message it created, the core records the session beside
+it, and quoting it reaches that session exactly as quoting a card does — with one short confirmation,
+because there is no card to turn into the running one. The message no longer sends the reader to the
+desk.
+
+### Changed
+
+- **The fallback message is anchored like a card.** `sendText()` resolves to the message the platform
+  created, and to `undefined` when it named none — which is not a failure, because arriving is that
+  path's whole purpose. `workspaces` records the session and the workspace against the handle, and
+  `replyByHandle` hands an instruction over from that anchor, so a quoted fallback message and a
+  quoted card reach the same place through one lookup. The anchor is deliberately neither durable nor
+  a notice: a text message must never be `patch`ed as a card, so a restart costs this way back until
+  the next result. See [0039](docs/decisions/0039-the-fallback-message-is-still-an-anchor.md).
+- **A reply with no card behind it is confirmed in words.** Every other successful reply is confirmed
+  by the quoted card rewriting itself into the running card; this one had nothing to speak for it, so
+  it says the instruction arrived instead of leaving silence that reads like a failure.
+  `messageReplyFailed` also stops pointing a cardless reply at a card that was never there.
+
 ## 1.0.0
 
 **This is the first 1.x, so the version line starts meaning something.** The batch below is what
