@@ -11,6 +11,23 @@ A version's GitHub Release body is assembled from two sources, Chinese first: th
 version's section of `RELEASE-NOTES.zh.md`, then this file's section for that version
 as the English half.
 
+## Unreleased
+
+**The message a result falls back to is charged what a message may weigh, not what a card may.** When
+every card shape has been refused, the answer goes out as a plain text message — and that message was
+clipped to the *card's* 32 KB budget, so the one path that could carry a whole long result gave up
+content the platform was never going to refuse. It now has a measured budget of its own.
+
+### Changed
+
+- **A plain-text fallback is bounded by `TEXT_MESSAGE_BUDGET` (64 KB), not `CARD_TEXT_BUDGET`.** The
+  platform's plain-text ceilings were already measured and written down in `budget.js` — 20 000 emoji
+  accepted, 40 000 refused; 51 000 Chinese characters accepted, 51 300 refused; a 131 KB request body
+  accepted, 164 KB refused — but nothing used them, because the fallback reused the card's constant.
+  64 KB is set from the tightest of them (emoji at four bytes each, so 80 KB accepted) on the same
+  reasoning as the other budgets sitting below their measured threshold. See
+  [0031](docs/decisions/0031-a-limit-changes-the-card-never-whether-it-arrives.md).
+
 ## 1.0.0
 
 **This is the first 1.x, so the version line starts meaning something.** The batch below is what

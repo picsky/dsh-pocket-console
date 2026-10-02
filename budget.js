@@ -29,11 +29,34 @@
  * Both are budgets for **one card**, structure included: the title, the rule, the fold, the reply
  * form and the buttons come out of the same element count.
  *
+ * The four plain-text rows above are the exception: they are not about cards at all, but about the
+ * plain-text **message** the result path falls back to when no card shape can be delivered. That
+ * message is subject to none of a card's gates, so it gets a budget of its own —
+ * {@link TEXT_MESSAGE_BUDGET}.
+ *
  * @module pocket-console/budget
  */
 
 /** Bytes of card text one message may carry, counted the way {@link bodyBytes} counts. */
 export const CARD_TEXT_BUDGET = 32 * 1024
+
+/**
+ * Bytes of plain text one **text message** may carry, counted the way {@link bodyBytes} counts.
+ *
+ * A separate budget from {@link CARD_TEXT_BUDGET} because it is a different message type against a
+ * different measured ceiling. A card is refused for its element count and its table count as well as
+ * its size; the result path that falls back to text is the one place where none of those gates apply
+ * ([0031](docs/decisions/0031-a-limit-changes-the-card-never-whether-it-arrives.md)) — so charging it
+ * the card's 32 KB held the one message that *could* carry a whole long result to the tighter bound,
+ * giving up content the platform was never going to refuse.
+ *
+ * Set at 64 KB against the table above. The binding row is **emoji**: 20,000 are accepted and 40,000
+ * refused, and at four bytes each the accepted figure is 80 KB — the smallest acceptance of the four,
+ * and so the one a byte budget has to respect. 64 KB is 80 % of that, on the same reasoning as
+ * {@link CARD_BODY_BUDGET}'s 96 KB against this tenant's accepted 131 KB, and it stays well under the
+ * 131 KB body with the second envelope's escaping still to pay for.
+ */
+export const TEXT_MESSAGE_BUDGET = 64 * 1024
 
 /**
  * How many elements one card may hold, across its whole body.

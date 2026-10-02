@@ -19,6 +19,7 @@
 import {
   CARD_ELEMENT_BUDGET,
   CARD_TEXT_BUDGET,
+  TEXT_MESSAGE_BUDGET,
   classifyRefusal,
   clipTailToBytes,
   clipToBytes,
@@ -732,7 +733,10 @@ export function createResultNotifier({
       // refuse a text message too, and pretending otherwise would just be a second failure.
       const cardShaped = kind === 'tables' || kind === 'size' || kind === 'elements' || kind === 'content'
       if (cardShaped && typeof channel.sendText === 'function') {
-        const body = clipToBytes(face, messages().truncated, CARD_TEXT_BUDGET)
+        // A **text message's** budget, not a card's: this path exists because no card shape could carry
+        // the result, so clipping what it carries to the card's own 32 KB would give up content the
+        // platform was never going to refuse.
+        const body = clipToBytes(face, messages().truncated, TEXT_MESSAGE_BUDGET)
         try {
           await channel.sendText(`${messages().fallbackHeadline}\n\n${body}`)
           log.warn(messages().logNoticeFellBackToText)
