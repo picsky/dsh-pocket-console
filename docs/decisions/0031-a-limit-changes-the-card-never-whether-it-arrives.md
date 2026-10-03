@@ -72,6 +72,11 @@ missing status line into a text message would be the push this plugin says it do
   above.
 - The text fallback is a third bounded write, and `tests/send-bounds.test.mjs` now counts it: every
   write to the platform still goes through the one deadline.
+- **The fallback's message has a budget of its own.** "150 KB instead of 30" was the argument for
+  sending it, but the code charged it the card's `CARD_TEXT_BUDGET`, so the one message that could
+  carry a whole long result was held to the tighter bound and gave up content the platform was never
+  going to refuse. It is now charged `TEXT_MESSAGE_BUDGET` (64 KB), set from the plain-text rows in
+  `budget.js` — the binding one being emoji, where 20 000 are accepted at four bytes each.
 - The reported table count in a card is now a budget rather than an accident, which is what makes
   `CARD_TABLE_BUDGET` worth putting beside the other two in `budget.js`.
 

@@ -296,3 +296,24 @@ test('a fallback message the channel cannot name records no anchor, and never a 
   assert.equal(outcome.ok, false, 'a reply to a message that was never anchored goes nowhere')
   assert.equal(outcome.reason, 'no-notice')
 })
+
+test('the text fallback carries what a card could not, up to a text message\u2019s own budget', async () => {
+  const texts = []
+  const { sink } = setup({
+    channel: {
+      async deliver() { throw tableRefusal() },
+      async update() {},
+      async sendText(text) { texts.push(text); return 'text_1' },
+    },
+  })
+  // Longer than a card's text budget (32 KB) and well inside a text message's (64 KB). This path
+  // exists because no card shape could carry the result, so the one bound it must not be held to is
+  // the card's: clipping here would give up content the platform was never going to refuse.
+  const long = '\u6c49'.repeat(12_000)
+  runTurn(sink, { id: 's1' }, { answer: long })
+  await waitForFire()
+
+  assert.equal(texts.length, 1, 'the answer went out as a text message')
+  assert.ok(texts[0].includes(long), 'and it is carried whole, not clipped to the card\u2019s budget')
+  assert.ok(!texts[0].includes(COPY.truncated), 'so it carries no truncation marker')
+})

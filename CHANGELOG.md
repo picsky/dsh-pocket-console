@@ -19,6 +19,10 @@ it, and quoting it reaches that session exactly as quoting a card does — with 
 because there is no card to turn into the running one. The message no longer sends the reader to the
 desk.
 
+**And that message is charged what a message may weigh, not what a card may.** It was clipped to the
+*card's* 32 KB budget, so the one path that could carry a whole long result gave up content the
+platform was never going to refuse. It now has a measured budget of its own.
+
 ### Changed
 
 - **The fallback message is anchored like a card.** `sendText()` resolves to the message the platform
@@ -32,6 +36,13 @@ desk.
   by the quoted card rewriting itself into the running card; this one had nothing to speak for it, so
   it says the instruction arrived instead of leaving silence that reads like a failure.
   `messageReplyFailed` also stops pointing a cardless reply at a card that was never there.
+- **A plain-text fallback is bounded by `TEXT_MESSAGE_BUDGET` (64 KB), not `CARD_TEXT_BUDGET`.** The
+  platform's plain-text ceilings were already measured and written down in `budget.js` — 20 000 emoji
+  accepted, 40 000 refused; 51 000 Chinese characters accepted, 51 300 refused; a 131 KB request body
+  accepted, 164 KB refused — but nothing used them, because the fallback reused the card's constant.
+  64 KB is set from the tightest of them (emoji at four bytes each, so 80 KB accepted) on the same
+  reasoning as the other budgets sitting below their measured threshold. See
+  [0031](docs/decisions/0031-a-limit-changes-the-card-never-whether-it-arrives.md).
 
 ## 1.0.0
 
