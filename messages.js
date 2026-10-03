@@ -151,7 +151,7 @@ const zh = {
   logNoticeFellBackToText: '结果卡的所有降级都没能通过，已改用纯文本消息把内容发出去（会没有回复框）。',
   logNoticeFallbackFailed: '连纯文本兜底也失败了，这一轮的内容没有送到手机上。',
   /** The headline on the plain-text message a result falls back to when no card can be delivered. */
-  fallbackHeadline: '（这张结果卡没能发出去，先把内容发给你；没有回复框，要回它请到桌面。）',
+  fallbackHeadline: '（这张结果卡没能发出去，先把内容发给你。它不是卡片、没有回复框——引用这条消息回一句，会话就能继续。）',
   /** The full-access switch: the third control, its confirmation, and what the card becomes. */
   allowFullAccess: label => `以后不再问（${label}）`,
   fullAccessConfirmTitle: '切到完全权限？',
@@ -176,7 +176,8 @@ const zh = {
   hintEmpty: '这条引用里没有内容，我什么都没做。',
   hintOrphanNew: '`/new` 需要**引用一张卡**，我才能知道新会话该用哪个工作区。',
   hintEmptyNew: '`/new` 后面还要写上要做什么。',
-  messageReplyFailed: reason => `这条指令没有送出去（${String(reason ?? '原因不明')}）。那张卡仍然可以回复，也可以在卡片输入框里再试一次。`,
+  messageReplyFailed: (reason, cardless = false) => `这条指令没有送出去（${String(reason ?? '原因不明')}）。${cardless ? '引用这条消息可以再试一次' : '那张卡仍然可以回复，也可以在卡片输入框里再试一次'}。`,
+  messageReplyFromText: '指令已送到会话。它不是卡片，不会有卡片改写来确认；要继续，引用这条消息回话即可。',
   messageNewFailed: '新会话没能起来（原因在部署日志里）。请到桌面看一眼，或再试一次。',
   messageNotAnAnswer: kind => (kind === 'approval'
     ? '这张是**审批卡**：回「**允许**」或「**拒绝**」就行，别的词我不会替你决定。'
@@ -407,7 +408,7 @@ const en = {
   logNoticeTablesFlattened: tables => `${tables} tables on this result card were written as text and it was sent again.`,
   logNoticeFellBackToText: 'every degradation of the result card was refused; the answer went out as a plain-text message instead (no reply box).',
   logNoticeFallbackFailed: 'even the plain-text fallback failed: this turn\'s content did not reach the phone.',
-  fallbackHeadline: '(this result card could not be delivered, so here is the content; there is no reply box — answer it from the desk.)',
+  fallbackHeadline: '(this result card could not be delivered, so here is the content. It is not a card and has no reply box — quote this message with a line and the session carries on.)',
   allowFullAccess: label => `Do not ask again (${label})`,
   fullAccessConfirmTitle: 'Switch to full access?',
   fullAccessConfirmText: 'This session stops being confined by the sandbox, and stops asking for approval — **this path goes quiet on the phone**. Actions that still need approval are **refused** rather than granted. Changing it back happens in the desk settings.',
@@ -430,7 +431,8 @@ const en = {
   hintEmpty: 'That quote carried no text, so nothing happened.',
   hintOrphanNew: '`/new` needs a **quoted card**, so I know which workspace the new session inherits.',
   hintEmptyNew: '`/new` needs something after it: what the new session should do.',
-  messageReplyFailed: reason => `That instruction did not go out (${String(reason ?? 'no reason given')}). The card can still be answered, or try its input box.`,
+  messageReplyFailed: (reason, cardless = false) => `That instruction did not go out (${String(reason ?? 'no reason given')}). ${cardless ? 'Quote this message and try again' : 'The card can still be answered, or try its input box'}.`,
+  messageReplyFromText: 'The instruction reached the session. It is not a card, so no rewrite confirms it — quote this message to carry on.',
   messageNewFailed: 'The new session could not be started (the deployment log has the reason). Check the desk, or try again.',
   messageNotAnAnswer: kind => (kind === 'approval'
     ? 'That is an **approval card**: answer with **`allow`** or **`reject`**. Any other word, and I will not decide it for you.'

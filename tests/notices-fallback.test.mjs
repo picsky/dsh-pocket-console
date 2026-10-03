@@ -13,6 +13,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createResultNotifier } from '../results.js'
+import { createWorkspaces } from '../workspaces.js'
 
 /** Copy the notifier reads while it is deciding and rewriting. */
 const COPY = {
@@ -43,6 +44,7 @@ function setup({ channel, agent = { status: 'idle', followed: [], followup: (mes
   const listeners = new Map()
   const updates = []
   const deliveries = []
+  const workspaces = createWorkspaces()
   const notifier = createResultNotifier({
     ctx: {
       get: (name) => (name === 'agents' ? { get: () => agent } : undefined),
@@ -64,11 +66,12 @@ function setup({ channel, agent = { status: 'idle', followed: [], followup: (mes
       resultNotify: 'idle', resultNotifyCooldownSeconds: 0,
     }),
     messages: () => COPY,
+    workspaces,
   })
   notifier.install()
   const sink = listeners.get('session/event')
   assert.equal(typeof sink, 'function', 'the notifier watches the session firehose')
-  return { notifier, sink, agent, updates, deliveries }
+  return { notifier, sink, agent, updates, deliveries, workspaces }
 }
 
 /** Drive one complete, finished turn into the notifier. */
@@ -245,4 +248,51 @@ test('a channel with no text fallback fails honestly instead of throwing', async
   // Nothing to await but the failure itself: if the fallback branch threw, this case would fail
   // with an unhandled rejection rather than completing.
   await waitForFire()
+})
+
+test('the fallback message is anchored, so quoting it still reaches the session', async () => {
+  const texts = []
+  const { notifier, sink, workspaces, agent } = setup({
+    channel: {
+      async deliver() { throw tableRefusal() },
+      async update() {},
+      async sendText(text) { texts.push(text); return 'text_1' },
+    },
+  })
+  const session = { id: 's1' }
+  runTurn(sink, session, { answer: TABLE })
+  await waitForFire()
+
+  assert.equal(texts.length, 1, 'the answer went out as a text message')
+  assert.equal(
+    workspaces.sessionOf('text_1'), 's1',
+    'and the message is anchored to its session, because a quote carries the message id',
+  )
+
+  // Quoting that message is the reader's way back in. The same lookup a quoted card reads answers
+  // here, and the instruction is handed over the way a quoted card's is.
+  const outcome = await notifier.replyByHandle({ handle: 'text_1', text: 'keep going' })
+  assert.equal(outcome.ok, true, 'the instruction reached the session')
+  assert.equal(outcome.session, 's1', 'the session the message belonged to')
+  assert.equal(outcome.cardless, true, 'and the caller is told no card will confirm it')
+  assert.equal(agent.followed.length, 1, 'the session was given the instruction')
+})
+
+test('a fallback message the channel cannot name records no anchor, and never a wrong one', async () => {
+  const { notifier, sink, workspaces } = setup({
+    channel: {
+      async deliver() { throw tableRefusal() },
+      async update() {},
+      // A channel that cannot say which message it created: the content still arrived, which is this
+      // path's whole purpose, and there is simply nothing to hang a reply on.
+      async sendText() { return undefined },
+    },
+  })
+  runTurn(sink, { id: 's1' }, { answer: TABLE })
+  await waitForFire()
+
+  assert.equal(workspaces.sessionOf('text_1'), undefined, 'nothing was recorded against a handle')
+  const outcome = await notifier.replyByHandle({ handle: 'text_1', text: 'keep going' })
+  assert.equal(outcome.ok, false, 'a reply to a message that was never anchored goes nowhere')
+  assert.equal(outcome.reason, 'no-notice')
 })

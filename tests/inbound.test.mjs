@@ -26,7 +26,8 @@ const COPY = {
   hintEmpty: 'empty hint',
   hintOrphanNew: 'orphan new hint',
   hintEmptyNew: 'empty new hint',
-  messageReplyFailed: reason => `failed: ${String(reason)}`,
+  messageReplyFailed: (reason, cardless = false) => `failed: ${String(reason)}${cardless ? ' (no card)' : ''}`,
+  messageReplyFromText: 'reply from text',
   messageNewFailed: 'new failed',
   logMessageFailed: 'message failed',
   logMessageReplyFailed: 'reply failed',
@@ -110,6 +111,20 @@ test('an instruction that did not go out is reported, in words', async () => {
   const { inbound } = setup({ reply: { ok: false, reason: 'not-sent' }, sessionOf: () => 's_1' })
   const answer = await inbound.handleMessage({ text: '接着做', parentId: 'om_card', sender: 'ou_a' })
   assert.equal(answer.reply, 'failed: not-sent', 'the reader is told, rather than left waiting')
+})
+
+test('a reply to a fallback message with no card behind it is confirmed in words', async () => {
+  const { inbound } = setup({ reply: { ok: true, session: 's_1', cardless: true }, sessionOf: () => 's_1' })
+  const answer = await inbound.handleMessage({ text: '接着做', parentId: 'om_text', sender: 'ou_a' })
+  // Nothing else will say it: every other successful reply is confirmed by the quoted card turning
+  // into the running card, and the plain-text message a result falls back to has no card to do that.
+  assert.equal(answer.reply, 'reply from text', 'the reader is told the instruction arrived')
+})
+
+test('a failed reply against a fallback message is not pointed at a card that is not there', async () => {
+  const { inbound } = setup({ reply: { ok: false, reason: 'not-sent', cardless: true }, sessionOf: () => 's_1' })
+  const answer = await inbound.handleMessage({ text: '接着做', parentId: 'om_text', sender: 'ou_a' })
+  assert.equal(answer.reply, 'failed: not-sent (no card)', 'the copy names the case it is actually in')
 })
 
 test('/new starts a session in the quoted card\u2019s workspace', async () => {

@@ -730,11 +730,27 @@ export function createResultNotifier({
       // reader who gets the answer without controls is strictly better off than one who gets nothing
       // at all. Only for card-shaped refusals: a missing scope or an unreachable recipient would
       // refuse a text message too, and pretending otherwise would just be a second failure.
+      //
+      // **And the message it lands in is anchored**, so losing the card does not lose the reader's
+      // way back: quoting a message is how an instruction is aimed at a session, and what that
+      // quoting carries is the message's own id. See
+      // [0039](../docs/decisions/0039-the-fallback-message-is-still-an-anchor.md).
       const cardShaped = kind === 'tables' || kind === 'size' || kind === 'elements' || kind === 'content'
       if (cardShaped && typeof channel.sendText === 'function') {
         const body = clipToBytes(face, messages().truncated, CARD_TEXT_BUDGET)
         try {
-          await channel.sendText(`${messages().fallbackHeadline}\n\n${body}`)
+          const handle = await channel.sendText(`${messages().fallbackHeadline}\n\n${body}`)
+          // The same registry the cards are recorded in, read by the same lookup — so the anchor a
+          // quoted card gets and the anchor a quoted fallback message gets are one mechanism, not two.
+          // The workspace rides along for `/new`, which reads it to know which project a session
+          // started from this message would inherit.
+          //
+          // Deliberately not a notice. A notice is a card's record: it is stored durably, rewritten
+          // when a reply or a newer result arrives, and every one of those would reach
+          // `im.message.patch` — which is a card edit, on a message that is not a card. Losing this
+          // anchor on a restart therefore costs the reader this one way back, and only until the next
+          // result, which arrives as a card whenever one can be carried.
+          workspaces?.record(handle, workspace, session)
           log.warn(messages().logNoticeFellBackToText)
         } catch (fallbackError) {
           log.warn(messages().logNoticeFallbackFailed, fallbackError)
@@ -1525,13 +1541,32 @@ export function createResultNotifier({
      * The work is deliberately the same as a reply typed into the card's form (claim the notice, hand
      * the instruction to the agent, put the notice back if the send did not land), because the reader
      * means the same thing either way.
-     * @param handle - the message the quoted card lives in.
+     *
+     * A quoted **plain-text** fallback message reaches the same place by the other anchor: the
+     * registry, since that message has no notice and no card. The instruction is handed over the same
+     * way — there is nothing to claim or put back — and the caller is told the reply is `cardless`, so
+     * it can say what no card will say for it.
+     * @param handle - the message the quoted card or fallback message lives in.
      * @param text - what the person asked for.
-     * @returns whether the instruction reached the session, and the session it was for.
+     * @returns whether the instruction reached the session, the session it was for, and whether there
+     *   was no card behind it to confirm the reply.
      */
     async replyByHandle({ handle, text }) {
       const found = [...notices.entries()].find(([, notice]) => notice.handle === handle)
-      if (found === undefined) return { ok: false, reason: 'no-notice' }
+      if (found === undefined) {
+        // **A message with nothing but its anchor.** The result no card could carry went out as plain
+        // text ([0031](../docs/decisions/0031-a-limit-changes-the-card-never-whether-it-arrives.md)),
+        // and what was kept for it is the registry entry rather than a notice. Handing the instruction
+        // over needs neither a notice nor a card: a session and the agent it names is the whole of it.
+        const session = workspaces?.sessionOf?.(handle)
+        if (session === undefined) return { ok: false, reason: 'no-notice' }
+        const agent = ctx.get?.('agents')?.get?.(session)
+        if (agent === undefined) return { ok: false, reason: 'no-agent', session }
+        const delivered = await send(agent, text, { session, handle })
+        return delivered
+          ? { ok: true, session, cardless: true }
+          : { ok: false, reason: 'not-sent', session, cardless: true }
+      }
       const [id, notice] = found
       const agent = ctx.get?.('agents')?.get?.(notice.session)
       if (agent === undefined) return { ok: false, reason: 'no-agent', session: notice.session }
