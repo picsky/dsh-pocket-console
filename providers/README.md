@@ -36,6 +36,7 @@ export async function create({ ctx, config, binding, log, messages }) {
 | `supportsForms` | yes | Whether it can render forms and return multi-select answers or free text. On `false` the core escalates only questions that are *entirely single-select options*; anything else is left to the desktop. |
 | `deliver(view, options?)` | yes | Deliver one message, resolving to an opaque handle for `update`. **Throw on failure** — the core logs a warning and falls back to the desktop. `options.uuid`, when given, is an idempotency key for this one message: a transport that can carry one must make a repeat of the same key resolve to the message it already accepted rather than delivering a second. See below. |
 | `update(handle, view)` | no | Replace an already-delivered message with a new view. Without it, a decision is not reported back to the card. |
+| `sendText(text)` | no | Deliver one plain-text message, resolving to the message's handle. It is the **last resort for a result no card could carry** — subject to none of a card's limits — and the one delivery whose handle the core keeps as an anchor with **no card behind it**: a reader who quotes that message still reaches the session. Answer `undefined` when the platform named no message; the content has still arrived, and the core records no anchor rather than a wrong one. |
 | `subscribe(onAction)` | yes | Subscribe to user actions. Returns the unsubscribe function. |
 | `close()` | no | Release transport resources. |
 

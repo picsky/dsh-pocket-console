@@ -1306,10 +1306,22 @@ export async function create({ ctx, config: rawConfig, binding, log, messages })
      * no tables to count, no 30 KB card ceiling — a text message may weigh 150 KB. So when every
      * card-shaped attempt has been refused, the answer itself can still reach the reader. It
      * carries no controls, which is a real loss; arriving is worth more than being interactive.
+     *
+     * **The message it created is named back**, because a plain-text message is still an anchor: it
+     * has an id, the reader can quote it, and the platform reports that id as the quoting message's
+     * `parent_id`. Handing the id over is what lets the core keep the conversation reachable behind a
+     * message that carries no form ([0039](../docs/decisions/0039-the-fallback-message-is-still-an-anchor.md)).
+     * A channel that cannot name it answers `undefined`, and the content has still arrived.
      * @param text - what to say.
+     * @returns the message the platform created, when it named one.
      */
     async sendText(text) {
-      await sendPlainText(text)
+      const response = await sendPlainText(text)
+      // Deliberately not a throw, unlike `deliver`: arriving is the whole reason this path exists, so a
+      // message the platform did not name is a message the reader still has. `undefined` says the
+      // anchor was not kept, not that nothing was sent.
+      const handle = response?.data?.message_id
+      return typeof handle === 'string' && handle !== '' ? handle : undefined
     },
     close() {
       closed = true

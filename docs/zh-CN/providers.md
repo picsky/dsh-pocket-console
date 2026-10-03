@@ -36,6 +36,7 @@ export async function create({ ctx, config, binding, log, messages }) {
 | `supportsForms` | 是 | 能否渲染表单并回传多选/自由文本。`false` 时核心只升级「全是单选选项」的提问，其余留给桌面。 |
 | `deliver(view, options?)` | 是 | 投递一条消息，resolve 出不透明句柄（供 `update` 使用）。失败请抛错——核心会记警告并回落到桌面。给了 `options.uuid` 时，它是一条消息的**幂等键**：能承载它的通道必须让**同一个键的重复投递 resolve 到它已经接受的那条消息**，而不是再投一条。见下。 |
 | `update(handle, view)` | 否 | 用新视图替换已投递的消息。缺失时决策后不回报结果。 |
+| `sendText(text)` | 否 | 投递一条纯文本消息，resolve 出这条消息的句柄。它是**卡片载不下的结果**的最后兜底——不受卡片任何限额约束——也是唯一一种句柄会成为**「没有卡片」的锚点**的投递：读者引用这条消息，仍然能到达那个会话。平台没有给这条消息命名时返回 `undefined`：内容已经送到，核心宁可不记锚点，也不记一个错的。 |
 | `subscribe(onAction)` | 是 | 订阅用户操作。返回取消订阅的函数。 |
 | `close()` | 否 | 释放传输资源。 |
 

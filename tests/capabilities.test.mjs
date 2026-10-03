@@ -36,6 +36,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
  * @param body - the script source.
  * @param name - a file name unique to this case.
  * @returns the last non-empty stdout line, or the last stderr line when it failed.
+ * @throws when the probe could not be started at all, which is not the same as a probe that ran and
+ *   said nothing.
  */
 function probeProcess(body, name) {
   const file = join(tmpdir(), `pocket-console-${name}-${process.pid}.mjs`)
@@ -50,6 +52,15 @@ function probeProcess(body, name) {
       cwd: root,
       encoding: 'utf8',
     })
+    // **A probe that never started is not a probe that answered nothing.** Without this the caller
+    // parses an empty string and the case fails as `SyntaxError: Unexpected end of JSON input`, which
+    // names the symptom and hides the cause — the shape of failure this repository keeps having to
+    // teach to speak (`diagnostics.js`). A confined sandbox is the usual way to reach it: spawning a
+    // child with piped stdio is refused there outright, and the plugin under test is not involved.
+    if (result.error !== undefined) {
+      const why = String(result.error.code ?? result.error.message ?? result.error)
+      throw new Error(`the probe "${name}" could not start a child process (${why}); these cases need a process that can spawn`)
+    }
     const lines = (result.stdout ?? '').trim().split('\n').filter(Boolean)
     if (lines.length > 0) return lines.at(-1)
     const errors = (result.stderr ?? '').trim().split('\n').filter(Boolean)
