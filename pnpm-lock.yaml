@@ -10,15 +10,15 @@ importers:
     dependencies:
       '@larksuiteoapi/node-sdk':
         specifier: ^1.74.0
-        version: 1.74.0(debug@4.4.3)
+        version: 1.76.0(debug@4.4.3)
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4
 
 packages:
 
-  '@larksuiteoapi/node-sdk@1.74.0':
-    resolution: {integrity: sha512-K2WoGy6x97u2kPPSFsu0v9X8CY+0q4OwO3rhXiOSRXYjGS7ovydFpEH07AS5VYcBnbQCoc5sGezo0IEGVViuoA==}
+  '@larksuiteoapi/node-sdk@1.76.0':
+    resolution: {integrity: sha512-v/bxQNCugwAmMPbZtBGJtSu8hdQLiB1/29Jr+GBIG18DyQ4LYyp7gxQ74pkhXVSuoUeH4v+/ZHAw/SW+KMrj2g==}
 
   '@protobufjs/aspromise@1.1.2':
     resolution: {integrity: sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ==}
@@ -334,7 +334,7 @@ packages:
 
 snapshots:
 
-  '@larksuiteoapi/node-sdk@1.74.0(debug@4.4.3)':
+  '@larksuiteoapi/node-sdk@1.76.0(debug@4.4.3)':
     dependencies:
       axios: 1.20.0(debug@4.4.3)
       lodash.identity: 3.0.0
